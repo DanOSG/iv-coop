@@ -3,7 +3,7 @@
 // they move), sending PlayerState exactly like the in-game client does.
 //
 //   iv-coop-bot [--host 127.0.0.1] [--port 41300] [--name Bot] [--radius 4] [--speed 1.6]
-//               [--phase 0] [--skew 123456] [--fixed] [--serve] [--seconds N]
+//               [--phase 0] [--skew 123456] [--fixed] [--serve] [--seconds N] [--retry]
 //
 // Run up to three at once (different --name/--phase) to fill a 4-player session.
 // --serve makes the bot the host instead (circling the origin), for testing the session
@@ -42,6 +42,7 @@ struct Args {
   bool follow = true;     // circle the host's current position (vs. where we first saw them)
   bool serve = false;     // host the session ourselves
   int seconds = 0;        // 0 = run until Ctrl+C
+  bool retry = false;     // keep re-joining until admitted (host not up yet, session full, ...)
 };
 
 Args parse(int argc, char** argv) {
@@ -59,6 +60,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--fixed") a.follow = false;
     else if (k == "--serve") a.serve = true;
     else if (k == "--seconds") a.seconds = std::atoi(next());
+    else if (k == "--retry") a.retry = true;
     else std::fprintf(stderr, "unknown argument %s\n", k.c_str());
   }
   if (a.radius < 0.5f) a.radius = 0.5f;
@@ -71,6 +73,7 @@ int main(int argc, char** argv) {
   using namespace ivc;
   const Args a = parse(argc, argv);
   SetConsoleCtrlHandler(on_ctrl, TRUE);
+  std::setvbuf(stdout, nullptr, _IONBF, 0); // output may be redirected to a file; don't buffer it
 
   net::Session session;
   if (a.serve ? !session.host(a.port, a.name, "127.0.0.1") : !session.join(a.host, a.port, a.name)) {
@@ -108,7 +111,14 @@ int main(int argc, char** argv) {
       if (e.kind == K::Left) std::printf("[%s] player #%u '%s' left\n", a.name.c_str(), e.id, e.text.c_str());
       if (e.kind == K::Disconnected) {
         std::printf("[%s] disconnected: %s\n", a.name.c_str(), e.text.c_str());
-        g_quit = true;
+        if (a.retry && !a.serve) {
+          std::this_thread::sleep_for(std::chrono::seconds(3));
+          std::printf("[%s] retrying...\n", a.name.c_str());
+          have_center = false;
+          if (!session.join(a.host, a.port, a.name)) g_quit = true;
+        } else {
+          g_quit = true;
+        }
       }
     }
     for (const auto& u : session.drain_states()) {

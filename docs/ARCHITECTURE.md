@@ -148,8 +148,12 @@ docs/
 - **M1:** native invoker, script-thread hooks (list running scripts, suppress on demand), and a loopback
   "ghost" of your own ped through the real serializer. This tests sync with no network. ✅ The tick runs from
   `scrThread::UpdateAll` in a live script's context; the interpolator learns the remote clock from arrivals.
-- **M2:** ENet host/join with 4 players, and on-foot player sync. Testing needs 2 PCs, or a mutex patch so two
-  game instances run on one machine.
+- **M2:** ENet host/join with 4 players, and on-foot player sync. ✅ for the host side: verified in-game with
+  three `iv-coop-bot` clients (join/leave, relay, interpolation, "session is full", dead-peer timeout).
+  Remote players are still frozen puppets that slide (no walk animation). The joiner's in-game side needs a
+  second PC to verify: the launcher stub allows only one copy of the game per machine.
+- **M2b:** animated remote players: drive puppets with movement tasks (walk/run/sprint by speed) as an
+  interim, then real player-slot peds with synthetic pad input (aiming, cover, vehicle entry for free).
 - **M3:** vehicles, including passengers in any vehicle and seat reservation.
 - **M4:** networked entities with **script owner vs sim owner** and migration. Testbed: entities spawned on the
   host while a client is across the map.

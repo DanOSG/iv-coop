@@ -35,4 +35,21 @@ defaults. Check `plugins/iv-coop.log` to see what it did.
 | F7 | Toggle the running-scripts panel |
 | F9 | Toggle the sync ghost (M1 loopback test: an MP-model ped mirrors you ~300 ms late, 2 m to your side) |
 
+| F10 | Host a session (UDP `[Net] Port`, default 41300) / leave |
+| F11 | Join `[Net] JoinAddress` / leave |
+
 To freeze scripts by name for testing, use `[Scripts] Suppress=name1,name2` in the ini.
+
+## Testing with bots
+
+Only one copy of the game runs per PC, so `iv-coop-bot.exe` stands in for other players. Host in-game with F10,
+then:
+
+```
+build\Debug\iv-coop-bot.exe --name Alice --radius 3 --retry
+build\Debug\iv-coop-bot.exe --name Bob --radius 5 --phase 120 --speed 2.5 --retry
+build\Debug\iv-coop-bot.exe --name Carol --radius 7 --phase 240 --speed 4 --retry
+```
+
+Each bot circles your player. `--serve` makes a bot host instead, which tests the session layer with no game
+running. For local tests, set `[Net] BindAddress=127.0.0.1` so Windows Firewall doesn't prompt.

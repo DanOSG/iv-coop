@@ -117,8 +117,11 @@ void tick() {
   const bool active = ss.mode == net::Mode::Hosting || ss.mode == net::Mode::Joined;
   auto local = sync::capture_local(now);
 
-  if (active && local && now - g_last_send >= 1000 / g_cfg.send_hz) {
-    g_last_send = now;
+  // Fixed cadence: advance the send clock by whole intervals so uneven frame times don't
+  // drag the rate below send_hz; after a long stall (pause), resync instead of bursting.
+  const std::uint32_t interval = 1000 / g_cfg.send_hz;
+  if (active && local && now - g_last_send >= interval) {
+    g_last_send = (now - g_last_send >= 4 * interval) ? now : g_last_send + interval;
     local->seq = ++g_seq;
     net.send_state(*local);
   }

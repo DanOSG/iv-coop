@@ -21,6 +21,10 @@ const char* reason_text(std::uint32_t r) {
   }
 }
 
+// A peer that stops answering (crash, killed process, cable pulled) is dropped after at
+// most this long, so it can't hold a session slot for ENet's default 30 s.
+void set_timeouts(ENetPeer* peer) { enet_peer_timeout(peer, 0, 3000, 8000); }
+
 void send_packet(ENetPeer* peer, std::uint8_t channel, std::span<const std::uint8_t> data, bool reliable) {
   ENetPacket* p = enet_packet_create(data.data(), data.size(), reliable ? ENET_PACKET_FLAG_RELIABLE : 0);
   if (enet_peer_send(peer, channel, p) != 0) enet_packet_destroy(p);
@@ -111,6 +115,7 @@ struct Session::Impl {
 
   // --- host side ---
   void host_on_connect(ENetEvent& ev) {
+    set_timeouts(ev.peer);
     if (ev.data != kProtocolVersion) {
       enet_peer_disconnect(ev.peer, static_cast<std::uint32_t>(Reject::VersionMismatch));
       return;
@@ -258,6 +263,7 @@ struct Session::Impl {
             if (mode == Mode::Hosting) {
               host_on_connect(ev);
             } else {
+              set_timeouts(ev.peer);
               send_packet(ev.peer, kChanControl, encode_hello(to_string(my_name)), true);
             }
             break;
