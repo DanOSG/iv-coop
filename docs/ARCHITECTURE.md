@@ -125,7 +125,8 @@ docs/
 
 - **M0:** the plugin loads, logs, checks the exe version, hooks D3D9 and draws an overlay. ✅
 - **M1:** native invoker, script-thread hooks (list running scripts, suppress on demand), and a loopback
-  "ghost" of your own ped through the real serializer. This tests sync with no network.
+  "ghost" of your own ped through the real serializer. This tests sync with no network. ✅ The tick runs from
+  `scrThread::UpdateAll` in a live script's context; the interpolator learns the remote clock from arrivals.
 - **M2:** ENet host/join with 4 players, and on-foot player sync. Testing needs 2 PCs, or a mutex patch so two
   game instances run on one machine.
 - **M3:** vehicles, including passengers in any vehicle and seat reservation.

@@ -76,8 +76,13 @@ void draw_status() {
     ImGui::Text("player  %.1f %.1f %.1f  hdg %.0f", g.player_x, g.player_y, g.player_z, g.player_heading);
     ImGui::Separator();
     ImGui::Text("ghost [F9]: %s", g.enabled ? g.phase.c_str() : "off");
-    if (g.enabled)
-      ImGui::Text("sent %u  recv %u  buffered %u  stale %u", g.sent, g.received, g.buffered, g.dropped);
+    if (g.enabled) {
+      ImGui::Text("sent %u  recv %u  buffered %u  stale %u", g.sent, g.received, g.buffered, g.stale);
+      const unsigned total = g.interpolated + g.extrapolated;
+      const float extra_pct = total ? 100.0f * static_cast<float>(g.extrapolated) / static_cast<float>(total) : 0.0f;
+      const ImVec4 col = extra_pct < 5.0f ? ImVec4(0.5f, 1, 0.5f, 1) : ImVec4(1, 0.6f, 0.3f, 1);
+      ImGui::TextColored(col, "offset %d ms  |  extrapolated %.1f%% of frames", g.offset_ms, extra_pct);
+    }
     ImGui::TextDisabled("F7 scripts  |  F8 overlay  |  built " __DATE__ " " __TIME__);
   }
   ImGui::End();

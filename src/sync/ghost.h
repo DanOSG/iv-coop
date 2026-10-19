@@ -23,7 +23,9 @@ struct Status {
   bool enabled = false;
   bool spawned = false;
   std::string phase;            // human-readable state for the overlay
-  std::uint32_t sent = 0, received = 0, buffered = 0, dropped = 0;
+  std::uint32_t sent = 0, received = 0, buffered = 0, stale = 0;
+  std::uint32_t interpolated = 0, extrapolated = 0; // frames rendered each way
+  std::int32_t offset_ms = 0;                       // learned arrival - send-time offset
   float player_x = 0, player_y = 0, player_z = 0, player_heading = 0;
 };
 

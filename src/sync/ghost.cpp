@@ -147,12 +147,13 @@ void tick() {
   // --- receive + apply (what the host does for each remote player) ---
   g_net.poll(now, [&](int, std::span<const std::uint8_t> payload) {
     if (auto ps = sync::decode_player_state(payload)) {
-      g_interp.push(*ps);
+      g_interp.push(*ps, now);
       ++st.received;
     }
   });
 
-  // The loopback shares our clock, so the sender's "now" is just now.
+  // Uses only our local clock: the interpolator learns the sender's timeline from arrivals,
+  // exactly as it must over a real network where the clocks differ.
   if (auto smp = g_interp.sample(now)) {
     const n::Vector3 at{smp->x + g_cfg.offset_x, smp->y, smp->z};
     if (ensure_spawned(at)) {
@@ -164,13 +165,25 @@ void tick() {
     set_phase("waiting for snapshots");
   }
 
+  static std::uint32_t last_stats_log = now;
+  if (now - last_stats_log >= 10000) {
+    last_stats_log = now;
+    const auto& is = g_interp.stats();
+    log::info("Ghost stats: interpolated {} / extrapolated {} frames, offset {} ms, stale {}, recv {}/{} sent",
+              is.interpolated, is.extrapolated, is.offset_ms, is.stale, st.received, st.sent);
+  }
+
   std::lock_guard lock(g_status_mutex);
   g_status.enabled = true;
   g_status.spawned = g_ped != 0;
   g_status.sent = st.sent;
   g_status.received = st.received;
   g_status.buffered = static_cast<std::uint32_t>(g_interp.buffered());
-  g_status.dropped = g_interp.dropped();
+  const auto& is = g_interp.stats();
+  g_status.stale = is.stale;
+  g_status.interpolated = is.interpolated;
+  g_status.extrapolated = is.extrapolated;
+  g_status.offset_ms = is.offset_ms;
 }
 
 Status status() {
