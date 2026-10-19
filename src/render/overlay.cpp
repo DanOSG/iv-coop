@@ -7,6 +7,8 @@
 #include <imgui_impl_win32.h>
 
 #include "core/log.h"
+#include "game/script.h"
+#include "sync/ghost.h"
 
 namespace ivc::overlay {
 namespace {
@@ -33,33 +35,82 @@ void init_imgui(IDirect3DDevice9* dev) {
   log::info("Overlay initialised (ImGui {})", IMGUI_VERSION);
 }
 
+int g_scripts_key = VK_F7;
+bool g_scripts_was_down = true;
+bool g_show_scripts = false;
+
+// Rising-edge detector for a hotkey, only while the game window is focused.
+bool pressed(int vk, bool& was_down) {
+  const bool down = (GetAsyncKeyState(vk) & 0x8000) != 0;
+  const bool edge = down && !was_down && GetForegroundWindow() == g_window;
+  was_down = down;
+  return edge;
+}
+
 void poll_toggle() {
-  const bool down = (GetAsyncKeyState(g_toggle_key) & 0x8000) != 0;
-  if (down && !g_key_was_down && GetForegroundWindow() == g_window) {
+  if (pressed(g_toggle_key, g_key_was_down)) {
     g_visible = !g_visible;
     log::info("Overlay {}", g_visible ? "shown" : "hidden");
   }
-  g_key_was_down = down;
+  if (pressed(g_scripts_key, g_scripts_was_down)) g_show_scripts = !g_show_scripts;
 }
 
-void draw() {
+constexpr ImGuiWindowFlags kHudFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                                       ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoFocusOnAppearing |
+                                       ImGuiWindowFlags_NoNav;
+
+void draw_status() {
   ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_Always);
   ImGui::SetNextWindowBgAlpha(0.55f);
-  constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
-                                     ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoFocusOnAppearing |
-                                     ImGuiWindowFlags_NoNav;
-  if (ImGui::Begin("##ivcoop", nullptr, flags)) {
-    ImGui::TextUnformatted("iv-coop  M0");
+  if (ImGui::Begin("##ivcoop", nullptr, kHudFlags)) {
+    ImGui::TextUnformatted("iv-coop  M1");
     ImGui::Text("frame %llu  |  %.0f fps", g_frames, ImGui::GetIO().Framerate);
-    ImGui::TextDisabled("built " __DATE__ " " __TIME__);
+
+    const std::string host = script::host_script();
+    if (host.empty())
+      ImGui::TextColored(ImVec4(1, 0.7f, 0.3f, 1), "script tick: waiting for a script to run");
+    else
+      ImGui::Text("script tick: host '%s'  (%zu scripts)", host.c_str(), script::threads().size());
+
+    const ghost::Status g = ghost::status();
+    ImGui::Text("player  %.1f %.1f %.1f  hdg %.0f", g.player_x, g.player_y, g.player_z, g.player_heading);
+    ImGui::Separator();
+    ImGui::Text("ghost [F9]: %s", g.enabled ? g.phase.c_str() : "off");
+    if (g.enabled)
+      ImGui::Text("sent %u  recv %u  buffered %u  stale %u", g.sent, g.received, g.buffered, g.dropped);
+    ImGui::TextDisabled("F7 scripts  |  F8 overlay  |  built " __DATE__ " " __TIME__);
   }
   ImGui::End();
 }
+
+void draw_scripts() {
+  ImGui::SetNextWindowPos(ImVec2(12, 220), ImGuiCond_Always);
+  ImGui::SetNextWindowBgAlpha(0.7f);
+  if (ImGui::Begin("##scripts", nullptr, kHudFlags)) {
+    ImGui::TextUnformatted("Running scripts");
+    ImGui::Separator();
+    static const char* kStates[] = {"run", "blocked", "aborted", "halted"};
+    for (const auto& t : script::threads()) {
+      const char* st = (t.state >= 0 && t.state < 4) ? kStates[t.state] : "?";
+      if (t.suppressed)
+        ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%5d  %-24s %s  SUPPRESSED", t.id, t.name.c_str(), st);
+      else
+        ImGui::Text("%5d  %-24s %s", t.id, t.name.c_str(), st);
+    }
+  }
+  ImGui::End();
+}
+
+void draw() {
+  draw_status();
+  if (g_show_scripts) draw_scripts();
+}
 } // namespace
 
-void configure(bool enabled, int toggle_key) {
+void configure(bool enabled, int toggle_key, int scripts_key) {
   g_visible = enabled;
   g_toggle_key = toggle_key;
+  g_scripts_key = scripts_key;
 }
 
 void set_window(HWND window) {

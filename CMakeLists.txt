@@ -49,6 +49,11 @@ add_library(iv-coop SHARED
   src/core/config.cpp
   src/core/game_version.cpp
   src/core/iat.cpp
+  src/game/pattern.cpp
+  src/game/addresses.cpp
+  src/game/natives.cpp
+  src/game/script.cpp
+  src/sync/ghost.cpp
   src/render/d3d9_hook.cpp
   src/render/overlay.cpp)
 target_include_directories(iv-coop PRIVATE src)
@@ -58,9 +63,11 @@ target_link_libraries(iv-coop PRIVATE minhook imgui d3d9 version)
 set_target_properties(iv-coop PROPERTIES SUFFIX ".asi" OUTPUT_NAME "iv-coop")
 
 if(IVCOOP_DEPLOY)
+  # -D must precede -P for script mode.
+  set(deploy_script -P ${CMAKE_SOURCE_DIR}/cmake/deploy.cmake)
+  set(deploy_dst -DDST_DIR=${IVCOOP_GAME_DIR}/plugins)
   add_custom_command(TARGET iv-coop POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${IVCOOP_GAME_DIR}/plugins"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:iv-coop>" "${IVCOOP_GAME_DIR}/plugins/"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_PDB_FILE:iv-coop>" "${IVCOOP_GAME_DIR}/plugins/"
-    COMMENT "Deploying iv-coop.asi to ${IVCOOP_GAME_DIR}/plugins")
+    COMMAND ${CMAKE_COMMAND} ${deploy_dst} -DSRC=$<TARGET_FILE:iv-coop> ${deploy_script}
+    COMMAND ${CMAKE_COMMAND} ${deploy_dst} -DSRC=$<TARGET_PDB_FILE:iv-coop> ${deploy_script}
+    COMMENT "Deploying iv-coop.asi to ${IVCOOP_GAME_DIR}/plugins (live on next launch if the game is running)")
 endif()
