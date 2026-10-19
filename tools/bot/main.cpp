@@ -4,6 +4,10 @@
 //
 //   iv-coop-bot [--host 127.0.0.1] [--port 41300] [--name Bot] [--radius 4] [--speed 1.6]
 //               [--phase 0] [--skew 123456] [--fixed] [--serve] [--seconds N] [--retry]
+//               [--drive MODEL] [--ride [--seat N]]
+//
+// --drive sultan: circle the host in that car (sends VehicleState as the car's owner).
+// --ride: sit in the host's car (passenger seat --seat, default 0) whenever they drive one.
 //
 // Run up to three at once (different --name/--phase) to fill a 4-player session.
 // --serve makes the bot the host instead (circling the origin), for testing the session
@@ -15,8 +19,10 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cctype>
 #include <cstdlib>
 #include <format>
+#include <optional>
 #include <map>
 #include <string>
 #include <thread>
@@ -45,7 +51,24 @@ struct Args {
   int seconds = 0;        // 0 = run until Ctrl+C
   bool retry = false;     // keep re-joining until admitted (host not up yet, session full, ...)
   int pause_every = 0;    // stand still for 3 s every N seconds (0 = never)
+  std::string drive;      // vehicle model name: circle in this car instead of on foot
+  bool ride = false;      // sit in the host's vehicle whenever they're in one
+  int seat = 0;           // passenger seat for --ride
 };
+
+// Model name -> hash, as the game's GET_HASH_KEY does (Jenkins one-at-a-time, lowercase).
+std::uint32_t model_hash(const std::string& name) {
+  std::uint32_t h = 0;
+  for (unsigned char c : name) {
+    h += static_cast<unsigned char>(std::tolower(c));
+    h += h << 10;
+    h ^= h >> 6;
+  }
+  h += h << 3;
+  h ^= h >> 11;
+  h += h << 15;
+  return h;
+}
 
 Args parse(int argc, char** argv) {
   Args a;
@@ -64,6 +87,9 @@ Args parse(int argc, char** argv) {
     else if (k == "--seconds") a.seconds = std::atoi(next());
     else if (k == "--retry") a.retry = true;
     else if (k == "--pause-every") a.pause_every = std::atoi(next());
+    else if (k == "--drive") a.drive = next();
+    else if (k == "--ride") a.ride = true;
+    else if (k == "--seat") a.seat = std::atoi(next());
     else std::fprintf(stderr, "unknown argument %s\n", k.c_str());
   }
   if (a.radius < 0.5f) a.radius = 0.5f;
@@ -103,6 +129,8 @@ int main(int argc, char** argv) {
     std::uint32_t last_arrival = 0, last_stamp = 0, max_arrival_gap = 0, max_stamp_gap = 0;
   };
   std::map<std::uint8_t, Gaps> gaps; // per sender, reset each report
+  std::map<std::uint32_t, unsigned> vehicles_received;
+  std::uint32_t host_vehicle = sync::kNoVehicle;
   auto prev = std::chrono::steady_clock::now();
   bool was_joined = false;
 
@@ -143,7 +171,13 @@ int main(int argc, char** argv) {
         if (!have_center) std::printf("[%s] host is at %.1f %.1f %.1f, circling\n", a.name.c_str(), cx, cy, cz);
         have_center = true;
       }
+      if (u.id == net::kHostId) {
+        if (u.state.vehicle_id != host_vehicle)
+          std::printf("[%s] host vehicle is now 0x%08X\n", a.name.c_str(), u.state.vehicle_id);
+        host_vehicle = u.state.vehicle_id;
+      }
     }
+    for (const auto& u : session.drain_vehicles()) ++vehicles_received[u.state.vehicle_id];
 
     for (auto& [id, ip] : interps) ip.sample(now);
 
@@ -168,11 +202,34 @@ int main(int argc, char** argv) {
     float h = std::atan2(std::sin(angle), std::cos(angle)) * 180.0f / kPi;
     s.heading = h < 0 ? h + 360.0f : h;
 
+    std::optional<sync::VehicleState> car;
+    if (a.ride && host_vehicle != sync::kNoVehicle) {
+      // Passenger in the host's car: our position is theirs; the host seats our puppet.
+      s.x = cx, s.y = cy, s.z = cz, s.vx = s.vy = s.vz = 0;
+      s.in_vehicle = 1, s.vehicle_id = host_vehicle, s.seat = static_cast<std::int8_t>(a.seat);
+    } else if (!a.drive.empty()) {
+      s.in_vehicle = 1, s.vehicle_id = (static_cast<std::uint32_t>(st.my_id) << 24) | 1, s.seat = -1;
+      sync::VehicleState v;
+      v.vehicle_id = s.vehicle_id;
+      v.model = model_hash(a.drive);
+      v.x = s.x, v.y = s.y, v.z = s.z;
+      const float hr = s.heading * kPi / 180.0f; // yaw about +Z
+      v.qx = 0, v.qy = 0, v.qz = std::sin(hr / 2), v.qw = std::cos(hr / 2);
+      v.vx = s.vx, v.vy = s.vy, v.vz = 0;
+      v.speed = speed;
+      v.colour[0] = 0, v.colour[1] = 0; // black
+      car = v;
+    }
+
     if (now - last_send >= 33) {
       last_send = now;
       s.seq = ++seq;
       s.time_ms = now + static_cast<std::uint32_t>(a.skew);
       session.send_state(s);
+      if (car) {
+        car->seq = s.seq, car->time_ms = s.time_ms;
+        session.send_vehicle(*car);
+      }
     }
 
     if (now - last_report >= 5000) {
@@ -192,6 +249,7 @@ int main(int argc, char** argv) {
       }
       for (const auto& p : st.players)
         if (p.id != st.my_id && (a.serve || p.id == net::kHostId)) line += std::format("  rtt#{} {} ms", p.id, p.rtt_ms);
+      for (const auto& [vid, n] : vehicles_received) line += std::format("  veh 0x{:08X}={}", vid, n);
       line += '\n';
       std::fwrite(line.data(), 1, line.size(), stdout);
       last_report_cost = net::steady_ms() - now;

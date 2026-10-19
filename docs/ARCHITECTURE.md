@@ -173,6 +173,11 @@ docs/
 - **M9:** MP character creator. It doesn't depend on the other milestones, so it can be pulled earlier as a side
   task.
 - **M10:** TLAD and TBoGT.
+- **Late: "free cutscenes" option** (host toggle, off by default). During cutscenes, joiners see the cutscene from
+  its camera as usual, but their characters stay visible and controllable in the scene instead of being hidden and
+  frozen. Needs: keep remote peds streamed and unfrozen during `.cut` playback, keep sending/applying their state, and
+  keep the local joiner's input live while the cutscene camera holds the view. The default stays as in the
+  cutscene row above.
 - **Connectivity:** UPnP port mapping, then Steam invites/relay (see Shape). This can land any time after M2.
 - **Final: one-click installer.** It finds the Steam install, checks that `GTAIV.exe` is 1.2.0.59, and installs
   FusionFix, the radio downgrade and iv-coop (plus a default ini). It also offers to uninstall and restore.

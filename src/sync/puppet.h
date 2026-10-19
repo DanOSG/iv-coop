@@ -28,6 +28,13 @@ class Puppet {
   void drive(const PlayerState& target, std::uint32_t now_ms);
   void despawn();
 
+  // Seats the puppet in `vehicle` (seat -1 = driver) if it isn't already there; while
+  // seated, don't call drive(). Returns true once seated.
+  bool sit_in(natives::Vehicle vehicle, std::int8_t seat);
+  // Takes the puppet out of any vehicle, onto `at`.
+  void leave_vehicle(const natives::Vector3& at);
+  bool in_vehicle() const { return vehicle_ != 0; }
+
   bool spawned() const { return ped_ != 0; }
   natives::Ped ped() const { return ped_; }
   // Short description of what the puppet is doing, for status displays.
@@ -56,6 +63,8 @@ class Puppet {
   std::uint32_t last_issue_ms_ = 0;
   float error_m_ = 0;
   std::uint32_t snaps_ = 0;
+  natives::Vehicle vehicle_ = 0;
+  std::int8_t seat_ = -1;
 };
 
 } // namespace ivc::sync

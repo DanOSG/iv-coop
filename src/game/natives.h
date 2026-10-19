@@ -100,6 +100,44 @@ inline void SetPedDontDoEvasiveDives(Ped ped, bool b) { invoke(0x1EAD1D7D, ped, 
 inline void SetDontActivateRagdollFromPlayerImpact(Ped ped, bool b) { invoke(0x5A676BCD, ped, b); }
 inline void SetCharWillMoveWhenInjured(Ped ped, bool b) { invoke(0x1EF36397, ped, b); }
 
+// Vehicles.
+using Vehicle = std::int32_t;
+inline constexpr std::int32_t kDriverSeat = -1;
+inline bool DoesVehicleExist(Vehicle v) { return invoke<bool>(0x67A42263, v); }
+inline Vehicle StoreCarCharIsInNoSave(Ped ped) { Vehicle v = 0; invoke(0x21CC647F, ped, &v); return v; }
+inline std::uint32_t GetCarModel(Vehicle v) { std::uint32_t m = 0; invoke(0x5FF84497, v, &m); return m; }
+inline Vector3 GetCarCoordinates(Vehicle v) { Vector3 p{}; invoke(0x2D432EAB, v, &p.x, &p.y, &p.z); return p; }
+inline Vector4 GetVehicleQuaternion(Vehicle v) { Vector4 q{}; invoke(0x6C5871D6, v, &q.x, &q.y, &q.z, &q.w); return q; }
+inline void SetVehicleQuaternion(Vehicle v, Vector4 q) { invoke(0x43573596, v, q.x, q.y, q.z, q.w); }
+inline float GetCarHeading(Vehicle v) { float h = 0; invoke(0x46803CFA, v, &h); return h; }
+inline Vector3 GetCarSpeedVector(Vehicle v) { Vector3 s{}; invoke(0x112E7FB1, v, &s, false); return s; }
+inline float GetCarSpeed(Vehicle v) { float s = 0; invoke(0x16DD2D00, v, &s); return s; }
+inline void SetCarCoordinatesNoOffset(Vehicle v, Vector3 p) { invoke(0x12D64378, v, p.x, p.y, p.z); }
+inline void SetCarForwardSpeed(Vehicle v, float s) { invoke(0x65BB0060, v, s); }
+inline Vehicle CreateCar(std::uint32_t model, Vector3 at) { Vehicle v = 0; invoke(0x2F1D6843, model, at.x, at.y, at.z, &v, true); return v; }
+inline void DeleteCar(Vehicle& v) { invoke(0x7F71342D, &v); }
+inline void WarpCharIntoCar(Ped ped, Vehicle v) { invoke(0x73D3504A, ped, v); }
+inline void WarpCharIntoCarAsPassenger(Ped ped, Vehicle v, std::uint32_t seat) { invoke(0x172376FE, ped, v, seat); }
+inline void WarpCharFromCarToCoord(Ped ped, Vector3 p) { invoke(0x6A77506A, ped, p.x, p.y, p.z); }
+inline bool IsCharInCar(Ped ped, Vehicle v) { return invoke<bool>(0x7D037B40, ped, v); }
+inline Ped GetDriverOfCar(Vehicle v) { Ped p = 0; invoke(0x22457083, v, &p); return p; }
+inline Ped GetCharInCarPassengerSeat(Vehicle v, std::uint32_t seat) { Ped p = 0; invoke(0x5E756B51, v, seat, &p); return p; }
+inline bool IsCarPassengerSeatFree(Vehicle v, std::uint32_t seat) { return invoke<bool>(0x1BDA0DA5, v, seat); }
+inline std::uint32_t GetMaximumNumberOfPassengers(Vehicle v) { std::uint32_t n = 0; invoke(0x554014F1, v, &n); return n; }
+inline void GetCarColours(Vehicle v, std::int32_t& c1, std::int32_t& c2) { invoke(0x6CAC3D62, v, &c1, &c2); }
+inline void ChangeCarColour(Vehicle v, std::int32_t c1, std::int32_t c2) { invoke(0x06441EAF, v, c1, c2); }
+inline void GetExtraCarColours(Vehicle v, std::int32_t& c1, std::int32_t& c2) { invoke(0x25B87BCA, v, &c1, &c2); }
+inline void SetExtraCarColours(Vehicle v, std::int32_t c1, std::int32_t c2) { invoke(0x6CB14354, v, c1, c2); }
+inline std::uint32_t GetCarHealth(Vehicle v) { std::uint32_t h = 0; invoke(0x4D417CD3, v, &h); return h; }
+inline void SetCarHealth(Vehicle v, std::uint32_t h) { invoke(0x49B6525C, v, h); }
+inline float GetEngineHealth(Vehicle v) { return invoke<float>(0x2B0A05E0, v); }
+inline void SetEngineHealth(Vehicle v, float h) { invoke(0x3F413561, v, h); }
+inline bool IsCarSirenOn(Vehicle v) { return invoke<bool>(0x129A1569, v); }
+inline void SwitchCarSiren(Vehicle v, bool on) { invoke(0x7781290F, v, on); }
+inline void SetCarEngineOn(Vehicle v, bool on, bool instantly) { invoke(0x0CAA42D0, v, on, instantly); }
+inline void SetCarAsMissionCar(Vehicle v) { invoke(0x210A33B2, v); }
+inline void SetCarCanBeDamaged(Vehicle v, bool b) { invoke(0x394E733E, v, b); }
+
 // Ped types for CREATE_CHAR.
 inline constexpr std::int32_t kPedTypeCivMale = 4;
 

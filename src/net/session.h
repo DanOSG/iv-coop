@@ -15,6 +15,7 @@
 
 #include "net/protocol.h"
 #include "sync/player_state.h"
+#include "sync/vehicle_state.h"
 
 namespace ivc::net {
 
@@ -41,6 +42,12 @@ struct StateUpdate {
   std::uint32_t arrival_ms; // receiver's clock (steady ms)
 };
 
+struct VehicleUpdate {
+  std::uint8_t id; // sending player (the vehicle's sim owner)
+  sync::VehicleState state;
+  std::uint32_t arrival_ms;
+};
+
 struct SessionEvent {
   enum class Kind { Joined, Left, Connected, Disconnected } kind;
   std::uint8_t id = 0; // Joined/Left
@@ -61,9 +68,12 @@ class Session {
   bool join(const std::string& address, std::uint16_t port, const std::string& name);
   void leave();
 
-  // Queues our latest state; the network thread sends it at once (unreliable).
+  // Queue our latest player / owned-vehicle state; the network thread sends it at once
+  // (unreliable).
   void send_state(const sync::PlayerState& s);
+  void send_vehicle(const sync::VehicleState& v);
   std::vector<StateUpdate> drain_states();
+  std::vector<VehicleUpdate> drain_vehicles();
   std::vector<SessionEvent> drain_events();
   SessionStatus status() const;
 

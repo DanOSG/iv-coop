@@ -10,6 +10,7 @@
 #include "sync/local_player.h"
 #include "sync/player_state.h"
 #include "sync/puppet.h"
+#include "sync/vehicle_sync.h"
 
 namespace ivc::coop {
 namespace {
@@ -24,6 +25,7 @@ struct Remote {
 Settings g_cfg;
 std::unique_ptr<net::Session> g_session; // created on first use, not inside DllMain
 std::map<std::uint8_t, Remote> g_remotes;
+sync::VehicleSync g_vehicles;
 bool g_host_was_down = true, g_join_was_down = true;
 std::uint32_t g_last_send = 0;
 std::uint16_t g_seq = 0;
@@ -85,7 +87,10 @@ void handle_hotkeys() {
 
 } // namespace
 
-void configure(const Settings& s) { g_cfg = s; }
+void configure(const Settings& s) {
+  g_cfg = s;
+  g_vehicles.interp_delay_ms = s.interp_delay_ms;
+}
 
 void tick() {
   handle_hotkeys();
@@ -101,6 +106,7 @@ void tick() {
       case K::Left:
         log::info("Player {} '{}' left", e.id, e.text);
         drop_remote(e.id);
+        g_vehicles.drop_owner(e.id);
         break;
       case K::Connected:
         log::info("Connected; we are player {}", e.id);
@@ -108,6 +114,7 @@ void tick() {
       case K::Disconnected:
         log::info("Disconnected: {}", e.text);
         drop_all();
+        g_vehicles.clear();
         break;
     }
   }
@@ -116,6 +123,18 @@ void tick() {
   const net::SessionStatus ss = net.status();
   const bool active = ss.mode == net::Mode::Hosting || ss.mode == net::Mode::Joined;
   auto local = sync::capture_local(now);
+  const n::Ped me = local ? n::GetPlayerChar(n::GetPlayerId()) : 0;
+
+  // Which vehicle/seat we're in, and the state of the vehicle if we're its sim owner.
+  std::optional<sync::VehicleState> owned;
+  if (local) {
+    const auto puppet_of = [](n::Ped ped) -> std::optional<std::uint8_t> {
+      for (const auto& [id, r] : g_remotes)
+        if (r.puppet.ped() == ped) return id;
+      return std::nullopt;
+    };
+    owned = g_vehicles.capture_local(me, ss.my_id, *local, now, puppet_of);
+  }
 
   // Fixed cadence: advance the send clock by whole intervals so uneven frame times don't
   // drag the rate below send_hz; after a long stall (pause), resync instead of bursting.
@@ -124,15 +143,28 @@ void tick() {
     g_last_send = (now - g_last_send >= 4 * interval) ? now : g_last_send + interval;
     local->seq = ++g_seq;
     net.send_state(*local);
+    if (owned) net.send_vehicle(*owned);
   }
 
   for (const auto& u : net.drain_states()) remote(u.id).interp.push(u.state, u.arrival_ms);
+  for (const auto& u : net.drain_vehicles()) g_vehicles.push_remote(u);
+  g_vehicles.update_remote(now, me); // stand-in cars first, so puppets can be seated in them
 
   std::vector<RemoteStatus> remotes;
   for (auto& [id, r] : g_remotes) {
     float dist = 0;
     if (auto smp = r.interp.sample(now)) { // once per frame: sampling advances the timeline
-      if (r.puppet.ensure({smp->x, smp->y, smp->z})) r.puppet.drive(*smp, now);
+      const n::Vector3 at{smp->x, smp->y, smp->z};
+      if (r.puppet.ensure(at)) {
+        const n::Vehicle veh = g_vehicles.handle_for(smp->vehicle_id);
+        if (veh) {
+          r.puppet.sit_in(veh, smp->seat);
+        } else {
+          // On foot, or their car hasn't arrived here yet: follow their position on foot.
+          if (r.puppet.in_vehicle()) r.puppet.leave_vehicle(at);
+          r.puppet.drive(*smp, now);
+        }
+      }
       if (local) dist = std::hypot(smp->x - local->x, smp->y - local->y, smp->z - local->z);
     }
     const auto& st = r.interp.stats();
@@ -153,9 +185,19 @@ void tick() {
                 r.error_m, r.snaps, r.distance_m, r.extrapolated_pct);
   }
 
+  const auto vehicles = g_vehicles.status();
+  static std::uint32_t last_vlog = now;
+  if (!vehicles.empty() && now - last_vlog >= 10000) {
+    last_vlog = now;
+    for (const auto& v : vehicles)
+      log::info("Remote vehicle 0x{:08X} (owner #{}): {} err {:.1f} m, {} snaps", v.vehicle_id, v.owner,
+                v.spawned ? "spawned" : "loading", v.error_m, v.snaps);
+  }
+
   std::lock_guard lock(g_status_mutex);
   g_status.session = ss;
   g_status.remotes = std::move(remotes);
+  g_status.vehicles = vehicles;
 }
 
 Status status() {

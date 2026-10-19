@@ -91,6 +91,7 @@ add_library(iv-coop SHARED
   src/sync/local_player.cpp
   src/sync/puppet.cpp
   src/sync/remote_players.cpp
+  src/sync/vehicle_sync.cpp
   src/render/d3d9_hook.cpp
   src/render/overlay.cpp)
 target_include_directories(iv-coop PRIVATE src)

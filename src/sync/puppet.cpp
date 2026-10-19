@@ -141,10 +141,46 @@ void Puppet::drive_animated(const PlayerState& t, std::uint32_t now_ms) {
   phase_ = ms == n::MoveState::Walk ? "walking" : ms == n::MoveState::Run ? "running" : "sprinting";
 }
 
+bool Puppet::sit_in(n::Vehicle vehicle, std::int8_t seat) {
+  if (!ped_ || !vehicle) return false;
+  if (vehicle_ == vehicle && seat_ == seat && n::IsCharInCar(ped_, vehicle)) return true;
+  if (!animated_) {
+    // Frozen puppets can't be seated; thaw first.
+    n::FreezeCharPosition(ped_, false);
+    n::SetCharCollision(ped_, true);
+  }
+  n::ClearCharTasks(ped_);
+  if (seat == n::kDriverSeat)
+    n::WarpCharIntoCar(ped_, vehicle);
+  else
+    n::WarpCharIntoCarAsPassenger(ped_, vehicle, static_cast<std::uint32_t>(seat));
+  const bool ok = n::IsCharInCar(ped_, vehicle);
+  if (ok) {
+    vehicle_ = vehicle, seat_ = seat;
+    action_ = Action::None;
+    phase_ = seat == n::kDriverSeat ? "driving" : "passenger";
+  } else {
+    phase_ = "seat taken";
+  }
+  return ok;
+}
+
+void Puppet::leave_vehicle(const n::Vector3& at) {
+  if (!ped_ || !vehicle_) return;
+  n::WarpCharFromCarToCoord(ped_, at);
+  vehicle_ = 0, seat_ = -1;
+  action_ = Action::None;
+  if (!animated_) {
+    n::SetCharCollision(ped_, false);
+    n::FreezeCharPosition(ped_, true);
+  }
+}
+
 void Puppet::despawn() {
   if (blip_) n::RemoveBlip(blip_), blip_ = 0;
   if (ped_ && n::DoesCharExist(ped_)) n::DeleteChar(ped_);
   ped_ = 0;
+  vehicle_ = 0;
   action_ = Action::None;
   phase_ = "idle";
 }

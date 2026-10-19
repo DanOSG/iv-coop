@@ -76,6 +76,7 @@ struct Session::Impl {
   Name my_name{};
   std::deque<std::vector<std::uint8_t>> out_states;
   std::deque<StateUpdate> in_states;
+  std::deque<VehicleUpdate> in_vehicles;
   std::deque<SessionEvent> events;
 
   void start() {
@@ -117,6 +118,29 @@ struct Session::Impl {
     in_states.push_back({id, s, steady_ms()});
     if (in_states.size() > 512) in_states.pop_front(); // caller stalled; keep it bounded
     ++st.states_received;
+  }
+
+  void push_vehicle(std::uint8_t id, const sync::VehicleState& v) {
+    std::lock_guard lock(m);
+    in_vehicles.push_back({id, v, steady_ms()});
+    if (in_vehicles.size() > 512) in_vehicles.pop_front();
+    ++st.states_received;
+  }
+
+  // Decodes a PlayerState/VehicleState packet (type byte already read) and queues it for
+  // the caller as coming from `from`. Returns false if malformed.
+  bool accept_state(MsgType type, Reader& r, std::uint8_t from) {
+    std::uint8_t id;
+    if (type == MsgType::PlayerState) {
+      sync::PlayerState s;
+      if (!decode_state(r, id, s)) return false;
+      push_state(from, s);
+      return true;
+    }
+    sync::VehicleState v;
+    if (!decode_vehicle(r, id, v)) return false;
+    push_vehicle(from, v);
+    return true;
   }
 
   // --- host side ---
@@ -164,11 +188,8 @@ struct Session::Impl {
       for (auto& other : clients)
         if (other.greeted && other.peer != ev.peer) send_packet(other.peer, kChanControl, joined, true);
       event(SessionEvent::Kind::Joined, c->id, to_string(c->name));
-    } else if (type == MsgType::PlayerState && c->greeted) {
-      std::uint8_t id;
-      sync::PlayerState s;
-      if (!decode_state(r, id, s)) return;
-      push_state(c->id, s);
+    } else if ((type == MsgType::PlayerState || type == MsgType::VehicleState) && c->greeted) {
+      if (!accept_state(type, r, c->id)) return;
       restamp_state(data, c->id); // never trust the sender's id
       for (auto& other : clients)
         if (other.greeted && other.peer != ev.peer) send_packet(other.peer, kChanState, data, false);
@@ -234,10 +255,9 @@ struct Session::Impl {
         std::erase_if(roster, [id](const RosterEntry& e) { return e.id == id; });
       }
       event(SessionEvent::Kind::Left, id, name);
-    } else if (type == MsgType::PlayerState) {
-      std::uint8_t id;
-      sync::PlayerState s;
-      if (decode_state(r, id, s) && id != st.my_id) push_state(id, s);
+    } else if (type == MsgType::PlayerState || type == MsgType::VehicleState) {
+      // The sender id is the byte right after the type; skip our own echoes.
+      if (ev.packet->dataLength > 1 && ev.packet->data[1] != st.my_id) accept_state(type, r, ev.packet->data[1]);
     }
   }
 
@@ -418,7 +438,21 @@ void Session::send_state(const sync::PlayerState& s) {
   std::lock_guard lock(impl_->m);
   if (impl_->st.mode != Mode::Hosting && impl_->st.mode != Mode::Joined) return;
   impl_->out_states.push_back(encode_state(impl_->st.my_id, s));
-  while (impl_->out_states.size() > 4) impl_->out_states.pop_front();
+  while (impl_->out_states.size() > 8) impl_->out_states.pop_front();
+}
+
+void Session::send_vehicle(const sync::VehicleState& v) {
+  std::lock_guard lock(impl_->m);
+  if (impl_->st.mode != Mode::Hosting && impl_->st.mode != Mode::Joined) return;
+  impl_->out_states.push_back(encode_vehicle(impl_->st.my_id, v));
+  while (impl_->out_states.size() > 8) impl_->out_states.pop_front();
+}
+
+std::vector<VehicleUpdate> Session::drain_vehicles() {
+  std::lock_guard lock(impl_->m);
+  std::vector<VehicleUpdate> v(impl_->in_vehicles.begin(), impl_->in_vehicles.end());
+  impl_->in_vehicles.clear();
+  return v;
 }
 
 std::vector<StateUpdate> Session::drain_states() {
