@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "game/netprobe.h"
 #include "sync/ghost.h"
 #include "sync/remote_players.h"
 
@@ -18,6 +19,7 @@ struct Config {
   std::vector<std::string> suppressed_scripts;
   ghost::Settings ghost;
   coop::Settings net;
+  netprobe::Settings netprobe;
 };
 
 // Reads iv-coop.ini next to the plugin, writing defaults for any missing keys.

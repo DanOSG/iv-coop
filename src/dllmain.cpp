@@ -12,6 +12,7 @@
 #include "core/instance.h"
 #include "core/log.h"
 #include "game/addresses.h"
+#include "game/netprobe.h"
 #include "game/script.h"
 #include "render/d3d9_hook.h"
 #include "render/overlay.h"
@@ -42,9 +43,11 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
   for (const auto& name : cfg.suppressed_scripts) script::suppress(name, true);
   ghost::configure(cfg.ghost);
   coop::configure(cfg.net);
+  netprobe::configure(cfg.netprobe);
   script::on_tick([] {
     ghost::tick();
     coop::tick();
+    netprobe::tick();
   });
 }
 

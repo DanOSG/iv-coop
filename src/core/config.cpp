@@ -96,6 +96,16 @@ Config load_config(const std::filesystem::path& ini) {
   n.host_key = read_int(p, L"Net", L"HostKey", n.host_key);
   n.join_key = read_int(p, L"Net", L"JoinKey", n.join_key);
   if (n.send_hz == 0) n.send_hz = 1;
+
+  auto& np = c.netprobe;
+  np.enabled = read_int(p, L"NetProbe", L"Enabled", np.enabled) != 0;
+  const auto args = split_csv(read_str(p, L"NetProbe", L"HostArgs", "16,0,4,0,0,0"));
+  for (size_t i = 0; i < np.host_args.size() && i < args.size(); ++i) {
+    try {
+      np.host_args[i] = std::stoi(args[i], nullptr, 0);
+    } catch (...) {
+    }
+  }
   return c;
 }
 

@@ -86,6 +86,7 @@ add_library(iv-coop SHARED
   src/game/addresses.cpp
   src/game/natives.cpp
   src/game/script.cpp
+  src/game/netprobe.cpp
   src/sync/ghost.cpp
   src/sync/local_player.cpp
   src/sync/puppet.cpp
