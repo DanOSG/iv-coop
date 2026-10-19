@@ -26,6 +26,9 @@ constexpr std::uint32_t kNetworkHostGame = 0x5BEA05E2;
 constexpr std::uint32_t kNetworkHostGamePending = 0x391E4575;
 constexpr std::uint32_t kNetworkHostGameSucceeded = 0x1CA77E94;
 constexpr std::uint32_t kNetworkLeaveGame = 0x55D66E24;
+constexpr std::uint32_t kNetworkStartSession = 0x58802CE5;
+constexpr std::uint32_t kNetworkStartSessionPending = 0x7F853FF4;
+constexpr std::uint32_t kNetworkStartSessionSucceeded = 0x5873667B;
 constexpr std::uint32_t kGetNetworkIdFromPed = 0x7BEE5003;
 constexpr std::uint32_t kGetNumberOfPlayers = 0x62405882;
 
@@ -76,9 +79,22 @@ Snapshot g_last{};
 bool g_have_last = false;
 bool g_f12_down = true, g_f11_down = true;
 
+bool g_f10_down = true;
+
+// The operation being followed frame by frame (host or start-session).
+struct Attempt {
+  const char* what = nullptr;
+  std::uint32_t pending_hash = 0, succeeded_hash = 0;
+  int last_pending = -1, last_succeeded = -1;
+  std::uint32_t frames = 0;
+};
 bool attempt_active = false;
-int last_pending = -1, last_succeeded = -1;
-std::uint32_t attempt_frames = 0;
+Attempt g_attempt;
+
+void follow(const char* what, std::uint32_t pending_hash, std::uint32_t succeeded_hash) {
+  g_attempt = {what, pending_hash, succeeded_hash};
+  attempt_active = true;
+}
 
 bool chord(int vk, bool& was_down) {
   const bool down = (GetAsyncKeyState(vk) & 0x8000) && (GetAsyncKeyState(VK_CONTROL) & 0x8000) &&
@@ -98,28 +114,37 @@ void start_attempt() {
   invoke(kNetworkSetLanSession, 1);
   const int ok = invoke<int>(kNetworkHostGame, a[0], a[1] != 0, a[2], a[3], a[4], a[5]);
   log::info("NetProbe: NETWORK_HOST_GAME returned {}", ok);
-  attempt_active = true;
-  last_pending = last_succeeded = -1;
-  attempt_frames = 0;
+  follow("host", kNetworkHostGamePending, kNetworkHostGameSucceeded);
+}
+
+// The step the MP frontend takes after hosting; suspected to switch the game into
+// network mode (IS_NETWORK_SESSION / mode globals), possibly resetting the world.
+void start_session() {
+  log::warn("NetProbe: NETWORK_START_SESSION");
+  log::info("NetProbe: before: {}", describe(take()));
+  const int ok = invoke<int>(kNetworkStartSession);
+  log::info("NetProbe: NETWORK_START_SESSION returned {}", ok);
+  follow("start session", kNetworkStartSessionPending, kNetworkStartSessionSucceeded);
 }
 
 void follow_attempt() {
-  ++attempt_frames;
-  const int pending = invoke<int>(kNetworkHostGamePending);
-  const int succeeded = invoke<int>(kNetworkHostGameSucceeded);
-  if (pending != last_pending || succeeded != last_succeeded) {
-    log::info("NetProbe: frame {}: host pending={} succeeded={}", attempt_frames, pending, succeeded);
-    last_pending = pending, last_succeeded = succeeded;
+  Attempt& a = g_attempt;
+  ++a.frames;
+  const int pending = invoke<int>(a.pending_hash);
+  const int succeeded = invoke<int>(a.succeeded_hash);
+  if (pending != a.last_pending || succeeded != a.last_succeeded) {
+    log::info("NetProbe: {} frame {}: pending={} succeeded={}", a.what, a.frames, pending, succeeded);
+    a.last_pending = pending, a.last_succeeded = succeeded;
   }
-  if (!pending && attempt_frames > 1) {
+  if (!pending && a.frames > 1) {
     natives::Ped me = natives::GetPlayerChar(natives::GetPlayerId());
     int net_id = -1;
     if (me && natives::DoesCharExist(me)) invoke(kGetNetworkIdFromPed, me, &net_id);
-    log::info("NetProbe: attempt settled after {} frames: succeeded={}, player network id {} | {}", attempt_frames,
+    log::info("NetProbe: {} settled after {} frames: succeeded={}, player network id {} | {}", a.what, a.frames,
               succeeded, net_id, describe(take()));
     attempt_active = false;
-  } else if (attempt_frames > 60 * 120) {
-    log::warn("NetProbe: still pending after ~2 min; giving up following it");
+  } else if (a.frames > 60 * 120) {
+    log::warn("NetProbe: {} still pending after ~2 min; giving up following it", a.what);
     attempt_active = false;
   }
 }
@@ -128,7 +153,9 @@ void follow_attempt() {
 
 void configure(const Settings& s) {
   g_cfg = s;
-  if (s.enabled) log::warn("NetProbe enabled: Ctrl+Shift+F12 attempts a native LAN host, Ctrl+Shift+F11 leaves");
+  if (s.enabled)
+    log::warn("NetProbe enabled: Ctrl+Shift+F12 native LAN host, Ctrl+Shift+F10 start session, "
+              "Ctrl+Shift+F11 leave");
 }
 
 void tick() {
@@ -142,6 +169,7 @@ void tick() {
   }
 
   if (chord(VK_F12, g_f12_down)) start_attempt();
+  if (chord(VK_F10, g_f10_down)) start_session();
   if (chord(VK_F11, g_f11_down)) {
     log::warn("NetProbe: NETWORK_LEAVE_GAME -> {}", invoke<int>(kNetworkLeaveGame));
   }

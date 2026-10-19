@@ -164,6 +164,28 @@ Goal: decide in one afternoon whether the native session can come up in a story 
 
 Steps 1-2 need no second PC and no hooks.
 
+## 7a. Results
+
+**Run 1 (2026-10-20), step 2: native LAN host inside a loaded story save.** Probe: `src/game/netprobe.cpp`,
+`[NetProbe] Enabled=1`, Ctrl+Shift+F12, offline, saves backed up first.
+
+| | Before | After `NETWORK_SET_LAN_SESSION(1)` + `NETWORK_HOST_GAME(16,0,4,0,0,0)` |
+|---|---|---|
+| `NETWORK_IS_NETWORK_AVAILABLE` | 1 | 1 |
+| `NETWORK_HOST_GAME` result / pending / succeeded | — | returned 1, pending 1 → 0 after **8 frames**, succeeded **1** |
+| `IS_NETWORK_GAME_RUNNING` / `NETWORK_IS_SESSION_STARTED` | 0 / 0 | **1 / 1** (half a second later) |
+| `NETWORK_GET_GAME_MODE` | -1 | 16 |
+| `IS_NETWORK_SESSION`, mode globals cur/pend/flag | 0, 0/0/0 | **unchanged** 0, 0/0/0 |
+| Script threads | 30 | 30, still running; the game kept ticking normally at ~60 fps |
+| `GET_NETWORK_ID_FROM_PED(player)` | — | 0 (player probably not registered as a network object) |
+
+Conclusions:
+- The encrypted session layer is alive and hosts a LAN session **offline, with no ROS/Rockstar services**.
+- Hosting alone does **not** switch the game into network mode and does not touch the story: we are hosting a
+  session while still in single-player mode.
+- Unknown: whether objects get cloned in this state (player network id 0 suggests not yet). The MP frontend's next
+  step is `NETWORK_START_SESSION`, which may perform the SP→MP mode switch. Run 2 tests that (Ctrl+Shift+F10).
+
 ## 8. Fallbacks if the native session is a dead end
 
 - Keep the M2b-M5 own-sync plan (current architecture).

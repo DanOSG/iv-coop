@@ -7,6 +7,7 @@
 //   - logs the native network state whenever it changes
 //   - Ctrl+Shift+F12: NETWORK_SET_LAN_SESSION(1) + NETWORK_HOST_GAME(HostArgs), then
 //     follows the attempt frame by frame (pending/succeeded, game mode, script count)
+//   - Ctrl+Shift+F10: NETWORK_START_SESSION (the next step after hosting), followed likewise
 //   - Ctrl+Shift+F11: NETWORK_LEAVE_GAME
 // Use a throwaway save: a game-mode switch may reset or autosave the world.
 
