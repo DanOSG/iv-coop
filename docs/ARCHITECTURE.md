@@ -165,6 +165,10 @@ docs/
 - **M4:** networked entities with **script owner vs sim owner** and migration. Testbed: entities spawned on the
   host while a client is across the map.
 - **M5:** combat, damage, deaths/respawns, wanted level rules.
+- **M5b:** ambient world sync: **city pedestrians and traffic** near more than one player become networked
+  entities (sim owner = nearest player), so everyone sees the same people and cars, including the same ped
+  getting hit, fleeing or fighting. Ambient entities near only one player stay local (cheap). Builds on M4's
+  ownership/migration.
 - **M6:** story layer: client script suppression, progression-state sync on join, and replication of blips, HUD,
   subtitles and dialogue.
 - **M7:** cutscenes and scripted cameras, mission teleport/"join host".
