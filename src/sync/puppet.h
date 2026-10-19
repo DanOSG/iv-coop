@@ -1,36 +1,61 @@
 #pragma once
-// A script-owned ped that we position directly every frame: the M1/M2 stand-in for a remote
-// player (frozen, no collision, invincible, AI events blocked). M3+ replaces this with a
-// real player-slot ped driven by replicated pad input.
+// A script-owned ped standing in for a remote player.
+//
+// Animated mode (default): the ped walks/runs/sprints under its own animation toward a point
+// just ahead of the remote player's interpolated position, and is snapped into place only
+// when it falls too far behind. Frozen mode: positioned directly every frame (slides; used
+// as a fallback and for debugging the raw sync).
+//
+// Both are interim: real player-slot peds driven by replicated pad input replace this later.
 
 #include <cstdint>
 #include <string>
 
 #include "game/natives.h"
+#include "sync/player_state.h"
 
 namespace ivc::sync {
 
 class Puppet {
  public:
-  explicit Puppet(std::string model_name = "M_Y_MULTIPLAYER") : model_name_(std::move(model_name)) {}
+  explicit Puppet(std::string model_name = "M_Y_MULTIPLAYER", bool animated = true)
+      : model_name_(std::move(model_name)), animated_(animated) {}
 
   // Game thread, script context. Requests the model and spawns when it's loaded; returns
   // true once the ped exists (respawning it if the game removed it).
   bool ensure(const natives::Vector3& at);
-  void place(const natives::Vector3& at, float heading);
+  // Moves the ped toward `target` (animated) or onto it (frozen). Call once per frame.
+  void drive(const PlayerState& target, std::uint32_t now_ms);
   void despawn();
 
   bool spawned() const { return ped_ != 0; }
   natives::Ped ped() const { return ped_; }
-  // Short description of what ensure() is waiting on, for status displays.
+  // Short description of what the puppet is doing, for status displays.
   const char* phase() const { return phase_; }
+  float error_m() const { return error_m_; }
+  std::uint32_t snaps() const { return snaps_; }
 
  private:
+  enum class Action { None, Standing, Moving };
+
+  void drive_animated(const PlayerState& t, std::uint32_t now_ms);
+  void snap_to(const PlayerState& t);
+
   std::string model_name_;
+  bool animated_;
   std::uint32_t model_ = 0;
   natives::Ped ped_ = 0;
   natives::Blip blip_ = 0;
   const char* phase_ = "idle";
+
+  // Animated-mode state.
+  Action action_ = Action::None;
+  natives::MoveState move_ = natives::MoveState::Walk;
+  natives::Vector3 last_goal_{};
+  float last_heading_ = 0;
+  std::uint32_t last_issue_ms_ = 0;
+  float error_m_ = 0;
+  std::uint32_t snaps_ = 0;
 };
 
 } // namespace ivc::sync

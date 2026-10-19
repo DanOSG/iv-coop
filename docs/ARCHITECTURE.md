@@ -31,6 +31,13 @@ Free-roam is not a separate mode. It's simply the campaign between missions.
   role is chosen in the in-game menu.
 - **Listen server, 4 players max.** ENet over UDP (reliable + unreliable channels) behind a `Transport`
   interface. The first version connects by direct IP or port forward; Steam relay or NAT punch-through come later.
+- **Peer-hosted only: no dedicated servers, ever.** A session always lives inside the host player's game. To get
+  through home routers without manual setup:
+  1. **UPnP/NAT-PMP** port mapping when hosting: automatic and serverless, and it works on most home routers.
+  2. **Steam join:** invites and "join game" through Steam friends, using Steam's networking with its free relay
+     as the fallback for strict NATs. No server of ours is involved. It still needs checking which Steamworks
+     networking interfaces the game's `steam_api.dll` exposes under app 12210.
+  3. Direct IP + manual port forward always remains as a fallback.
 - **Remote players** are real player peds in spare player slots (the engine still has the original MP slot code).
   They're driven by the remote player's replicated pad state plus position/velocity correction, so animation,
   aiming, cover and vehicle entry come from the game itself. Fallback: an AI ped with events blocked.
@@ -166,3 +173,8 @@ docs/
 - **M9:** MP character creator. It doesn't depend on the other milestones, so it can be pulled earlier as a side
   task.
 - **M10:** TLAD and TBoGT.
+- **Connectivity:** UPnP port mapping, then Steam invites/relay (see Shape). This can land any time after M2.
+- **Final: one-click installer.** It finds the Steam install, checks that `GTAIV.exe` is 1.2.0.59, and installs
+  FusionFix, the radio downgrade and iv-coop (plus a default ini). It also offers to uninstall and restore.
+  Third-party pieces are fetched from their official release sources at install time rather than bundled, so we
+  never redistribute other people's files or Rockstar's audio. Their versions are pinned and verified by hash.

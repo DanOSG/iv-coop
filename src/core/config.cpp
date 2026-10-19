@@ -80,6 +80,7 @@ Config load_config(const std::filesystem::path& ini) {
   g.interp_delay_ms =
       static_cast<std::uint32_t>(read_int(p, L"Ghost", L"InterpDelayMs", static_cast<int>(g.interp_delay_ms)));
   g.offset_x = read_float(p, L"Ghost", L"OffsetX", g.offset_x);
+  g.animated = read_int(p, L"Ghost", L"Animated", g.animated) != 0;
   if (g.send_hz == 0) g.send_hz = 1;
 
   auto& n = c.net;
@@ -91,6 +92,7 @@ Config load_config(const std::filesystem::path& ini) {
   n.interp_delay_ms =
       static_cast<std::uint32_t>(read_int(p, L"Net", L"InterpDelayMs", static_cast<int>(n.interp_delay_ms)));
   n.puppet_model = read_str(p, L"Net", L"PuppetModel", n.puppet_model);
+  n.animated_puppets = read_int(p, L"Net", L"AnimatedPuppets", n.animated_puppets) != 0;
   n.host_key = read_int(p, L"Net", L"HostKey", n.host_key);
   n.join_key = read_int(p, L"Net", L"JoinKey", n.join_key);
   if (n.send_hz == 0) n.send_hz = 1;

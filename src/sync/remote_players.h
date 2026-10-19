@@ -19,6 +19,7 @@ struct Settings {
   std::uint32_t send_hz = 30;
   std::uint32_t interp_delay_ms = 100;
   std::string puppet_model = "M_Y_MULTIPLAYER";
+  bool animated_puppets = true;
   int host_key = 0x79; // VK_F10: host / leave
   int join_key = 0x7A; // VK_F11: join / leave
 };
@@ -30,6 +31,9 @@ struct RemoteStatus {
   bool spawned;
   float extrapolated_pct;
   float distance_m; // from the local player
+  const char* action; // what the puppet is doing (walking, standing, snapped, ...)
+  float error_m;      // puppet's distance from the true (interpolated) position
+  std::uint32_t snaps;
 };
 
 struct Status {

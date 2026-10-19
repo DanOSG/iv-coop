@@ -17,6 +17,7 @@ struct Settings {
   float loss = 0.05f;
   std::uint32_t interp_delay_ms = 100;
   float offset_x = 2.0f;        // world-space offset so the ghost doesn't overlap you
+  bool animated = true;         // walk/run with animation (vs. frozen and positioned directly)
 };
 
 struct Status {

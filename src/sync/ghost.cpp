@@ -46,7 +46,7 @@ void disable() {
 
 void configure(const Settings& s) {
   g_cfg = s;
-  g_puppet = sync::Puppet(s.model);
+  g_puppet = sync::Puppet(s.model, s.animated);
   g_net.latency_ms = s.latency_ms;
   g_net.jitter_ms = s.jitter_ms;
   g_net.loss = s.loss;
@@ -102,13 +102,9 @@ void tick() {
   // Uses only our local clock: the interpolator learns the sender's timeline from arrivals,
   // exactly as it must over a real network where the clocks differ.
   if (auto smp = g_interp.sample(now)) {
-    const n::Vector3 at{smp->x + g_cfg.offset_x, smp->y, smp->z};
-    if (g_puppet.ensure(at)) {
-      g_puppet.place(at, smp->heading);
-      set_phase("following");
-    } else {
-      set_phase(g_puppet.phase());
-    }
+    smp->x += g_cfg.offset_x;
+    if (g_puppet.ensure({smp->x, smp->y, smp->z})) g_puppet.drive(*smp, now);
+    set_phase(g_puppet.phase());
   } else {
     set_phase("waiting for snapshots");
   }

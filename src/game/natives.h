@@ -87,6 +87,19 @@ inline void SetCharCollision(Ped ped, bool b) { invoke(0x2A7413EB, ped, b); }
 inline Blip AddBlipForChar(Ped ped) { Blip b = 0; invoke(0x19A64C5D, ped, &b); return b; }
 inline void RemoveBlip(Blip b) { invoke(0x7BBF3625, b); }
 
+// Movement / tasks.
+enum class MoveState : std::uint32_t { Walk = 2, Run = 3, Sprint = 4 };
+inline void TaskGoStraightToCoord(Ped ped, Vector3 to, MoveState ms, std::uint32_t timeout_ms = 45000) {
+  invoke(0x19591255, ped, to.x, to.y, to.z, static_cast<std::uint32_t>(ms), timeout_ms);
+}
+inline void TaskAchieveHeading(Ped ped, float heading) { invoke(0x6D6A1261, ped, heading); }
+inline void ClearCharTasks(Ped ped) { invoke(0x4AB470F3, ped); }
+inline void SetCharMoveAnimSpeedMultiplier(Ped ped, float m) { invoke(0x5DC456DE, ped, m); }
+inline void SetCharKeepTask(Ped ped, bool b) { invoke(0x264009D3, ped, b); }
+inline void SetPedDontDoEvasiveDives(Ped ped, bool b) { invoke(0x1EAD1D7D, ped, b); }
+inline void SetDontActivateRagdollFromPlayerImpact(Ped ped, bool b) { invoke(0x5A676BCD, ped, b); }
+inline void SetCharWillMoveWhenInjured(Ped ped, bool b) { invoke(0x1EF36397, ped, b); }
+
 // Ped types for CREATE_CHAR.
 inline constexpr std::int32_t kPedTypeCivMale = 4;
 

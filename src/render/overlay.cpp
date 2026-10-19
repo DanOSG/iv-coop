@@ -103,8 +103,9 @@ void draw_status() {
         for (const auto& rs : c.remotes)
           if (rs.id == p.id) r = &rs;
         if (r)
-          ImGui::Text("  #%u %-16s rtt %3u ms  %5.1f m  %s  extrap %.1f%%", p.id, p.name.c_str(), p.rtt_ms,
-                      r->distance_m, r->spawned ? "ped" : "...", r->extrapolated_pct);
+          ImGui::Text("  #%u %-12s rtt %3u ms  %5.1f m  %-9s err %.1f m  snaps %u  extrap %.1f%%", p.id,
+                      p.name.c_str(), p.rtt_ms, r->distance_m, r->spawned ? r->action : "...", r->error_m, r->snaps,
+                      r->extrapolated_pct);
         else
           ImGui::Text("  #%u %-16s rtt %3u ms  (no state yet)", p.id, p.name.c_str(), p.rtt_ms);
       }

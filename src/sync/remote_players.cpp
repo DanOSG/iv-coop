@@ -40,7 +40,7 @@ Remote& remote(std::uint8_t id) {
   auto [it, inserted] = g_remotes.try_emplace(id);
   if (inserted) {
     it->second.interp.delay_ms = g_cfg.interp_delay_ms;
-    it->second.puppet = sync::Puppet(g_cfg.puppet_model);
+    it->second.puppet = sync::Puppet(g_cfg.puppet_model, g_cfg.animated_puppets);
   }
   return it->second;
 }
@@ -132,8 +132,7 @@ void tick() {
   for (auto& [id, r] : g_remotes) {
     float dist = 0;
     if (auto smp = r.interp.sample(now)) { // once per frame: sampling advances the timeline
-      const n::Vector3 at{smp->x, smp->y, smp->z};
-      if (r.puppet.ensure(at)) r.puppet.place(at, smp->heading);
+      if (r.puppet.ensure({smp->x, smp->y, smp->z})) r.puppet.drive(*smp, now);
       if (local) dist = std::hypot(smp->x - local->x, smp->y - local->y, smp->z - local->z);
     }
     const auto& st = r.interp.stats();
@@ -143,7 +142,15 @@ void tick() {
       if (p.id == id) rtt = p.rtt_ms;
     remotes.push_back({id, r.name, rtt, r.puppet.spawned(),
                        frames ? 100.0f * static_cast<float>(st.extrapolated) / static_cast<float>(frames) : 0.0f,
-                       dist});
+                       dist, r.puppet.phase(), r.puppet.error_m(), r.puppet.snaps()});
+  }
+
+  static std::uint32_t last_log = now;
+  if (!remotes.empty() && now - last_log >= 10000) {
+    last_log = now;
+    for (const auto& r : remotes)
+      log::info("Remote #{} '{}': {} err {:.1f} m, {} snaps, {:.1f} m away, extrap {:.1f}%", r.id, r.name, r.action,
+                r.error_m, r.snaps, r.distance_m, r.extrapolated_pct);
   }
 
   std::lock_guard lock(g_status_mutex);

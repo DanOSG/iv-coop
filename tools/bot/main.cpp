@@ -43,6 +43,7 @@ struct Args {
   bool serve = false;     // host the session ourselves
   int seconds = 0;        // 0 = run until Ctrl+C
   bool retry = false;     // keep re-joining until admitted (host not up yet, session full, ...)
+  int pause_every = 0;    // stand still for 3 s every N seconds (0 = never)
 };
 
 Args parse(int argc, char** argv) {
@@ -61,6 +62,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--serve") a.serve = true;
     else if (k == "--seconds") a.seconds = std::atoi(next());
     else if (k == "--retry") a.retry = true;
+    else if (k == "--pause-every") a.pause_every = std::atoi(next());
     else std::fprintf(stderr, "unknown argument %s\n", k.c_str());
   }
   if (a.radius < 0.5f) a.radius = 0.5f;
@@ -136,16 +138,19 @@ int main(int argc, char** argv) {
     if (!active || !have_center) continue;
 
     // Walk the circle at constant speed; heading follows the direction of travel.
-    angle += a.speed / a.radius * dt;
+    const bool paused = a.pause_every > 0 && ((now - started) / 1000) % static_cast<std::uint32_t>(a.pause_every) < 3;
+    const float speed = paused ? 0.0f : a.speed;
+    angle += speed / a.radius * dt;
     sync::PlayerState s;
     s.x = cx + std::cos(angle) * a.radius;
     s.y = cy + std::sin(angle) * a.radius;
     s.z = cz;
-    s.vx = -std::sin(angle) * a.speed;
-    s.vy = std::cos(angle) * a.speed;
+    s.vx = -std::sin(angle) * speed;
+    s.vy = std::cos(angle) * speed;
     s.vz = 0;
-    // IV heading: degrees counter-clockwise from north (+Y).
-    float h = std::atan2(-s.vx, s.vy) * 180.0f / kPi;
+    // IV heading: degrees counter-clockwise from north (+Y). Tangent to the circle, so a
+    // paused bot keeps facing the way it was walking.
+    float h = std::atan2(std::sin(angle), std::cos(angle)) * 180.0f / kPi;
     s.heading = h < 0 ? h + 360.0f : h;
 
     if (now - last_send >= 33) {
