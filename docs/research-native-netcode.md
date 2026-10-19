@@ -192,6 +192,22 @@ So **hosting twice hangs the game thread.** The MP frontend never does this. The
 session exists or is pending, and only allows `NETWORK_START_SESSION` after a successful host. `NETWORK_START_SESSION`
 itself is still untested.
 
+**Run 3 (2026-10-20), fresh launch: host once, then `NETWORK_START_SESSION`.**
+
+| Step | Result |
+|---|---|
+| `NETWORK_HOST_GAME(16,0,4,0,0,0)` | succeeded in 8 frames (as in run 1) |
+| `NETWORK_START_SESSION` | returned 1; pending 1 → 0, **succeeded after 2 frames** |
+| `GET_NETWORK_ID_FROM_PED(player)` | **0 → 1**: the player became a registered network object |
+| `IS_NETWORK_SESSION`, mode globals | still 0, 0/0/0: no SP→MP mode switch |
+| Story | 34 script threads before and after, ~79 fps, no world reset, nothing visible for 30 s |
+
+**Status: a full native session (hosted + started, player registered for sync) runs inside a story save,
+offline, with no Rockstar services and no patches.** The remaining unknown is whether the clone sync actually
+reaches another machine (and how remote players appear) while the game stays in SP mode. That needs a second PC on
+the same LAN running `NETWORK_JOIN_GAME` (step 3). The launcher allows one game copy per machine, so this can't be
+done on one PC. Join-side probe keys still have to be added (find/join LAN session).
+
 ## 8. Fallbacks if the native session is a dead end
 
 - Keep the M2b-M5 own-sync plan (current architecture).
