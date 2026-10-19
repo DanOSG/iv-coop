@@ -69,6 +69,27 @@ The original MP character models are still in the CE data: `M_Y_Multiplayer` and
 | **Ambient world** | Each client has its own traffic and peds around itself. Where players overlap, ambient entities near more than one player become networked (sim owner = nearest). |
 | **EFLC (TLAD / TBoGT)** | Same system. The host picks the episode and it stays fixed for the session. |
 
+### Radio: listen together (beyond the original MP)
+
+The original multiplayer never synced radio. We will, so players hear the same station and song at the same
+moment:
+
+- **Downgraded radio is expected.** Players install a community radio downgrade, which restores the tracks
+  removed from the CE in 2018; it is installed separately, and we don't ship audio. Track lists must be identical
+  across the session, so the join handshake compares a hash of each station's track list. A mismatch gets a
+  clear "radio versions differ" warning, and radio sync turns off rather than playing different songs.
+- **Station sync.** In a shared vehicle, the driver's station applies to all passengers. Each player in their own
+  vehicle keeps their own station. Natives exist for both directions: get the current station index, retune to
+  a station index.
+- **Song/position sync.** IV's stations run on a continuous virtual timeline. What plays on a station is derived
+  from a radio clock, not from when you tuned in. If every client's radio clock and station state match the
+  host's, the same station plays the same song at the same offset everywhere. Plan: reverse-engineer the radio
+  timeline (`audRadioStation`), replicate the host's radio clock/seed on join and correct drift periodically.
+  Talk-show/DJ/ad selection must come from the same seed too.
+- **Independence.** A client's own station choice never retunes anyone else, except as driver of a shared vehicle.
+
+Milestone: after M5 (it needs vehicle seats), before the mission audit.
+
 ### Concessions (resolved per mission during the audit)
 
 When a section can't include joiners, the options in order of preference are:

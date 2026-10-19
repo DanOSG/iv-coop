@@ -24,7 +24,25 @@ FetchContent_Declare(imgui
   GIT_REPOSITORY https://github.com/ocornut/imgui.git
   GIT_TAG        v1.91.9
   SOURCE_SUBDIR  _none)
-FetchContent_MakeAvailable(minhook imgui)
+FetchContent_Declare(enet
+  GIT_REPOSITORY https://github.com/lsalzman/enet.git
+  GIT_TAG        v1.3.18
+  SOURCE_SUBDIR  _none)
+FetchContent_MakeAvailable(minhook imgui enet)
+
+add_library(enet STATIC
+  ${enet_SOURCE_DIR}/callbacks.c
+  ${enet_SOURCE_DIR}/compress.c
+  ${enet_SOURCE_DIR}/host.c
+  ${enet_SOURCE_DIR}/list.c
+  ${enet_SOURCE_DIR}/packet.c
+  ${enet_SOURCE_DIR}/peer.c
+  ${enet_SOURCE_DIR}/protocol.c
+  ${enet_SOURCE_DIR}/win32.c)
+target_include_directories(enet PUBLIC ${enet_SOURCE_DIR}/include)
+target_compile_definitions(enet PRIVATE _WINSOCK_DEPRECATED_NO_WARNINGS)
+target_compile_options(enet PRIVATE /wd5287) # third-party enum mixing, harmless
+target_link_libraries(enet PUBLIC ws2_32 winmm)
 
 add_library(minhook STATIC
   ${minhook_SOURCE_DIR}/src/buffer.c
@@ -42,6 +60,20 @@ add_library(imgui STATIC
   ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp)
 target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
 
+set(IVCOOP_WARNINGS /W4 /permissive- /utf-8)
+
+# --- netcode shared by the plugin and the bot (no game dependencies) ---
+add_library(ivc_net STATIC src/net/session.cpp)
+target_include_directories(ivc_net PUBLIC src)
+target_compile_definitions(ivc_net PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_options(ivc_net PRIVATE ${IVCOOP_WARNINGS})
+target_link_libraries(ivc_net PUBLIC enet)
+
+# --- headless test client ---
+add_executable(iv-coop-bot tools/bot/main.cpp)
+target_compile_options(iv-coop-bot PRIVATE ${IVCOOP_WARNINGS})
+target_link_libraries(iv-coop-bot PRIVATE ivc_net)
+
 # --- the plugin ---
 add_library(iv-coop SHARED
   src/dllmain.cpp
@@ -49,17 +81,21 @@ add_library(iv-coop SHARED
   src/core/config.cpp
   src/core/game_version.cpp
   src/core/iat.cpp
+  src/core/instance.cpp
   src/game/pattern.cpp
   src/game/addresses.cpp
   src/game/natives.cpp
   src/game/script.cpp
   src/sync/ghost.cpp
+  src/sync/local_player.cpp
+  src/sync/puppet.cpp
+  src/sync/remote_players.cpp
   src/render/d3d9_hook.cpp
   src/render/overlay.cpp)
 target_include_directories(iv-coop PRIVATE src)
-target_compile_definitions(iv-coop PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
-target_compile_options(iv-coop PRIVATE /W4 /permissive- /utf-8)
-target_link_libraries(iv-coop PRIVATE minhook imgui d3d9 version)
+target_compile_definitions(iv-coop PRIVATE UNICODE _UNICODE)
+target_compile_options(iv-coop PRIVATE ${IVCOOP_WARNINGS})
+target_link_libraries(iv-coop PRIVATE ivc_net minhook imgui d3d9 version)
 set_target_properties(iv-coop PROPERTIES SUFFIX ".asi" OUTPUT_NAME "iv-coop")
 
 if(IVCOOP_DEPLOY)

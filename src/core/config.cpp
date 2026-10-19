@@ -65,6 +65,7 @@ Config load_config(const std::filesystem::path& ini) {
   c.overlay_toggle_key = read_int(p, L"Overlay", L"ToggleKey", c.overlay_toggle_key);
   c.scripts_panel_key = read_int(p, L"Overlay", L"ScriptsPanelKey", c.scripts_panel_key);
   c.debug_log = read_int(p, L"Log", L"Debug", c.debug_log) != 0;
+  c.isolate_named_objects = read_int(p, L"Instance", L"IsolateNamedObjects", c.isolate_named_objects) != 0;
 
   c.host_scripts = split_csv(read_str(p, L"Scripts", L"TickHost", "main"));
   c.suppressed_scripts = split_csv(read_str(p, L"Scripts", L"Suppress", ""));
@@ -80,6 +81,19 @@ Config load_config(const std::filesystem::path& ini) {
       static_cast<std::uint32_t>(read_int(p, L"Ghost", L"InterpDelayMs", static_cast<int>(g.interp_delay_ms)));
   g.offset_x = read_float(p, L"Ghost", L"OffsetX", g.offset_x);
   if (g.send_hz == 0) g.send_hz = 1;
+
+  auto& n = c.net;
+  n.name = read_str(p, L"Net", L"Name", n.name);
+  n.join_address = read_str(p, L"Net", L"JoinAddress", n.join_address);
+  n.port = static_cast<std::uint16_t>(read_int(p, L"Net", L"Port", n.port));
+  n.bind_address = read_str(p, L"Net", L"BindAddress", n.bind_address);
+  n.send_hz = static_cast<std::uint32_t>(read_int(p, L"Net", L"SendHz", static_cast<int>(n.send_hz)));
+  n.interp_delay_ms =
+      static_cast<std::uint32_t>(read_int(p, L"Net", L"InterpDelayMs", static_cast<int>(n.interp_delay_ms)));
+  n.puppet_model = read_str(p, L"Net", L"PuppetModel", n.puppet_model);
+  n.host_key = read_int(p, L"Net", L"HostKey", n.host_key);
+  n.join_key = read_int(p, L"Net", L"JoinKey", n.join_key);
+  if (n.send_hz == 0) n.send_hz = 1;
   return c;
 }
 

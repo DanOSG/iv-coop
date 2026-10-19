@@ -1,0 +1,96 @@
+#pragma once
+// Wire protocol. Every packet is [MsgType u8][payload], little-endian.
+// Channel 0 = unreliable (player state), channel 1 = reliable (session control).
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <cstring>
+#include <optional>
+#include <span>
+#include <string>
+#include <vector>
+
+#include "net/bytes.h"
+#include "sync/player_state.h"
+
+namespace ivc::net {
+
+inline constexpr std::uint16_t kProtocolVersion = 1;
+inline constexpr int kMaxPlayers = 4; // host + 3
+inline constexpr std::uint8_t kHostId = 0;
+inline constexpr std::size_t kNameLen = 24;
+
+inline constexpr std::uint8_t kChanState = 0;
+inline constexpr std::uint8_t kChanControl = 1;
+inline constexpr std::uint8_t kNumChannels = 2;
+
+// Disconnect reasons (ENet disconnect data).
+enum class Reject : std::uint32_t { None = 0, Full = 1, VersionMismatch = 2, HostLeft = 3, Kicked = 4 };
+
+enum class MsgType : std::uint8_t {
+  Hello = 1,        // C->H: version, name
+  Welcome = 2,      // H->C: your id, roster
+  PlayerJoined = 3, // H->all: id, name
+  PlayerLeft = 4,   // H->all: id
+  PlayerState = 5,  // any: id (stamped by host when relaying), state
+};
+
+using Name = std::array<char, kNameLen>;
+
+inline Name make_name(const std::string& s) {
+  Name n{};
+  std::memcpy(n.data(), s.data(), std::min(s.size(), kNameLen - 1));
+  return n;
+}
+inline std::string to_string(const Name& n) { return std::string(n.data(), strnlen(n.data(), kNameLen)); }
+
+struct RosterEntry {
+  std::uint8_t id;
+  Name name;
+};
+
+inline std::vector<std::uint8_t> encode_hello(const std::string& name) {
+  Writer w;
+  w.put(MsgType::Hello).put(kProtocolVersion).put(make_name(name));
+  return std::move(w.data());
+}
+
+inline std::vector<std::uint8_t> encode_welcome(std::uint8_t your_id, const std::vector<RosterEntry>& roster) {
+  Writer w;
+  w.put(MsgType::Welcome).put(your_id).put(static_cast<std::uint8_t>(roster.size()));
+  for (const auto& r : roster) w.put(r.id).put(r.name);
+  return std::move(w.data());
+}
+
+inline std::vector<std::uint8_t> encode_joined(std::uint8_t id, const Name& name) {
+  Writer w;
+  w.put(MsgType::PlayerJoined).put(id).put(name);
+  return std::move(w.data());
+}
+
+inline std::vector<std::uint8_t> encode_left(std::uint8_t id) {
+  Writer w;
+  w.put(MsgType::PlayerLeft).put(id);
+  return std::move(w.data());
+}
+
+inline std::vector<std::uint8_t> encode_state(std::uint8_t id, const sync::PlayerState& s) {
+  Writer w;
+  w.put(MsgType::PlayerState).put(id).put(s.seq).put(s.time_ms).put(s.x).put(s.y).put(s.z).put(s.vx).put(s.vy)
+      .put(s.vz).put(s.heading).put(s.model).put(s.in_vehicle);
+  return std::move(w.data());
+}
+
+inline bool decode_state(Reader& r, std::uint8_t& id, sync::PlayerState& s) {
+  r.get(id), r.get(s.seq), r.get(s.time_ms), r.get(s.x), r.get(s.y), r.get(s.z), r.get(s.vx), r.get(s.vy);
+  r.get(s.vz), r.get(s.heading), r.get(s.model), r.get(s.in_vehicle);
+  return r.ok();
+}
+
+// Rewrites the id byte of an encoded PlayerState in place (host relay).
+inline void restamp_state(std::span<std::uint8_t> packet, std::uint8_t id) {
+  if (packet.size() > 1) packet[1] = id;
+}
+
+} // namespace ivc::net

@@ -1,14 +1,15 @@
 #include "sync/ghost.h"
 
-#include <windows.h>
-
-#include <chrono>
 #include <mutex>
 
+#include "core/input.h"
 #include "core/log.h"
-#include "game/natives.h"
+#include "net/protocol.h"
+#include "net/session.h"
 #include "net/transport.h"
+#include "sync/local_player.h"
 #include "sync/player_state.h"
+#include "sync/puppet.h"
 
 namespace ivc::ghost {
 namespace {
@@ -17,29 +18,16 @@ namespace n = natives;
 Settings g_cfg;
 net::LoopbackTransport g_net;
 sync::Interpolator g_interp;
+sync::Puppet g_puppet;
 
 bool g_enabled = false;
 bool g_key_was_down = true;
-n::Ped g_ped = 0;
-n::Blip g_blip = 0;
-std::uint32_t g_model = 0;
 std::uint32_t g_last_send = 0;
 std::uint16_t g_seq = 0;
+std::uint32_t g_sent = 0, g_received = 0;
 
 std::mutex g_status_mutex;
 Status g_status;
-
-std::uint32_t now_ms() {
-  using namespace std::chrono;
-  return static_cast<std::uint32_t>(duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
-}
-
-void despawn() {
-  if (g_blip) n::RemoveBlip(g_blip), g_blip = 0;
-  if (g_ped && n::DoesCharExist(g_ped)) n::DeleteChar(g_ped);
-  g_ped = 0;
-  g_interp.clear();
-}
 
 void set_phase(std::string p) {
   std::lock_guard lock(g_status_mutex);
@@ -47,51 +35,18 @@ void set_phase(std::string p) {
   g_status.phase = std::move(p);
 }
 
-// Returns true once the ghost exists.
-bool ensure_spawned(const n::Vector3& at) {
-  if (g_ped && n::DoesCharExist(g_ped)) return true;
-  if (g_ped) {
-    log::warn("Ghost ped {} vanished; respawning", g_ped);
-    g_ped = 0;
-  }
-  if (!g_model) g_model = n::GetHashKey(g_cfg.model.c_str());
-  n::RequestModel(g_model);
-  if (!n::HasModelLoaded(g_model)) {
-    set_phase("loading model " + g_cfg.model);
-    return false;
-  }
-  g_ped = n::CreateChar(n::kPedTypeCivMale, g_model, at);
-  n::MarkModelAsNoLongerNeeded(g_model);
-  if (!g_ped) {
-    set_phase("CREATE_CHAR failed");
-    return false;
-  }
-  n::SetBlockingOfNonTemporaryEvents(g_ped, true);
-  n::SetCharInvincible(g_ped, true);
-  n::SetCharCollision(g_ped, false);
-  n::FreezeCharPosition(g_ped, true);
-  g_blip = n::AddBlipForChar(g_ped);
-  log::info("Ghost spawned: ped {} model 0x{:08X}", g_ped, g_model);
-  return true;
-}
-
-void poll_toggle() {
-  const bool down = (GetAsyncKeyState(g_cfg.toggle_key) & 0x8000) != 0;
-  if (down && !g_key_was_down) {
-    g_enabled = !g_enabled;
-    log::info("Ghost {}", g_enabled ? "enabled" : "disabled");
-    if (!g_enabled) {
-      despawn();
-      set_phase("off");
-    }
-  }
-  g_key_was_down = down;
+void disable() {
+  g_puppet.despawn();
+  g_interp.clear();
+  g_sent = g_received = 0;
+  set_phase("off");
 }
 
 } // namespace
 
 void configure(const Settings& s) {
   g_cfg = s;
+  g_puppet = sync::Puppet(s.model);
   g_net.latency_ms = s.latency_ms;
   g_net.jitter_ms = s.jitter_ms;
   g_net.loss = s.loss;
@@ -100,55 +55,47 @@ void configure(const Settings& s) {
 }
 
 void tick() {
-  poll_toggle();
-  const std::uint32_t now = now_ms();
+  if (input::pressed(g_cfg.toggle_key, g_key_was_down)) {
+    g_enabled = !g_enabled;
+    log::info("Ghost {}", g_enabled ? "enabled" : "disabled");
+    if (!g_enabled) disable();
+  }
+
+  const std::uint32_t now = net::steady_ms();
   g_net.set_clock(now);
-
-  const n::Player player = n::GetPlayerId();
-  const n::Ped me = n::GetPlayerChar(player);
-  if (!me || !n::DoesCharExist(me)) {
-    if (g_enabled) set_phase("no player ped yet");
-    return;
-  }
-
-  // --- capture + send (what a remote client will do) ---
-  sync::PlayerState s;
-  const n::Vector3 pos = n::GetCharCoordinates(me);
-  const n::Vector3 vel = n::GetCharVelocity(me);
-  s.time_ms = now;
-  s.x = pos.x, s.y = pos.y, s.z = pos.z;
-  s.vx = vel.x, s.vy = vel.y, s.vz = vel.z;
-  s.heading = n::GetCharHeading(me);
-  s.model = n::GetCharModel(me);
-  s.in_vehicle = n::IsCharInAnyCar(me);
-
-  Status st;
-  {
+  auto local = sync::capture_local(now);
+  if (local) {
     std::lock_guard lock(g_status_mutex);
-    g_status.player_x = s.x, g_status.player_y = s.y, g_status.player_z = s.z, g_status.player_heading = s.heading;
-    st = g_status;
+    g_status.player_x = local->x, g_status.player_y = local->y, g_status.player_z = local->z;
+    g_status.player_heading = local->heading;
   }
-
   if (!g_enabled) {
     std::lock_guard lock(g_status_mutex);
-    g_status.enabled = false;
-    g_status.spawned = false;
+    g_status.enabled = g_status.spawned = false;
+    return;
+  }
+  if (!local) {
+    set_phase("no player ped yet");
     return;
   }
 
+  // --- capture + send (what a remote client does) ---
   if (now - g_last_send >= 1000 / g_cfg.send_hz) {
     g_last_send = now;
-    s.seq = ++g_seq;
-    const auto bytes = sync::encode(s);
-    g_net.send(0, net::Channel::Unreliable, bytes);
-    ++st.sent;
+    local->seq = ++g_seq;
+    g_net.send(0, net::Channel::Unreliable, net::encode_state(0, *local));
+    ++g_sent;
   }
 
   // --- receive + apply (what the host does for each remote player) ---
   g_net.poll(now, [&](int, std::span<const std::uint8_t> payload) {
-    if (auto ps = sync::decode_player_state(payload)) {
-      g_interp.push(*ps, now);
-      ++st.received;
+    net::Reader r(payload);
+    net::MsgType type{};
+    std::uint8_t id;
+    sync::PlayerState s;
+    if (r.get(type) && type == net::MsgType::PlayerState && net::decode_state(r, id, s)) {
+      g_interp.push(s, now);
+      ++g_received;
     }
   });
 
@@ -156,30 +103,30 @@ void tick() {
   // exactly as it must over a real network where the clocks differ.
   if (auto smp = g_interp.sample(now)) {
     const n::Vector3 at{smp->x + g_cfg.offset_x, smp->y, smp->z};
-    if (ensure_spawned(at)) {
-      n::SetCharCoordinatesNoOffset(g_ped, at);
-      n::SetCharHeading(g_ped, smp->heading);
+    if (g_puppet.ensure(at)) {
+      g_puppet.place(at, smp->heading);
       set_phase("following");
+    } else {
+      set_phase(g_puppet.phase());
     }
   } else {
     set_phase("waiting for snapshots");
   }
 
   static std::uint32_t last_stats_log = now;
+  const auto& is = g_interp.stats();
   if (now - last_stats_log >= 10000) {
     last_stats_log = now;
-    const auto& is = g_interp.stats();
     log::info("Ghost stats: interpolated {} / extrapolated {} frames, offset {} ms, stale {}, recv {}/{} sent",
-              is.interpolated, is.extrapolated, is.offset_ms, is.stale, st.received, st.sent);
+              is.interpolated, is.extrapolated, is.offset_ms, is.stale, g_received, g_sent);
   }
 
   std::lock_guard lock(g_status_mutex);
   g_status.enabled = true;
-  g_status.spawned = g_ped != 0;
-  g_status.sent = st.sent;
-  g_status.received = st.received;
+  g_status.spawned = g_puppet.spawned();
+  g_status.sent = g_sent;
+  g_status.received = g_received;
   g_status.buffered = static_cast<std::uint32_t>(g_interp.buffered());
-  const auto& is = g_interp.stats();
   g_status.stale = is.stale;
   g_status.interpolated = is.interpolated;
   g_status.extrapolated = is.extrapolated;

@@ -9,12 +9,14 @@
 
 #include "core/config.h"
 #include "core/game_version.h"
+#include "core/instance.h"
 #include "core/log.h"
 #include "game/addresses.h"
 #include "game/script.h"
 #include "render/d3d9_hook.h"
 #include "render/overlay.h"
 #include "sync/ghost.h"
+#include "sync/remote_players.h"
 
 namespace {
 
@@ -39,7 +41,11 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
   script::set_host_scripts(cfg.host_scripts);
   for (const auto& name : cfg.suppressed_scripts) script::suppress(name, true);
   ghost::configure(cfg.ghost);
-  script::on_tick([] { ghost::tick(); });
+  coop::configure(cfg.net);
+  script::on_tick([] {
+    ghost::tick();
+    coop::tick();
+  });
 }
 
 // Runs inside DllMain, before the game's own startup: file IO, an IAT write, and
@@ -47,10 +53,19 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
 void startup(HMODULE self) {
   using namespace ivc;
   const auto dir = plugin_dir(self);
-  log::init(dir / "iv-coop.log");
+  const int slot = instance::claim_slot();
+  log::init(dir / ("iv-coop" + instance::suffix() + ".log"));
   const Config cfg = load_config(dir / "iv-coop.ini");
   if (cfg.debug_log) log::set_min_level(log::Level::Debug);
-  log::info("iv-coop M1 loading (built " __DATE__ " " __TIME__ ")");
+  log::info("iv-coop M2 loading (built " __DATE__ " " __TIME__ "), instance slot {}, pid {}", slot,
+            GetCurrentProcessId());
+  {
+    wchar_t* cmd = GetCommandLineW();
+    std::string narrow;
+    for (const wchar_t* c = cmd; *c; ++c) narrow.push_back(static_cast<char>(*c));
+    log::info("Command line: {}", narrow);
+  }
+  instance::install_named_object_hooks(cfg.isolate_named_objects);
 
   const GameVersion ver = query_game_version();
   log::info("Host exe version {}", ver.str());

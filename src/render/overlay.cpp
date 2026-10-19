@@ -9,6 +9,7 @@
 #include "core/log.h"
 #include "game/script.h"
 #include "sync/ghost.h"
+#include "sync/remote_players.h"
 
 namespace ivc::overlay {
 namespace {
@@ -63,7 +64,7 @@ void draw_status() {
   ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_Always);
   ImGui::SetNextWindowBgAlpha(0.55f);
   if (ImGui::Begin("##ivcoop", nullptr, kHudFlags)) {
-    ImGui::TextUnformatted("iv-coop  M1");
+    ImGui::TextUnformatted("iv-coop  M2");
     ImGui::Text("frame %llu  |  %.0f fps", g_frames, ImGui::GetIO().Framerate);
 
     const std::string host = script::host_script();
@@ -83,7 +84,32 @@ void draw_status() {
       const ImVec4 col = extra_pct < 5.0f ? ImVec4(0.5f, 1, 0.5f, 1) : ImVec4(1, 0.6f, 0.3f, 1);
       ImGui::TextColored(col, "offset %d ms  |  extrapolated %.1f%% of frames", g.offset_ms, extra_pct);
     }
-    ImGui::TextDisabled("F7 scripts  |  F8 overlay  |  built " __DATE__ " " __TIME__);
+
+    ImGui::Separator();
+    const coop::Status c = coop::status();
+    const auto& s = c.session;
+    if (s.mode == net::Mode::Idle) {
+      ImGui::TextUnformatted("session: idle   [F10 host | F11 join]");
+      if (!s.last_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "last: %s", s.last_error.c_str());
+    } else {
+      ImGui::Text("session: %s on UDP %u, we are #%u   [F10/F11 leave]", net::to_string(s.mode), s.port, s.my_id);
+      ImGui::Text("states sent %u  recv %u", s.states_sent, s.states_received);
+      for (const auto& p : s.players) {
+        if (p.id == s.my_id) {
+          ImGui::Text("  #%u %-16s (you)", p.id, p.name.c_str());
+          continue;
+        }
+        const coop::RemoteStatus* r = nullptr;
+        for (const auto& rs : c.remotes)
+          if (rs.id == p.id) r = &rs;
+        if (r)
+          ImGui::Text("  #%u %-16s rtt %3u ms  %5.1f m  %s  extrap %.1f%%", p.id, p.name.c_str(), p.rtt_ms,
+                      r->distance_m, r->spawned ? "ped" : "...", r->extrapolated_pct);
+        else
+          ImGui::Text("  #%u %-16s rtt %3u ms  (no state yet)", p.id, p.name.c_str(), p.rtt_ms);
+      }
+    }
+    ImGui::TextDisabled("F7 scripts  |  F8 overlay  |  F9 ghost  |  built " __DATE__ " " __TIME__);
   }
   ImGui::End();
 }

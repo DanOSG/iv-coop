@@ -4,16 +4,12 @@
 #include <cstdint>
 #include <deque>
 #include <optional>
-#include <span>
-#include <vector>
-
-#include "net/bytes.h"
+#include <utility>
 
 namespace ivc::sync {
 
-enum class MsgType : std::uint8_t { PlayerState = 1 };
-
 // On-foot player snapshot. Grows as sync covers more (pad state, aim, weapon, vehicle seat).
+// Wire encoding lives in net/protocol.h.
 struct PlayerState {
   std::uint32_t time_ms = 0; // sender clock when captured
   std::uint16_t seq = 0;
@@ -23,25 +19,6 @@ struct PlayerState {
   std::uint32_t model = 0;
   std::uint8_t in_vehicle = 0;
 };
-
-inline std::vector<std::uint8_t> encode(const PlayerState& s) {
-  net::Writer w;
-  w.put(MsgType::PlayerState).put(s.seq).put(s.time_ms).put(s.x).put(s.y).put(s.z).put(s.vx).put(s.vy).put(s.vz)
-      .put(s.heading).put(s.model).put(s.in_vehicle);
-  return std::move(w.data());
-}
-
-inline std::optional<PlayerState> decode_player_state(std::span<const std::uint8_t> d) {
-  net::Reader r(d);
-  MsgType type{};
-  PlayerState s;
-  r.get(type);
-  if (type != MsgType::PlayerState) return std::nullopt;
-  r.get(s.seq), r.get(s.time_ms), r.get(s.x), r.get(s.y), r.get(s.z), r.get(s.vx), r.get(s.vy), r.get(s.vz);
-  r.get(s.heading), r.get(s.model), r.get(s.in_vehicle);
-  if (!r.ok()) return std::nullopt;
-  return s;
-}
 
 // Snapshot interpolation. The sender stamps each snapshot with its own clock; the receiver
 // learns `offset` = (local arrival - sender stamp), i.e. clock difference + one-way latency,
