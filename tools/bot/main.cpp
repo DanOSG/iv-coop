@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <format>
 #include <map>
 #include <string>
 #include <thread>
@@ -93,8 +94,15 @@ int main(int argc, char** argv) {
   const std::uint32_t started = net::steady_ms();
   float cx = 0, cy = 0, cz = 0;
   std::uint16_t seq = 0;
-  std::uint32_t last_send = 0, last_report = net::steady_ms();
+  std::uint32_t last_send = 0, last_report = net::steady_ms(), last_report_cost = 0;
   std::map<std::uint8_t, unsigned> received;
+  // Same interpolation the game runs per remote player, so its health can be checked
+  // from the bot's report with no game involved.
+  std::map<std::uint8_t, sync::Interpolator> interps;
+  struct Gaps {
+    std::uint32_t last_arrival = 0, last_stamp = 0, max_arrival_gap = 0, max_stamp_gap = 0;
+  };
+  std::map<std::uint8_t, Gaps> gaps; // per sender, reset each report
   auto prev = std::chrono::steady_clock::now();
   bool was_joined = false;
 
@@ -125,12 +133,19 @@ int main(int argc, char** argv) {
     }
     for (const auto& u : session.drain_states()) {
       ++received[u.id];
+      interps[u.id].push(u.state, u.arrival_ms);
+      auto& g = gaps[u.id];
+      if (g.last_arrival) g.max_arrival_gap = std::max(g.max_arrival_gap, u.arrival_ms - g.last_arrival);
+      if (g.last_stamp) g.max_stamp_gap = std::max(g.max_stamp_gap, u.state.time_ms - g.last_stamp);
+      g.last_arrival = u.arrival_ms, g.last_stamp = u.state.time_ms;
       if (u.id == net::kHostId && (a.follow || !have_center)) {
         cx = u.state.x, cy = u.state.y, cz = u.state.z;
         if (!have_center) std::printf("[%s] host is at %.1f %.1f %.1f, circling\n", a.name.c_str(), cx, cy, cz);
         have_center = true;
       }
     }
+
+    for (auto& [id, ip] : interps) ip.sample(now);
 
     const net::SessionStatus st = session.status();
     const bool active = st.mode == net::Mode::Joined || st.mode == net::Mode::Hosting;
@@ -162,12 +177,24 @@ int main(int argc, char** argv) {
 
     if (now - last_report >= 5000) {
       last_report = now;
-      std::printf("[%s] #%u  players %zu  sent %u  recv:", a.name.c_str(), st.my_id, st.players.size(),
-                  st.states_sent);
-      for (const auto& [id, n] : received) std::printf(" #%u=%u", id, n);
+      // Build the whole line first and write it once: many small writes to a redirected
+      // stdout each block on the reader and can stall this loop (and so our sends).
+      std::string line = std::format("[{}] #{}  players {}  sent {}  report took {} ms  recv:", a.name, st.my_id,
+                                     st.players.size(), st.states_sent, last_report_cost);
+      for (const auto& [id, n] : received) {
+        const auto& is = interps[id].stats();
+        const unsigned frames = is.interpolated + is.extrapolated;
+        auto& g = gaps[id];
+        line += std::format(" #{}={} (extrap {:.1f}%, offset {}, max gap arrive {}/stamp {} ms)", id, n,
+                            frames ? 100.0 * is.extrapolated / frames : 0.0, is.offset_ms, g.max_arrival_gap,
+                            g.max_stamp_gap);
+        g.max_arrival_gap = g.max_stamp_gap = 0;
+      }
       for (const auto& p : st.players)
-        if (p.id != st.my_id && (a.serve || p.id == net::kHostId)) std::printf("  rtt#%u %u ms", p.id, p.rtt_ms);
-      std::printf("\n");
+        if (p.id != st.my_id && (a.serve || p.id == net::kHostId)) line += std::format("  rtt#{} {} ms", p.id, p.rtt_ms);
+      line += '\n';
+      std::fwrite(line.data(), 1, line.size(), stdout);
+      last_report_cost = net::steady_ms() - now;
     }
   }
 

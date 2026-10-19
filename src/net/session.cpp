@@ -21,9 +21,15 @@ const char* reason_text(std::uint32_t r) {
   }
 }
 
-// A peer that stops answering (crash, killed process, cable pulled) is dropped after at
-// most this long, so it can't hold a session slot for ENet's default 30 s.
-void set_timeouts(ENetPeer* peer) { enet_peer_timeout(peer, 0, 3000, 8000); }
+void configure_peer(ENetPeer* peer) {
+  // A peer that stops answering (crash, killed process, cable pulled) is dropped after at
+  // most 8 s, so it can't hold a session slot for ENet's default 30 s.
+  enet_peer_timeout(peer, 0, 3000, 8000);
+  // ENet throttles unreliable packets when RTT fluctuates; on fast links tiny jitter reads
+  // as congestion and it silently drops 20-30% of our state packets (seen as ~0.5-2 s gaps).
+  // Our traffic is a few KB/s, so never back off: deceleration 0 keeps the throttle at max.
+  enet_peer_throttle_configure(peer, ENET_PEER_PACKET_THROTTLE_INTERVAL, ENET_PEER_PACKET_THROTTLE_ACCELERATION, 0);
+}
 
 void send_packet(ENetPeer* peer, std::uint8_t channel, std::span<const std::uint8_t> data, bool reliable) {
   ENetPacket* p = enet_packet_create(data.data(), data.size(), reliable ? ENET_PACKET_FLAG_RELIABLE : 0);
@@ -115,7 +121,7 @@ struct Session::Impl {
 
   // --- host side ---
   void host_on_connect(ENetEvent& ev) {
-    set_timeouts(ev.peer);
+    configure_peer(ev.peer);
     if (ev.data != kProtocolVersion) {
       enet_peer_disconnect(ev.peer, static_cast<std::uint32_t>(Reject::VersionMismatch));
       return;
@@ -263,7 +269,7 @@ struct Session::Impl {
             if (mode == Mode::Hosting) {
               host_on_connect(ev);
             } else {
-              set_timeouts(ev.peer);
+              configure_peer(ev.peer);
               send_packet(ev.peer, kChanControl, encode_hello(to_string(my_name)), true);
             }
             break;
@@ -326,7 +332,7 @@ Session::~Session() {
 }
 
 bool Session::host(std::uint16_t port, const std::string& name, const std::string& bind_address) {
-  leave();
+  impl_->stop();
   if (!g_enet_ok) {
     impl_->st.last_error = "ENet failed to initialise";
     return false;
@@ -360,7 +366,7 @@ bool Session::host(std::uint16_t port, const std::string& name, const std::strin
 }
 
 bool Session::join(const std::string& address, std::uint16_t port, const std::string& name) {
-  leave();
+  impl_->stop();
   if (!g_enet_ok) {
     impl_->st.last_error = "ENet failed to initialise";
     return false;
@@ -395,9 +401,17 @@ bool Session::join(const std::string& address, std::uint16_t port, const std::st
 }
 
 void Session::leave() {
-  const bool was_active = impl_->host != nullptr;
+  // Announce only a deliberate leave from a live session. After a remote disconnect the
+  // mode is already Idle (that path raised its own event); host()/join() tear down via
+  // stop() directly and must not raise one either, or a client that re-joins on
+  // "disconnected" would loop forever on its own teardown.
+  Mode mode;
+  {
+    std::lock_guard lock(impl_->m);
+    mode = impl_->st.mode;
+  }
   impl_->stop();
-  if (was_active) impl_->event(SessionEvent::Kind::Disconnected, 0, "left the session");
+  if (mode != Mode::Idle) impl_->event(SessionEvent::Kind::Disconnected, 0, "left the session");
 }
 
 void Session::send_state(const sync::PlayerState& s) {
