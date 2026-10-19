@@ -12,7 +12,9 @@ namespace ivc::overlay {
 namespace {
 bool g_visible = true;
 int g_toggle_key = VK_F8;
-bool g_key_was_down = false;
+// Starts "down" so a stale key state on the first poll can't toggle the overlay; the key must
+// be seen released once before it does anything.
+bool g_key_was_down = true;
 
 HWND g_window = nullptr;
 bool g_ready = false;
