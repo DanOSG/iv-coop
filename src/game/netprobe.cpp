@@ -106,7 +106,16 @@ bool chord(int vk, bool& was_down) {
   return edge;
 }
 
+bool g_hosted = false; // a host attempt succeeded in this process
+
 void start_attempt() {
+  // Hosting again while a session exists hangs the game thread (seen in run 2: the
+  // engine spins forever inside the call). The MP frontend never does that; neither do we.
+  const Snapshot now = take();
+  if (now.running || now.started || now.pending || attempt_active) {
+    log::warn("NetProbe: refusing to host: a session already exists or is pending ({})", describe(now));
+    return;
+  }
   const auto& a = g_cfg.host_args;
   log::warn("NetProbe: attempting native LAN host: NETWORK_HOST_GAME({}, {}, {}, {}, {}, {})", a[0], a[1], a[2], a[3],
             a[4], a[5]);
@@ -120,6 +129,10 @@ void start_attempt() {
 // The step the MP frontend takes after hosting; suspected to switch the game into
 // network mode (IS_NETWORK_SESSION / mode globals), possibly resetting the world.
 void start_session() {
+  if (!g_hosted || attempt_active) {
+    log::warn("NetProbe: refusing to start session: host first (Ctrl+Shift+F12) and wait for it to succeed");
+    return;
+  }
   log::warn("NetProbe: NETWORK_START_SESSION");
   log::info("NetProbe: before: {}", describe(take()));
   const int ok = invoke<int>(kNetworkStartSession);
@@ -142,6 +155,7 @@ void follow_attempt() {
     if (me && natives::DoesCharExist(me)) invoke(kGetNetworkIdFromPed, me, &net_id);
     log::info("NetProbe: {} settled after {} frames: succeeded={}, player network id {} | {}", a.what, a.frames,
               succeeded, net_id, describe(take()));
+    if (a.pending_hash == kNetworkHostGamePending && succeeded) g_hosted = true;
     attempt_active = false;
   } else if (a.frames > 60 * 120) {
     log::warn("NetProbe: {} still pending after ~2 min; giving up following it", a.what);

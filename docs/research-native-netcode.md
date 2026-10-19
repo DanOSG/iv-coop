@@ -186,6 +186,12 @@ Conclusions:
 - Unknown: whether objects get cloned in this state (player network id 0 suggests not yet). The MP frontend's next
   step is `NETWORK_START_SESSION`, which may perform the SP→MP mode switch. Run 2 tests that (Ctrl+Shift+F10).
 
+**Run 2 (2026-10-20): `NETWORK_HOST_GAME` again while the run-1 session was still up** (same process, not
+restarted). The log stops inside the call; the game went "not responding" with one core spinning and then exited.
+So **hosting twice hangs the game thread.** The MP frontend never does this. The probe now refuses to host when a
+session exists or is pending, and only allows `NETWORK_START_SESSION` after a successful host. `NETWORK_START_SESSION`
+itself is still untested.
+
 ## 8. Fallbacks if the native session is a dead end
 
 - Keep the M2b-M5 own-sync plan (current architecture).
