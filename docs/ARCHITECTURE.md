@@ -161,7 +161,15 @@ docs/
   second PC to verify: the launcher stub allows only one copy of the game per machine.
 - **M2b:** animated remote players: drive puppets with movement tasks (walk/run/sprint by speed) as an
   interim, then real player-slot peds with synthetic pad input (aiming, cover, vehicle entry for free).
-- **M3:** vehicles, including passengers in any vehicle and seat reservation.
+- **M3:** vehicles, including passengers in any vehicle and seat reservation. ✅ base, verified in-game with bots:
+  the owner (driver, else lowest-id player inside) sends `VehicleState`, and others drive a stand-in kinematically
+  (0.0 m error, 0 snaps). Remote players sit in the right car and seat, including as your passenger.
+  Follow-ups:
+  - **physics-follow:** a physical stand-in steered by forces toward the received pose, so it reacts to local
+    traffic and walls instead of passing through them with impact sounds.
+  - enter/exit animations instead of warps.
+  - deformation/damage sync.
+  - seat reservation for script-tasked seats (with M6).
 - **M4:** networked entities with **script owner vs sim owner** and migration. Testbed: entities spawned on the
   host while a client is across the map.
 - **M5:** combat, damage, deaths/respawns, wanted level rules.
