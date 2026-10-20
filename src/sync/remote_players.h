@@ -49,6 +49,9 @@ struct Status {
   std::vector<RemoteStatus> remotes;
   std::vector<sync::RemoteVehicleStatus> vehicles;
   std::vector<sync::EntityStatus> entities;
+  bool recording = false;
+  std::uint32_t recording_ms = 0;
+  unsigned story_messages = 0;
 };
 
 void configure(const Settings& s);

@@ -78,6 +78,7 @@ std::optional<PendingSpawn> g_pending_spawn;
 bool g_spawn_ped_down = true, g_spawn_car_down = true, g_delete_down = true;
 
 bool g_record_down = true;
+std::uint32_t g_record_started_ms = 0;
 
 void handle_entity_keys(bool hosting) {
   if (!hosting) return;
@@ -97,7 +98,7 @@ void handle_entity_keys(bool hosting) {
       for (wchar_t ch : d) path.push_back(static_cast<char>(ch));
       path += std::format("iv-coop-{:02}{:02}{:02}.ivcrec", t.wHour, t.wMinute, t.wSecond);
       if (session().start_recording(path))
-        log::info("Recording session to {}", path);
+        log::info("Recording session to {}", path), g_record_started_ms = net::steady_ms();
       else
         log::error("Could not open recording {}", path);
     }
@@ -366,6 +367,9 @@ void tick() {
   g_status.remotes = std::move(remotes);
   g_status.vehicles = vehicles;
   g_status.entities = entities;
+  g_status.recording = net.recording();
+  g_status.recording_ms = g_status.recording ? now - g_record_started_ms : 0;
+  g_status.story_messages = story::status().messages;
 }
 
 Status status() {

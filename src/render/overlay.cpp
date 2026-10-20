@@ -88,6 +88,9 @@ void draw_status() {
     ImGui::Separator();
     const coop::Status c = coop::status();
     const auto& s = c.session;
+    if (c.recording)
+      ImGui::TextColored(ImVec4(1, 0.25f, 0.25f, 1), "(*) REC  %u:%02u   story messages sent: %u   [Ctrl+Shift+R stop]",
+                         c.recording_ms / 60000, (c.recording_ms / 1000) % 60, c.story_messages);
     if (s.mode == net::Mode::Idle) {
       ImGui::TextUnformatted("session: idle   [F10 host | F11 join]");
       if (!s.last_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "last: %s", s.last_error.c_str());
