@@ -307,6 +307,22 @@ void EntitySync::tick(std::uint32_t now_ms, std::uint8_t my_id, bool hosting, co
     evaluate_ownership(players, my_id, net);
   }
 
+  // Host: a pinned (script-created) entity whose handle vanished was removed by the game or
+  // its script without a release we saw. Respawning it would create a duplicate the script
+  // doesn't know about, so remove it from the network instead.
+  if (hosting) {
+    for (auto it = ents_.begin(); it != ents_.end();) {
+      Entity& e = it->second;
+      if (e.pinned && e.handle && !exists(e.type, e.handle)) {
+        log::info("Entity {}: host's script entity is gone; removing it everywhere", it->first);
+        net.send_game(encode_delete(it->first), true);
+        it = ents_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
   const std::uint32_t interval = 1000 / std::max<std::uint32_t>(send_hz, 1);
   for (auto& [id, e] : ents_) {
     if (!ensure_spawned(e, my_id)) continue;
