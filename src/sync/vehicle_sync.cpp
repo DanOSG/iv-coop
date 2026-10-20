@@ -1,5 +1,6 @@
 #include "sync/vehicle_sync.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <numbers>
@@ -136,17 +137,21 @@ void VehicleSync::drive_kinematic(Remote& r, const VehicleState& t) {
 // position) through APPLY_FORCE_TO_CAR with mass scaling. Which force type is an impulse
 // isn't known statically, so the controller measures how much velocity change it actually
 // got per m/s requested (horizontal only, gravity-free) and scales its requests by that.
-void VehicleSync::drive_physics(Remote& r, const VehicleState& t) {
-  constexpr float kPull = 2.0f;        // 1/s: position error -> corrective velocity
-  constexpr float kMaxPull = 8.0f;     // m/s cap on the corrective part
-  constexpr float kMaxDvPerFrame = 3.0f;
-  constexpr float kRotBlend = 0.25f;   // fraction of the orientation error closed per frame
+void VehicleSync::drive_physics(Remote& r, const VehicleState& t, float dt) {
+  constexpr float kPull = 2.0f;      // 1/s: position error -> corrective velocity
+  constexpr float kMaxPull = 8.0f;   // m/s cap on the corrective part
+  // Authority: a car-like 2 g. Enough to hold a fast circle, but weak enough that walls
+  // and other cars win the contact, so the stand-in stops/deflects instead of being
+  // bulldozed through (it then snaps once it's kSnapDist behind).
+  constexpr float kMaxAccel = 20.0f; // m/s^2
+  constexpr float kSnapDz = 4.0f;
+  constexpr float kRotBlend = 0.15f; // fraction of the orientation error closed per frame
 
-  if (r.error_m > kSnapDist) {
+  const n::Vector3 cur = n::GetCarCoordinates(r.handle);
+  if (r.error_m > kSnapDist || std::fabs(t.z - cur.z) > kSnapDz) {
     snap(r, t);
     return;
   }
-  const n::Vector3 cur = n::GetCarCoordinates(r.handle);
   const n::Vector3 vel = n::GetCarSpeedVector(r.handle);
 
   // Learn the gain from last frame's request (horizontal, only when the request was big
@@ -154,21 +159,23 @@ void VehicleSync::drive_physics(Remote& r, const VehicleState& t) {
   if (r.have_last) {
     const float rx = r.last_request.x, ry = r.last_request.y;
     const float req2 = rx * rx + ry * ry;
-    if (req2 > 0.25f) {
+    if (req2 > 0.01f) { // requests are now per-frame sized (<= 2 g * dt), so a lower floor
       const float got = ((vel.x - r.last_vel.x) * rx + (vel.y - r.last_vel.y) * ry) / req2;
       if (got > 0.001f && got < 3.0f) r.gain += (got - r.gain) * 0.1f;
     }
   }
 
-  float ex = t.x - cur.x, ey = t.y - cur.y, ez = t.z - cur.z;
-  const float pull = std::hypot(ex, ey, ez) * kPull;
+  // Horizontal only: gravity and suspension keep the car on the road; height mismatches
+  // beyond kSnapDz are fixed by snapping.
+  const float ex = t.x - cur.x, ey = t.y - cur.y;
+  const float pull = std::hypot(ex, ey) * kPull;
   const float pull_scale = pull > kMaxPull ? kMaxPull / pull : 1.0f;
   const float dvx = t.vx + ex * kPull * pull_scale - vel.x;
   const float dvy = t.vy + ey * kPull * pull_scale - vel.y;
-  const float dvz = t.vz + ez * kPull * pull_scale - vel.z;
-  const float dv = std::hypot(dvx, dvy, dvz);
-  const float dv_scale = dv > kMaxDvPerFrame ? kMaxDvPerFrame / dv : 1.0f;
-  const n::Vector3 want{dvx * dv_scale, dvy * dv_scale, dvz * dv_scale};
+  const float dv = std::hypot(dvx, dvy);
+  const float max_dv = kMaxAccel * dt;
+  const float dv_scale = dv > max_dv ? max_dv / dv : 1.0f;
+  const n::Vector3 want{dvx * dv_scale, dvy * dv_scale, 0.0f};
 
   const float g = std::max(r.gain, 0.005f);
   n::ApplyForceToCar(r.handle, force_type, {want.x / g, want.y / g, want.z / g});
@@ -186,11 +193,13 @@ void VehicleSync::drive_physics(Remote& r, const VehicleState& t) {
   if (len > 1e-6f) n::SetVehicleQuaternion(r.handle, {o.x / len, o.y / len, o.z / len, o.w / len});
 }
 
-void VehicleSync::drive(Remote& r, const VehicleState& t) {
+void VehicleSync::drive(Remote& r, const VehicleState& t, std::uint32_t now_ms) {
   const n::Vector3 cur = n::GetCarCoordinates(r.handle);
-  r.error_m = std::hypot(t.x - cur.x, t.y - cur.y, t.z - cur.z);
+  r.error_m = std::hypot(t.x - cur.x, t.y - cur.y);
+  const float dt = r.last_drive_ms ? std::clamp((now_ms - r.last_drive_ms) / 1000.0f, 0.004f, 0.05f) : 1.0f / 60;
+  r.last_drive_ms = now_ms;
   if (physics_follow)
-    drive_physics(r, t);
+    drive_physics(r, t, dt);
   else
     drive_kinematic(r, t);
 
@@ -245,7 +254,7 @@ void VehicleSync::update_remote(std::uint32_t now_ms, n::Ped me) {
           }
         }
       }
-      if (r.handle) drive(r, *t);
+      if (r.handle) drive(r, *t, now_ms);
     }
     ++it;
   }

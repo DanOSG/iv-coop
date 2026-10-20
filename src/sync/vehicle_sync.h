@@ -75,12 +75,13 @@ class VehicleSync {
     natives::Vector3 last_request{}; // velocity change we asked for last frame (world, m/s)
     bool have_last = false;
     float gain = 1.0f;
+    std::uint32_t last_drive_ms = 0;
   };
 
   std::uint32_t local_id_for(natives::Vehicle v, std::uint8_t my_id);
-  void drive(Remote& r, const VehicleState& t);
+  void drive(Remote& r, const VehicleState& t, std::uint32_t now_ms);
   void drive_kinematic(Remote& r, const VehicleState& t);
-  void drive_physics(Remote& r, const VehicleState& t);
+  void drive_physics(Remote& r, const VehicleState& t, float dt);
   void snap(Remote& r, const VehicleState& t);
   void despawn(Remote& r, natives::Ped me);
 

@@ -212,7 +212,8 @@ int main(int argc, char** argv) {
       sync::VehicleState v;
       v.vehicle_id = s.vehicle_id;
       v.model = model_hash(a.drive);
-      v.x = s.x, v.y = s.y, v.z = s.z;
+      // The host's z is their ped's centre, ~1 m above the road; put the car on the road.
+      v.x = s.x, v.y = s.y, v.z = s.z - 1.0f;
       const float hr = s.heading * kPi / 180.0f; // yaw about +Z
       v.qx = 0, v.qy = 0, v.qz = std::sin(hr / 2), v.qw = std::cos(hr / 2);
       v.vx = s.vx, v.vy = s.vy, v.vz = 0;
