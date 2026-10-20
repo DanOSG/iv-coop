@@ -189,8 +189,26 @@ void tick() {
     if (owned) net.send_vehicle(*owned);
   }
 
-  for (const auto& u : net.drain_states()) remote(u.id).interp.push(u.state, u.arrival_ms);
-  for (const auto& u : net.drain_vehicles()) g_vehicles.push_remote(u);
+  // Only players currently in the session count. Packets from a player who just left can
+  // still be queued behind their "left" event; accepting them would resurrect a frozen
+  // ghost of that player (and keep entities it owned from being reassigned).
+  const auto in_session = [&ss](std::uint8_t id) {
+    for (const auto& p : ss.players)
+      if (p.id == id) return true;
+    return false;
+  };
+  for (auto it = g_remotes.begin(); it != g_remotes.end();) {
+    if (!in_session(it->first)) {
+      it->second.puppet.despawn();
+      it = g_remotes.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  for (const auto& u : net.drain_states())
+    if (in_session(u.id)) remote(u.id).interp.push(u.state, u.arrival_ms);
+  for (const auto& u : net.drain_vehicles())
+    if (in_session(u.id)) g_vehicles.push_remote(u);
   g_vehicles.update_remote(now, me); // stand-in cars first, so puppets can be seated in them
 
   // Everyone's position, for entity sim-ownership decisions (host).
@@ -229,7 +247,8 @@ void tick() {
   if (active) {
     g_was_host = ss.mode == net::Mode::Hosting;
     process_pending_spawn(me);
-    for (const auto& m : net.drain_game()) g_entities.on_message(m, ss.my_id);
+    for (const auto& m : net.drain_game())
+      if (in_session(m.from)) g_entities.on_message(m, ss.my_id);
     g_entities.tick(now, ss.my_id, g_was_host, positions, net);
   }
   const auto entities = g_entities.status();
