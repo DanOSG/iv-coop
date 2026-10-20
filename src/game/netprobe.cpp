@@ -207,10 +207,9 @@ void log_extra(const char* when) {
 // *local* player and crashes if one exists, so we call what it calls, with a slot of our
 // own and the "not local" flags (no camera/pad hookup).
 //   create(flags, slot, model_index, flag): CPlayerInfo + player ped into slot; returns ped
-//   remove(slot): deletes that slot's ped and CPlayerInfo
+//   (0x93EB70 frees a slot, but only safely at session teardown; see remove below)
 //   model_index(name)
 constexpr std::uintptr_t kFnCreatePlayerSlot = 0x0093E960;
-constexpr std::uintptr_t kFnRemovePlayerSlot = 0x0093EB70;
 constexpr std::uintptr_t kFnModelIndex = 0x009DC680;
 //   set_pop_type(ped this, type): CREATE_PLAYER passes 2 right after creating
 //   place(ped, pos*): set position, add to the world (0x9495D0), finish setup
@@ -221,9 +220,11 @@ constexpr std::uintptr_t kFnPlacePlayerPed = 0x0093E380;
 //   local_pad(): the local player's controller.
 // The per-frame player-control code uses the pad unchecked (online, remote players are
 // network clones and never run it), so our slot-1 ped crashed one frame after spawning.
-// We hand it the local pad instead; SET_PLAYER_CONTROL(off) makes it ignore the input.
+// Handing it the local pad made it copy our moves (SET_PLAYER_CONTROL(off) on its slot
+// doesn't stop the idle on-foot task reading it), so it gets the second pad: the one
+// local_pad() (0x8F69E0) falls back to, which nobody presses in single player.
 constexpr std::uintptr_t kFnGetPad = 0x00A2B350;
-constexpr std::uintptr_t kFnLocalPad = 0x008F69E0;
+constexpr std::uintptr_t kIdlePad = 0x01185C08;
 constexpr std::uintptr_t kPlayerInfos = 0x011A8808; // CPlayerInfo* [32]
 constexpr std::uint32_t kExtraSlot = 1;
 
@@ -236,7 +237,7 @@ using GetPadFn = void*(__thiscall*)(void*);
 GetPadFn g_get_pad_orig = nullptr;
 
 void* __fastcall get_pad_detour(void* ped, void* /*edx*/) {
-  if (ped && ped == g_extra_ped_obj) return at_static<void*(__cdecl*)()>(kFnLocalPad)();
+  if (ped && ped == g_extra_ped_obj) return at_static<void*>(kIdlePad);
   return g_get_pad_orig(ped);
 }
 
@@ -278,23 +279,28 @@ bool guarded_place(void* ped, natives::Vector3 at) {
   }
 }
 
-bool guarded_remove(std::uint32_t slot) {
-  __try {
-    at_static<void(__cdecl*)(std::uint32_t)>(kFnRemovePlayerSlot)(slot);
-    return true;
-  } __except (EXCEPTION_EXECUTE_HANDLER) {
-    return false;
-  }
-}
+bool g_parked = false;
 
 void create_extra_player() {
   using namespace natives;
-  if (g_extra >= 0 || slot_info(kExtraSlot)) {
-    log::warn("ExtraPlayer: slot {} is already in use (remove it with Ctrl+Shift+F4)", kExtraSlot);
-    return;
-  }
   const Ped me = GetPlayerChar(GetPlayerId());
   const Vector3 at = GetOffsetFromCharInWorldCoords(me, {2.0f, 2.0f, 0.0f});
+  if (g_extra >= 0 && g_parked && invoke<bool>(kPlayerHasChar, g_extra)) {
+    const Ped h = GetPlayerChar(g_extra);
+    FreezeCharPosition(h, false);
+    SetCharCollision(h, true);
+    invoke(0x689D0F5F, h, at.x, at.y, at.z); // SET_CHAR_COORDINATES
+    SetCharHeading(h, GetCharHeading(me));
+    SetCharVisible(h, true);
+    g_parked = false;
+    g_extra_frames = 0;
+    log_extra("unparked");
+    return;
+  }
+  if (g_extra >= 0 || slot_info(kExtraSlot)) {
+    log::warn("ExtraPlayer: slot {} is already in use", kExtraSlot);
+    return;
+  }
   if (!hook_get_pad()) return;
   const std::int32_t model = at_static<std::int32_t(__cdecl*)(const char*)>(kFnModelIndex)("player");
   log::warn("ExtraPlayer: creating slot {} (model index {}) at ({:.1f},{:.1f},{:.1f})", kExtraSlot, model, at.x, at.y,
@@ -327,16 +333,24 @@ void create_extra_player() {
   log_extra("configured");
 }
 
+// Freeing a live player slot (0x93EB70) mid-game crashed a frame later on a queued job
+// that still referenced the freed ped; the game only frees slots at session teardown.
+// So slots are kept for the whole run: "remove" parks the ped hidden and frozen far
+// below the map, and the next create reuses it.
 void remove_extra_player() {
-  if (!slot_info(kExtraSlot)) {
-    log::warn("ExtraPlayer: slot {} is empty", kExtraSlot);
+  using namespace natives;
+  if (g_extra < 0 || g_parked || !invoke<bool>(kPlayerHasChar, g_extra)) {
+    log::warn("ExtraPlayer: nothing to park");
     return;
   }
-  log::warn("ExtraPlayer: removing slot {}", kExtraSlot);
-  const bool ok = guarded_remove(kExtraSlot);
-  log::info("ExtraPlayer: remove {}; slot info now {}", ok ? "returned" : "FAULTED", slot_info(kExtraSlot));
-  g_extra = -1;
-  g_extra_ped_obj = nullptr;
+  const Ped h = GetPlayerChar(g_extra);
+  ClearCharTasks(h);
+  SetCharVisible(h, false);
+  SetCharCollision(h, false);
+  invoke(0x689D0F5F, h, 0.0f, 0.0f, -100.0f); // SET_CHAR_COORDINATES
+  FreezeCharPosition(h, true);
+  g_parked = true;
+  log_extra("parked");
 }
 
 void walk_extra_player() {

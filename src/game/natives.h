@@ -88,6 +88,7 @@ inline void SetBlockingOfNonTemporaryEvents(Ped ped, bool b) { invoke(0x76247429
 inline void SetCharInvincible(Ped ped, bool b) { invoke(0x2A58578B, ped, b); }
 inline void FreezeCharPosition(Ped ped, bool b) { invoke(0x20266A86, ped, b); }
 inline void SetCharCollision(Ped ped, bool b) { invoke(0x2A7413EB, ped, b); }
+inline void SetCharVisible(Ped ped, bool b) { invoke(0x04CF0105, ped, b); }
 inline Blip AddBlipForChar(Ped ped) { Blip b = 0; invoke(0x19A64C5D, ped, &b); return b; }
 inline void RemoveBlip(Blip b) { invoke(0x7BBF3625, b); }
 inline Blip AddBlipForCar(std::int32_t car) { Blip b = 0; invoke(0x6D21564D, car, &b); return b; }
