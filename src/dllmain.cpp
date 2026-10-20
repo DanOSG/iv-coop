@@ -8,6 +8,7 @@
 #include <filesystem>
 
 #include "core/config.h"
+#include "core/crash.h"
 #include "core/game_version.h"
 #include "core/instance.h"
 #include "core/log.h"
@@ -47,6 +48,7 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
   coop::configure(cfg.net);
   netprobe::configure(cfg.netprobe);
   if (cfg.story_log_calls) story::register_call_logging();
+  native_hooks::set_trace(cfg.story_trace_calls);
   script::on_tick([] {
     // Natives are registered by the time any script runs, so hook them on the first tick.
     static bool hooked = false;
@@ -75,6 +77,7 @@ void startup(HMODULE self) {
     log::info("Command line: {}", narrow);
   }
   instance::install_named_object_hooks(cfg.isolate_named_objects);
+  crash::install();
 
   const GameVersion ver = query_game_version();
   log::info("Host exe version {}", ver.str());

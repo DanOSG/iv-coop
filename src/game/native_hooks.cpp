@@ -28,11 +28,14 @@ std::array<Slot, kMaxHooks> g_slots;
 int g_count = 0;
 bool g_installed = false;
 bool g_in_callback = false; // natives called from a callback are ours: don't report them
+bool g_trace = false;       // log each hooked call *before* it runs (crash bisection)
 
 // One detour per slot, so each knows which native it is.
 template <int N>
 void __cdecl detour(natives::CallContext* ctx) {
   Slot& s = g_slots[N];
+  if (g_trace && !g_in_callback && !script::in_own_tick())
+    log::debug("[trace] -> {} from {}", s.name, script::current_script_name());
   s.orig(ctx);
   if (g_in_callback || script::in_own_tick()) return;
   g_in_callback = true;
@@ -54,6 +57,8 @@ constexpr std::array<Handler, sizeof...(I)> make_detours(std::index_sequence<I..
 constexpr auto kDetours = make_detours(std::make_index_sequence<kMaxHooks>{});
 
 } // namespace
+
+void set_trace(bool on) { g_trace = on; }
 
 void on(std::uint32_t hash, const char* name, Callback cb) {
   for (int i = 0; i < g_count; ++i) {

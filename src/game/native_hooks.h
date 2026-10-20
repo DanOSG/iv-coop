@@ -42,5 +42,7 @@ using Callback = std::function<void(const Call&)>;
 void on(std::uint32_t hash, const char* name, Callback cb);
 // Game thread (natives must be registered by then; call from the first tick). Idempotent.
 bool install();
+// Log every hooked call before it runs (debug level; for finding a native that crashes).
+void set_trace(bool on);
 
 } // namespace ivc::native_hooks

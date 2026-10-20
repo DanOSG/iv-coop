@@ -101,6 +101,7 @@ Config load_config(const std::filesystem::path& ini) {
   if (n.send_hz == 0) n.send_hz = 1;
 
   c.story_log_calls = read_int(p, L"Story", L"LogCalls", c.story_log_calls) != 0;
+  c.story_trace_calls = read_int(p, L"Story", L"TraceCalls", c.story_trace_calls) != 0;
 
   auto& np = c.netprobe;
   np.enabled = read_int(p, L"NetProbe", L"Enabled", np.enabled) != 0;
