@@ -85,10 +85,9 @@ void register_call_logging() {
   on(0x60C80EC9, "ALTER_WANTED_LEVEL",
      [](const Call& c) { report(c, std::format("player {}, level {}", c.arg<int>(0), c.arg<int>(1))); });
   on(0x6C213305, "NEW_SCRIPTED_CONVERSATION", [](const Call& c) { report(c, ""); });
-  // Argument types undocumented: log raw words (dereferencing a guessed string could crash).
+  // Types partly undocumented; args 1-2 look like text pointers (validated reads are safe).
   on(0x75080482, "ADD_LINE_TO_CONVERSATION", [](const Call& c) {
-    report(c, std::format("0x{:08X}, 0x{:08X}, 0x{:08X}, 0x{:08X}, 0x{:08X}", c.arg<unsigned>(0), c.arg<unsigned>(1),
-                          c.arg<unsigned>(2), c.arg<unsigned>(3), c.arg<unsigned>(4)));
+    report(c, std::format("{}, {}, {}, {}, {}", c.arg<int>(0), str(c, 1), str(c, 2), c.arg<int>(3), c.arg<int>(4)));
   });
   on(0x288E50A3, "START_SCRIPT_CONVERSATION",
      [](const Call& c) { report(c, std::format("{}, {}", c.arg<int>(0), c.arg<int>(1))); });

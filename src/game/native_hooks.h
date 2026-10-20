@@ -7,6 +7,7 @@
 // code (our tick, or natives called from inside a callback) are not reported.
 
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <string>
 
@@ -19,10 +20,18 @@ struct Call {
   std::uint32_t hash;
   const char* name;
   std::string script; // calling script thread
+  // Arguments as the script passed them, copied *before* the native ran: the script VM
+  // writes a native's return value over its first argument slot, so ctx->args afterwards
+  // is not reliable for natives that return something.
+  const std::uint32_t* args;
+  int arg_count;
 
   template <class T>
   T arg(int i) const {
-    return *reinterpret_cast<const T*>(static_cast<const std::uint8_t*>(ctx->args) + 4 * i);
+    static_assert(sizeof(T) <= 4);
+    T v{};
+    if (i >= 0 && i < arg_count) std::memcpy(&v, &args[i], sizeof(T));
+    return v;
   }
   // Value written through a pointer argument (e.g. Blip* out).
   template <class T>

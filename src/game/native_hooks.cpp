@@ -4,7 +4,9 @@
 
 #include <MinHook.h>
 
+#include <algorithm>
 #include <array>
+#include <cstring>
 #include <format>
 #include <utility>
 #include <vector>
@@ -33,9 +35,11 @@ bool g_installed = false;
 bool g_in_callback = false; // natives called from a callback are ours: don't report them
 bool g_trace = false;       // log each hooked call *before* it runs (crash bisection)
 
+constexpr int kMaxArgs = 16;
+
 // Runs a slot's callbacks (C++ objects live here, so it can't hold the SEH guard itself).
-__declspec(noinline) void run_callbacks(Slot& s, natives::CallContext* ctx) {
-  const Call call{ctx, s.hash, s.name, script::current_script_name()};
+__declspec(noinline) void run_callbacks(Slot& s, natives::CallContext* ctx, const std::uint32_t* args, int argc) {
+  const Call call{ctx, s.hash, s.name, script::current_script_name(), args, argc};
   for (const auto& cb : s.callbacks) {
     try {
       cb(call);
@@ -49,9 +53,9 @@ __declspec(noinline) void run_callbacks(Slot& s, natives::CallContext* ctx) {
 // an "argument" isn't what we think) must never take the game down: catch the hardware
 // exception here, remember which native did it, and carry on.
 bool g_faulted[kMaxHooks] = {};
-void guarded_callbacks(int n, natives::CallContext* ctx) {
+void guarded_callbacks(int n, natives::CallContext* ctx, const std::uint32_t* args, int argc) {
   __try {
-    run_callbacks(g_slots[n], ctx);
+    run_callbacks(g_slots[n], ctx, args, argc);
   } __except (EXCEPTION_EXECUTE_HANDLER) {
     g_faulted[n] = true;
   }
@@ -61,12 +65,16 @@ void guarded_callbacks(int n, natives::CallContext* ctx) {
 template <int N>
 void __cdecl detour(natives::CallContext* ctx) {
   Slot& s = g_slots[N];
-  if (g_trace && !g_in_callback && !script::in_own_tick())
-    log::debug("[trace] -> {} from {}", s.name, script::current_script_name());
+  const bool report = !g_in_callback && !script::in_own_tick();
+  if (g_trace && report) log::debug("[trace] -> {} from {}", s.name, script::current_script_name());
+  // Snapshot the arguments before the native overwrites slot 0 with its result.
+  std::uint32_t args[kMaxArgs];
+  const int argc = report ? std::clamp(ctx->arg_count, 0, kMaxArgs) : 0;
+  if (argc) std::memcpy(args, ctx->args, static_cast<std::size_t>(argc) * 4);
   s.orig(ctx);
-  if (g_in_callback || script::in_own_tick()) return;
+  if (!report) return;
   g_in_callback = true;
-  guarded_callbacks(N, ctx);
+  guarded_callbacks(N, ctx, args, argc);
   g_in_callback = false;
   if (g_faulted[N]) {
     g_faulted[N] = false;
