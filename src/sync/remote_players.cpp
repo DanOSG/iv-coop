@@ -64,6 +64,7 @@ struct HiddenBlip {
 };
 std::vector<HiddenBlip> g_hidden_blips;
 constexpr std::uint32_t kBlipSprites = 128; // sprite ids to scan; IV uses fewer
+constexpr std::uint32_t kSpritePlayer = 6, kSpriteNorth = 7, kSpriteWaypoint = 8;
 
 void hide_own_blips(n::Ped me) {
   g_hidden_blips.clear();
@@ -74,7 +75,9 @@ void hide_own_blips(n::Ped me) {
       const std::uint32_t type = n::GetBlipInfoIdType(b);
       const n::Ped ped = n::GetBlipInfoIdPedIndex(b);
       log::debug("Client mode: own blip {} sprite {} type {} display {} ped {}", b, sprite, type, display, ped);
-      if (ped == me) continue; // the radar's centre arrow is our own ped's blip
+      // Radar furniture and our own things stay: the player arrow (sprite 6), the north
+      // marker (7) and our waypoint (8). The arrow is a coord blip, not one on our ped.
+      if (ped == me || sprite == kSpritePlayer || sprite == kSpriteNorth || sprite == kSpriteWaypoint) continue;
       g_hidden_blips.push_back({b, display});
     }
   }
