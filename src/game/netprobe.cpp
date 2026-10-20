@@ -221,7 +221,11 @@ void* slot_info(std::uint32_t slot) { return at_static<void**>(kPlayerInfos)[slo
 
 void* guarded_create(std::uint32_t slot, std::int32_t model) {
   using Create = void*(__cdecl*)(const std::uint8_t*, std::uint32_t, std::int32_t, std::uint8_t);
-  const std::uint8_t flags[2] = {1, 0}; // not the local player
+  // Copied into the ped (+0x218/+0x219). {0,1} is what CREATE_PLAYER passes and makes the
+  // slot the local one. {1,0} crashed: with +0x219 clear the ctor runs an init step that
+  // needs +0x22c, which the factory only sets afterwards. {1,1} skips that step and the
+  // local-player/camera hookup.
+  const std::uint8_t flags[2] = {1, 1};
   __try {
     return at_static<Create>(kFnCreatePlayerSlot)(flags, slot, model, 0);
   } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -251,7 +255,9 @@ void create_extra_player() {
             at.z);
   void* ped = guarded_create(kExtraSlot, model);
   if (ped == reinterpret_cast<void*>(-1)) {
-    log::error("ExtraPlayer: the engine faulted creating the slot; slot info now {}", slot_info(kExtraSlot));
+    // Drop the half-built slot (leaking it) so the per-frame player update skips it.
+    log::error("ExtraPlayer: the engine faulted creating the slot; clearing slot info {}", slot_info(kExtraSlot));
+    at_static<void**>(kPlayerInfos)[kExtraSlot] = nullptr;
     return;
   }
   log::info("ExtraPlayer: created: ped object {}, slot info {}", ped, slot_info(kExtraSlot));
