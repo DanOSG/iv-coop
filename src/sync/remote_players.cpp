@@ -55,6 +55,37 @@ bool swap_player_model(std::uint32_t model) {
   return true;
 }
 
+// Our own story's blips (contacts, mission starts, ...) were placed by scripts that are now
+// frozen; a joiner should only see the host's. Hidden on entering client mode, restored
+// exactly on leaving.
+struct HiddenBlip {
+  n::Blip blip;
+  std::uint32_t display;
+};
+std::vector<HiddenBlip> g_hidden_blips;
+constexpr std::uint32_t kBlipSprites = 128; // sprite ids to scan; IV uses fewer
+
+void hide_own_blips() {
+  g_hidden_blips.clear();
+  for (std::uint32_t sprite = 0; sprite < kBlipSprites; ++sprite) {
+    for (n::Blip b = n::GetFirstBlipInfoId(sprite); n::DoesBlipExist(b); b = n::GetNextBlipInfoId(sprite)) {
+      const std::uint32_t display = n::GetBlipInfoIdDisplay(b);
+      if (display == 0) continue;
+      g_hidden_blips.push_back({b, display});
+    }
+  }
+  for (const HiddenBlip& h : g_hidden_blips) n::ChangeBlipDisplay(h.blip, 0);
+  log::info("Client mode: hid {} of our own blips", g_hidden_blips.size());
+}
+
+void restore_own_blips() {
+  std::size_t restored = 0;
+  for (const HiddenBlip& h : g_hidden_blips)
+    if (n::DoesBlipExist(h.blip)) n::ChangeBlipDisplay(h.blip, h.display), ++restored;
+  log::info("Client mode: restored {} of {} hidden blips", restored, g_hidden_blips.size());
+  g_hidden_blips.clear();
+}
+
 void update_client_mode(n::Ped me) {
   if (!me) return;
   if (g_want_client_mode && !g_client_mode) {
@@ -64,6 +95,7 @@ void update_client_mode(n::Ped me) {
       g_original_model = original;
       g_client_mode = true;
       if (g_cfg.freeze_story_scripts) script::set_suppress_predicate(story::is_story_script);
+      hide_own_blips();
       log::info("Client mode: playing as {} (was 0x{:08X}); story scripts {}", g_cfg.joiner_model, original,
                 g_cfg.freeze_story_scripts ? "frozen" : "left running");
     }
@@ -72,6 +104,7 @@ void update_client_mode(n::Ped me) {
     if (swap_player_model(g_original_model)) {
       g_restore_pending = false;
       g_client_mode = false;
+      restore_own_blips();
       log::info("Client mode ended: back to model 0x{:08X}", g_original_model);
     }
   }

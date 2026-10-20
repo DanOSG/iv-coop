@@ -93,6 +93,10 @@ inline Blip AddBlipForChar(Ped ped) { Blip b = 0; invoke(0x19A64C5D, ped, &b); r
 inline void RemoveBlip(Blip b) { invoke(0x7BBF3625, b); }
 inline Blip AddBlipForCar(std::int32_t car) { Blip b = 0; invoke(0x6D21564D, car, &b); return b; }
 inline Blip AddBlipForCoord(Vector3 p) { Blip b = 0; invoke(0x3E7D3074, p.x, p.y, p.z, &b); return b; }
+inline Blip GetFirstBlipInfoId(std::uint32_t sprite) { return invoke<Blip>(0x3BD729E9, sprite); }
+inline Blip GetNextBlipInfoId(std::uint32_t sprite) { return invoke<Blip>(0x154932F0, sprite); }
+inline std::uint32_t GetBlipInfoIdDisplay(Blip b) { return invoke<std::uint32_t>(0x1B731C3F, b); }
+inline bool DoesBlipExist(Blip b) { return invoke<bool>(0x590A6FF4, b); }
 inline Blip AddBlipForContact(Vector3 p) { Blip b = 0; invoke(0x7C671162, p.x, p.y, p.z, &b); return b; }
 inline void ChangeBlipColour(Blip b, std::int32_t c) { invoke(0x1D8800E3, b, c); }
 inline void ChangeBlipSprite(Blip b, std::uint32_t s) { invoke(0x6A90123D, b, s); }
