@@ -210,6 +210,11 @@ void log_extra(const char* when) {
 constexpr std::uintptr_t kFnCreatePlayerSlot = 0x0093E960;
 constexpr std::uintptr_t kFnRemovePlayerSlot = 0x0093EB70;
 constexpr std::uintptr_t kFnModelIndex = 0x009DC680;
+//   set_pop_type(ped this, type): CREATE_PLAYER passes 2 right after creating
+//   place(ped, pos*): set position, add to the world (0x9495D0), finish setup
+// CREATE_PLAYER then gives the ped its default (player-controlled) task; we skip that.
+constexpr std::uintptr_t kFnSetPopType = 0x009F19C0;
+constexpr std::uintptr_t kFnPlacePlayerPed = 0x0093E380;
 constexpr std::uintptr_t kPlayerInfos = 0x011A8808; // CPlayerInfo* [32]
 constexpr std::uint32_t kExtraSlot = 1;
 
@@ -230,6 +235,16 @@ void* guarded_create(std::uint32_t slot, std::int32_t model) {
     return at_static<Create>(kFnCreatePlayerSlot)(flags, slot, model, 0);
   } __except (EXCEPTION_EXECUTE_HANDLER) {
     return reinterpret_cast<void*>(-1);
+  }
+}
+
+bool guarded_place(void* ped, natives::Vector3 at) {
+  __try {
+    at_static<void(__thiscall*)(void*, std::uint32_t)>(kFnSetPopType)(ped, 2);
+    at_static<bool(__cdecl*)(void*, natives::Vector3*)>(kFnPlacePlayerPed)(ped, &at);
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
   }
 }
 
@@ -262,6 +277,7 @@ void create_extra_player() {
   }
   log::info("ExtraPlayer: created: ped object {}, slot info {}", ped, slot_info(kExtraSlot));
   if (!ped) return;
+  log::info("ExtraPlayer: placing in the world: {}", guarded_place(ped, at) ? "ok" : "FAULTED");
   const Player p = invoke<Player>(kConvertIntToPlayerIndex, kExtraSlot);
   g_extra = p;
   g_extra_frames = 0;
