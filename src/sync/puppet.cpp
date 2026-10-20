@@ -22,6 +22,7 @@ constexpr float kLeadSeconds = 0.6f;    // aim this far ahead along the remote's
 constexpr float kRegoalDist = 0.75f;    // m the goal must move before we reissue the task
 constexpr std::uint32_t kReissueMs = 300;
 constexpr float kTurnThresholdDeg = 15.0f;
+constexpr std::uint32_t kPartnerBlipColour = 2;
 
 float angle_diff(float a, float b) { return std::fabs(std::fmod(a - b + 540.0f, 360.0f) - 180.0f); }
 
@@ -78,6 +79,9 @@ bool Puppet::ensure(const n::Vector3& at) {
     n::FreezeCharPosition(ped_, true);
   }
   blip_ = n::AddBlipForChar(ped_);
+  // Friendly green (IV: 1 red, 2 green, 3 blue, 5 yellow), not the default red that reads
+  // as an enemy and not blue/yellow, which missions use for targets and destinations.
+  if (blip_) n::ChangeBlipColour(blip_, kPartnerBlipColour);
   action_ = Action::None;
   phase_ = "spawned";
   log::info("Puppet spawned: ped {} model {} (0x{:08X}), {}", ped_, model_override_ ? "(peer's)" : model_name_.c_str(), model_,
