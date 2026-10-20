@@ -98,15 +98,19 @@ void scan_threads() {
   g_host_snapshot = g_host_name;
 }
 
+bool g_in_own_tick = false;
+
 void run_tick(game::scrThread* host) {
   game::scrThread** cur = game::g_addr.current_thread;
   game::scrThread* prev = *cur;
   *cur = host; // natives see the host script as the caller
+  g_in_own_tick = true;
   try {
     if (g_tick) g_tick();
   } catch (const std::exception& e) {
     log::error("Tick threw: {}", e.what());
   }
+  g_in_own_tick = false;
   *cur = prev;
 }
 
@@ -176,6 +180,13 @@ void suppress(const std::string& name, bool on) {
 std::vector<ThreadInfo> threads() {
   std::lock_guard lock(g_mutex);
   return g_snapshot;
+}
+
+bool in_own_tick() { return g_in_own_tick; }
+
+std::string current_script_name() {
+  const game::scrThread* t = game::g_addr.current_thread ? *game::g_addr.current_thread : nullptr;
+  return t ? name_of(t) : std::string();
 }
 
 std::string host_script() {

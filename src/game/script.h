@@ -30,6 +30,13 @@ void suppress(const std::string& name, bool on);
 
 // Snapshot of all script threads, refreshed every tick (safe to call from any thread).
 std::vector<ThreadInfo> threads();
+
+// Game thread: true while our own tick is running (natives called now are ours, not a
+// story script's).
+bool in_own_tick();
+// Game thread: name of the script whose context is active (the caller of a native), or
+// empty outside any script.
+std::string current_script_name();
 // Name of the current host script, or empty if none is running yet.
 std::string host_script();
 

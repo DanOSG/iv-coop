@@ -20,6 +20,7 @@ struct Config {
   ghost::Settings ghost;
   coop::Settings net;
   netprobe::Settings netprobe;
+  bool story_log_calls = true; // M6a diagnostics: log story natives scripts call
 };
 
 // Reads iv-coop.ini next to the plugin, writing defaults for any missing keys.
