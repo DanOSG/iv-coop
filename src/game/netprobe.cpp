@@ -5,6 +5,8 @@
 #include <format>
 #include <string>
 
+#include <MinHook.h>
+
 #include "core/log.h"
 #include "game/addresses.h"
 #include "game/natives.h"
@@ -215,11 +217,39 @@ constexpr std::uintptr_t kFnModelIndex = 0x009DC680;
 // CREATE_PLAYER then gives the ped its default (player-controlled) task; we skip that.
 constexpr std::uintptr_t kFnSetPopType = 0x009F19C0;
 constexpr std::uintptr_t kFnPlacePlayerPed = 0x0093E380;
+//   get_pad(ped this): a player ped's controller; null for remote (+0x218) players.
+//   local_pad(): the local player's controller.
+// The per-frame player-control code uses the pad unchecked (online, remote players are
+// network clones and never run it), so our slot-1 ped crashed one frame after spawning.
+// We hand it the local pad instead; SET_PLAYER_CONTROL(off) makes it ignore the input.
+constexpr std::uintptr_t kFnGetPad = 0x00A2B350;
+constexpr std::uintptr_t kFnLocalPad = 0x008F69E0;
 constexpr std::uintptr_t kPlayerInfos = 0x011A8808; // CPlayerInfo* [32]
 constexpr std::uint32_t kExtraSlot = 1;
 
 template <class T> T at_static(std::uintptr_t va) {
   return reinterpret_cast<T>(va - 0x400000 + reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr)));
+}
+
+void* g_extra_ped_obj = nullptr; // CPed* of the slot-1 ped
+using GetPadFn = void*(__thiscall*)(void*);
+GetPadFn g_get_pad_orig = nullptr;
+
+void* __fastcall get_pad_detour(void* ped, void* /*edx*/) {
+  if (ped && ped == g_extra_ped_obj) return at_static<void*(__cdecl*)()>(kFnLocalPad)();
+  return g_get_pad_orig(ped);
+}
+
+bool hook_get_pad() {
+  if (g_get_pad_orig) return true;
+  void* target = at_static<void*>(kFnGetPad);
+  if (MH_CreateHook(target, reinterpret_cast<void*>(&get_pad_detour), reinterpret_cast<void**>(&g_get_pad_orig)) !=
+          MH_OK ||
+      MH_EnableHook(target) != MH_OK) {
+    log::error("ExtraPlayer: could not hook the pad getter");
+    return false;
+  }
+  return true;
 }
 
 void* slot_info(std::uint32_t slot) { return at_static<void**>(kPlayerInfos)[slot]; }
@@ -265,6 +295,7 @@ void create_extra_player() {
   }
   const Ped me = GetPlayerChar(GetPlayerId());
   const Vector3 at = GetOffsetFromCharInWorldCoords(me, {2.0f, 2.0f, 0.0f});
+  if (!hook_get_pad()) return;
   const std::int32_t model = at_static<std::int32_t(__cdecl*)(const char*)>(kFnModelIndex)("player");
   log::warn("ExtraPlayer: creating slot {} (model index {}) at ({:.1f},{:.1f},{:.1f})", kExtraSlot, model, at.x, at.y,
             at.z);
@@ -277,6 +308,7 @@ void create_extra_player() {
   }
   log::info("ExtraPlayer: created: ped object {}, slot info {}", ped, slot_info(kExtraSlot));
   if (!ped) return;
+  g_extra_ped_obj = ped; // before it is in the world, so its first update gets a pad
   log::info("ExtraPlayer: placing in the world: {}", guarded_place(ped, at) ? "ok" : "FAULTED");
   const Player p = invoke<Player>(kConvertIntToPlayerIndex, kExtraSlot);
   g_extra = p;
@@ -304,6 +336,7 @@ void remove_extra_player() {
   const bool ok = guarded_remove(kExtraSlot);
   log::info("ExtraPlayer: remove {}; slot info now {}", ok ? "returned" : "FAULTED", slot_info(kExtraSlot));
   g_extra = -1;
+  g_extra_ped_obj = nullptr;
 }
 
 void walk_extra_player() {
