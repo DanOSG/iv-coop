@@ -59,6 +59,7 @@ struct Args {
   int leave_after = 0;      // leave the session N seconds after joining (0 = never)
   bool armed = false;       // hold a pistol (weapon type 7) and aim at the host
   int shoot_host = 0;       // fire at the host every N seconds (10 damage per hit); implies armed
+  int health = 200;         // starting (and respawn) health
 };
 
 // Model name -> hash, as the game's GET_HASH_KEY does (Jenkins one-at-a-time, lowercase).
@@ -98,6 +99,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--test-entity") a.test_entity = true;
     else if (k == "--leave-after") a.leave_after = std::atoi(next());
     else if (k == "--armed") a.armed = true;
+    else if (k == "--health") a.health = std::atoi(next());
     else if (k == "--shoot-host") a.shoot_host = std::atoi(next()), a.armed = true;
     else std::fprintf(stderr, "unknown argument %s\n", k.c_str());
   }
@@ -156,7 +158,7 @@ int main(int argc, char** argv) {
 
   // Combat (M5): our health, death/respawn, and shooting at the host.
   constexpr std::uint32_t kPistol = 7;
-  int health = 200;
+  int health = a.health;
   std::uint32_t dead_until = 0; // respawn time while dead
   std::uint16_t shots = 0;
   std::uint32_t last_shot_ms = 0;
@@ -327,7 +329,7 @@ int main(int argc, char** argv) {
 
     // Combat: dead for 5 s (standing still), then respawn at full health.
     if (dead_until && now >= dead_until) {
-      dead_until = 0, health = 200;
+      dead_until = 0, health = a.health;
       std::printf("[%s] respawned\n", a.name.c_str());
     }
     s.health = static_cast<std::uint16_t>(std::max(health, 0));

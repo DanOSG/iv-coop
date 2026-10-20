@@ -116,6 +116,14 @@ inline void RemoveAllCharWeapons(Ped ped) { invoke(0x6BA520F0, ped); }
 inline std::uint32_t GetAmmoInCharWeapon(Ped ped, std::uint32_t weapon) { std::uint32_t a = 0; invoke(0x23E140A9, ped, weapon, &a); return a; }
 inline void SetCharAmmo(Ped ped, std::uint32_t weapon, std::uint32_t ammo) { invoke(0x437D247E, ped, weapon, ammo); }
 inline void TaskAimGunAtCoord(Ped ped, Vector3 at, std::uint32_t duration_ms) { invoke(0x0AA202B0, ped, at.x, at.y, at.z, duration_ms); }
+// TASK_GO_TO_COORD_WHILE_AIMING. Layout read from its handler (0xBB9B40):
+// (ped, dest xyz, move state, float, float, entity, aim xyz, flag). The two floats are
+// presumably the arrival radius and slow-down distance (as in the other go-to tasks);
+// entity 0 = aim at the coordinates.
+inline void TaskGoToCoordWhileAiming(Ped ped, Vector3 dest, MoveState ms, Vector3 aim) {
+  invoke(0x2A2959DA, ped, dest.x, dest.y, dest.z, static_cast<std::uint32_t>(ms), 0.5f, 2.0f, 0, aim.x, aim.y, aim.z,
+         false);
+}
 inline void FirePedWeapon(Ped ped, Vector3 at) { invoke(0x25BB7D67, ped, at.x, at.y, at.z); }
 inline bool IsPlayerTargettingAnything(Player p) { return invoke<bool>(0x665F6BB7, p); }
 inline std::uint32_t GetCharArmour(Ped ped) { std::uint32_t a = 0; invoke(0x3C756E54, ped, &a); return a; }

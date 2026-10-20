@@ -71,6 +71,7 @@ class Puppet {
   natives::Vector3 last_goal_{};
   float last_heading_ = 0;
   std::uint32_t last_issue_ms_ = 0;
+  bool moving_aimed_ = false; // the current movement task also aims
   float error_m_ = 0;
   std::uint32_t snaps_ = 0;
   natives::Vehicle vehicle_ = 0;

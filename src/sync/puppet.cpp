@@ -140,9 +140,14 @@ void Puppet::drive_animated(const PlayerState& t, std::uint32_t now_ms) {
   // Aim ahead along their velocity, so the task never runs out before we refresh it.
   const n::Vector3 goal{t.x + t.vx * kLeadSeconds, t.y + t.vy * kLeadSeconds, t.z};
   const float goal_moved = std::hypot(goal.x - last_goal_.x, goal.y - last_goal_.y);
-  if (action_ != Action::Moving || ms != move_ || goal_moved > kRegoalDist || now_ms - last_issue_ms_ > kReissueMs) {
-    n::TaskGoStraightToCoord(ped_, goal, ms, 2000);
-    action_ = Action::Moving, move_ = ms, last_goal_ = goal, last_issue_ms_ = now_ms;
+  const bool aiming = (t.flags & PlayerState::kAiming) && t.weapon;
+  if (action_ != Action::Moving || ms != move_ || goal_moved > kRegoalDist || now_ms - last_issue_ms_ > kReissueMs ||
+      aiming != moving_aimed_) {
+    if (aiming) // gun up while moving: walk/run and aim at their aim point at the same time
+      n::TaskGoToCoordWhileAiming(ped_, goal, ms, {t.ax, t.ay, t.az});
+    else
+      n::TaskGoStraightToCoord(ped_, goal, ms, 2000);
+    action_ = Action::Moving, move_ = ms, last_goal_ = goal, last_issue_ms_ = now_ms, moving_aimed_ = aiming;
   }
 
   // Fine speed match: hurry if the true position is ahead of us along the direction of
@@ -235,8 +240,10 @@ void Puppet::apply_combat(const PlayerState& s, std::uint32_t now_ms) {
   }
   last_shots_ = s.shots, have_shots_ = true;
 
-  // Aiming (on foot): keep the aim task fresh while their gun is up.
-  if ((s.flags & PlayerState::kAiming) && weapon_ && !vehicle_ && now_ms - last_aim_ms_ > 250) {
+  // Aiming while standing (on foot): keep the aim task fresh while their gun is up. While
+  // moving, drive() already uses the move-while-aiming task.
+  const bool standing = std::hypot(s.vx, s.vy) < kStillSpeed;
+  if ((s.flags & PlayerState::kAiming) && weapon_ && !vehicle_ && standing && now_ms - last_aim_ms_ > 250) {
     n::TaskAimGunAtCoord(ped_, aim, 600);
     last_aim_ms_ = now_ms;
     action_ = Action::None; // movement re-issues its task when they move again
