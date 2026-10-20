@@ -140,13 +140,22 @@ void Puppet::drive_animated(const PlayerState& t, std::uint32_t now_ms) {
   // Aim ahead along their velocity, so the task never runs out before we refresh it.
   const n::Vector3 goal{t.x + t.vx * kLeadSeconds, t.y + t.vy * kLeadSeconds, t.z};
   const float goal_moved = std::hypot(goal.x - last_goal_.x, goal.y - last_goal_.y);
+  // Every reissue restarts the task (and, for the aiming one, its aim-up animation), so the
+  // aiming variant aims further ahead and is refreshed much less eagerly.
   const bool aiming = (t.flags & PlayerState::kAiming) && t.weapon;
-  if (action_ != Action::Moving || ms != move_ || goal_moved > kRegoalDist || now_ms - last_issue_ms_ > kReissueMs ||
-      aiming != moving_aimed_) {
-    if (aiming) // gun up while moving: walk/run and aim at their aim point at the same time
-      n::TaskGoToCoordWhileAiming(ped_, goal, ms, {t.ax, t.ay, t.az});
-    else
+  const n::Vector3 aim{t.ax, t.ay, t.az};
+  const float regoal = aiming ? 2.5f : kRegoalDist;
+  const std::uint32_t reissue = aiming ? 1200 : kReissueMs;
+  const float aim_moved = std::hypot(aim.x - last_aim_.x, aim.y - last_aim_.y, aim.z - last_aim_.z);
+  if (action_ != Action::Moving || ms != move_ || goal_moved > regoal || now_ms - last_issue_ms_ > reissue ||
+      aiming != moving_aimed_ || (aiming && aim_moved > 3.0f)) {
+    if (aiming) { // gun up while moving: walk/run and aim at their aim point at the same time
+      const n::Vector3 far_goal{t.x + t.vx * 1.5f, t.y + t.vy * 1.5f, t.z};
+      n::TaskGoToCoordWhileAiming(ped_, far_goal, ms, aim);
+      last_aim_ = aim;
+    } else {
       n::TaskGoStraightToCoord(ped_, goal, ms, 2000);
+    }
     action_ = Action::Moving, move_ = ms, last_goal_ = goal, last_issue_ms_ = now_ms, moving_aimed_ = aiming;
   }
 
@@ -228,10 +237,15 @@ void Puppet::apply_combat(const PlayerState& s, std::uint32_t now_ms) {
     weapon_ = s.weapon;
   }
 
+  // Our copy knocked over locally (e.g. hit by a car here): no shooting or aiming visuals
+  // until it's back up. Shots during that time are dropped, not saved up; the real damage
+  // still comes from the shooter's own Damage messages.
+  const bool down = n::IsPedRagdoll(ped_) || n::IsCharGettingUp(ped_);
+
   // Shots: fire the difference of their cumulative counter (wraps at 16 bits), so lost
   // packets never lose shots. Cap per frame so a long stall doesn't empty a magazine.
   const n::Vector3 aim{s.ax, s.ay, s.az};
-  if (have_shots_ && weapon_) {
+  if (have_shots_ && weapon_ && !down) {
     const std::uint16_t diff = static_cast<std::uint16_t>(s.shots - last_shots_);
     if (diff > 0 && diff < 200) {
       for (std::uint16_t i = 0; i < std::min<std::uint16_t>(diff, 5); ++i) n::FirePedWeapon(ped_, aim);
@@ -242,11 +256,15 @@ void Puppet::apply_combat(const PlayerState& s, std::uint32_t now_ms) {
 
   // Aiming while standing (on foot): keep the aim task fresh while their gun is up. While
   // moving, drive() already uses the move-while-aiming task.
+  // Long task, refreshed only when it's about to run out or the aim point really moved
+  // (reissuing restarts the aim-up animation, which reads as jitter).
   const bool standing = std::hypot(s.vx, s.vy) < kStillSpeed;
-  if ((s.flags & PlayerState::kAiming) && weapon_ && !vehicle_ && standing && now_ms - last_aim_ms_ > 250) {
-    n::TaskAimGunAtCoord(ped_, aim, 600);
-    last_aim_ms_ = now_ms;
-    action_ = Action::None; // movement re-issues its task when they move again
+  const float aim_moved = std::hypot(aim.x - last_aim_.x, aim.y - last_aim_.y, aim.z - last_aim_.z);
+  if ((s.flags & PlayerState::kAiming) && weapon_ && !vehicle_ && standing && !down &&
+      (action_ != Action::Aiming || now_ms - last_aim_ms_ > 2500 || aim_moved > 2.0f)) {
+    n::TaskAimGunAtCoord(ped_, aim, 3000);
+    last_aim_ms_ = now_ms, last_aim_ = aim;
+    action_ = Action::Aiming;
   }
 }
 

@@ -125,6 +125,8 @@ inline void TaskGoToCoordWhileAiming(Ped ped, Vector3 dest, MoveState ms, Vector
          false);
 }
 inline void FirePedWeapon(Ped ped, Vector3 at) { invoke(0x25BB7D67, ped, at.x, at.y, at.z); }
+inline bool IsPedRagdoll(Ped ped) { return invoke<bool>(0x3E251ADE, ped); }
+inline bool IsCharGettingUp(Ped ped) { return invoke<bool>(0x4A906237, ped); }
 inline bool IsPlayerTargettingAnything(Player p) { return invoke<bool>(0x665F6BB7, p); }
 inline std::uint32_t GetCharArmour(Ped ped) { std::uint32_t a = 0; invoke(0x3C756E54, ped, &a); return a; }
 inline void AddArmourToChar(Ped ped, std::uint32_t amount) { invoke(0x1C623537, ped, amount); }

@@ -53,7 +53,7 @@ class Puppet {
   std::uint32_t snaps() const { return snaps_; }
 
  private:
-  enum class Action { None, Standing, Moving };
+  enum class Action { None, Standing, Moving, Aiming };
 
   void drive_animated(const PlayerState& t, std::uint32_t now_ms);
   void snap_to(const PlayerState& t);
@@ -72,6 +72,7 @@ class Puppet {
   float last_heading_ = 0;
   std::uint32_t last_issue_ms_ = 0;
   bool moving_aimed_ = false; // the current movement task also aims
+  natives::Vector3 last_aim_{};
   float error_m_ = 0;
   std::uint32_t snaps_ = 0;
   natives::Vehicle vehicle_ = 0;
