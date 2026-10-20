@@ -163,6 +163,91 @@ void follow_attempt() {
   }
 }
 
+// --- Extra player experiment (independent of [NetProbe] Enabled) ------------------------
+// Can a second *player* (slot 1) exist in a story save? Only player peds may wear the
+// protagonist model, so this is how a remote host could appear as Niko. Logs what the
+// game does with it: does it copy our input, take the camera, get police attention.
+constexpr std::uint32_t kCreatePlayer = 0x335E3951;
+constexpr std::uint32_t kSetPlayerControl = 0x1A6203EA;
+constexpr std::uint32_t kSetPoliceIgnorePlayer = 0x619D51D3;
+constexpr std::uint32_t kSetEveryoneIgnorePlayer = 0x059901B9;
+constexpr std::uint32_t kSetPlayerInvincible = 0x7E9E02E1;
+constexpr std::uint32_t kConvertIntToPlayerIndex = 0x5996315E;
+constexpr std::uint32_t kPlayerHasChar = 0x22545844;
+constexpr std::uint32_t kStoreWantedLevel = 0x12AA6D71;
+
+bool g_f5_down = true, g_f6_down = true;
+natives::Player g_extra = -1;
+std::uint32_t g_extra_frames = 0; // frames since it was created (follow for ~20 s)
+
+void log_extra(const char* when) {
+  using namespace natives;
+  const Player me_id = GetPlayerId();
+  const Ped me = GetPlayerChar(me_id);
+  const Vector3 mp = GetCharCoordinates(me);
+  const bool has = invoke<bool>(kPlayerHasChar, g_extra);
+  Ped ped = 0;
+  if (has) ped = GetPlayerChar(g_extra);
+  int wanted = -1;
+  invoke(kStoreWantedLevel, g_extra, &wanted);
+  if (ped && DoesCharExist(ped)) {
+    const Vector3 p = GetCharCoordinates(ped);
+    log::info("ExtraPlayer {}: slot {} ped {} model 0x{:08X} at ({:.1f},{:.1f},{:.1f}) playing={} wanted={} | "
+              "local id {} ped {} at ({:.1f},{:.1f},{:.1f}) players={}",
+              when, g_extra, ped, GetCharModel(ped), p.x, p.y, p.z, IsPlayerPlaying(g_extra), wanted, me_id, me, mp.x,
+              mp.y, mp.z, invoke<std::uint32_t>(kGetNumberOfPlayers));
+  } else {
+    log::info("ExtraPlayer {}: slot {} has_char={} ped {} (missing) | local id {} ped {}", when, g_extra, has, ped,
+              me_id, me);
+  }
+}
+
+void create_extra_player() {
+  using namespace natives;
+  if (g_extra >= 0) {
+    log::warn("ExtraPlayer: already created (slot {}); restart the game to try again", g_extra);
+    return;
+  }
+  const Ped me = GetPlayerChar(GetPlayerId());
+  const Vector3 at = GetOffsetFromCharInWorldCoords(me, {2.0f, 2.0f, 0.0f});
+  log::warn("ExtraPlayer: CREATE_PLAYER(1) at ({:.1f},{:.1f},{:.1f})", at.x, at.y, at.z);
+  Player p = -1;
+  invoke(kCreatePlayer, 1u, at.x, at.y, at.z, &p);
+  log::info("ExtraPlayer: CREATE_PLAYER returned index {} (slot 1 index is {})", p,
+            invoke<Player>(kConvertIntToPlayerIndex, 1u));
+  if (p < 0) return;
+  g_extra = p;
+  g_extra_frames = 0;
+  log_extra("created");
+  // Keep it out of the single-player game: no input, no police, no hostility, no dying.
+  invoke(kSetPlayerControl, p, false);
+  invoke(kSetPoliceIgnorePlayer, p, true);
+  invoke(kSetEveryoneIgnorePlayer, p, true);
+  invoke(kSetPlayerInvincible, p, true);
+  log_extra("configured");
+}
+
+void walk_extra_player() {
+  using namespace natives;
+  if (g_extra < 0 || !invoke<bool>(kPlayerHasChar, g_extra)) {
+    log::warn("ExtraPlayer: none to move; create it first (Ctrl+Shift+F5)");
+    return;
+  }
+  const Ped ped = GetPlayerChar(g_extra);
+  const Vector3 to = GetOffsetFromCharInWorldCoords(GetPlayerChar(GetPlayerId()), {0.0f, 10.0f, 0.0f});
+  log::warn("ExtraPlayer: walking slot {} to ({:.1f},{:.1f},{:.1f})", g_extra, to.x, to.y, to.z);
+  TaskGoStraightToCoord(ped, to, MoveState::Walk);
+  g_extra_frames = 0; // follow it again
+}
+
+void tick_extra_player() {
+  if (chord(VK_F5, g_f5_down)) create_extra_player();
+  if (chord(VK_F6, g_f6_down)) walk_extra_player();
+  if (g_extra >= 0 && g_extra_frames < 60 * 20) {
+    if (++g_extra_frames % 60 == 0) log_extra("follow");
+  }
+}
+
 } // namespace
 
 void configure(const Settings& s) {
@@ -173,6 +258,7 @@ void configure(const Settings& s) {
 }
 
 void tick() {
+  tick_extra_player();
   if (!g_cfg.enabled) return;
 
   const Snapshot s = take();
