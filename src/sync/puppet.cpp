@@ -69,7 +69,7 @@ bool Puppet::ensure(const n::Vector3& at) {
   blip_ = n::AddBlipForChar(ped_);
   action_ = Action::None;
   phase_ = "spawned";
-  log::info("Puppet spawned: ped {} model {} (0x{:08X}), {}", ped_, model_name_, model_,
+  log::info("Puppet spawned: ped {} model {} (0x{:08X}), {}", ped_, model_override_ ? "(peer's)" : model_name_.c_str(), model_,
             animated_ ? "animated" : "frozen");
   return true;
 }
@@ -203,6 +203,15 @@ void Puppet::leave_vehicle(const n::Vector3& at) {
 }
 
 void Puppet::set_model(std::uint32_t model_hash) {
+  // The protagonist model ("player": Niko, and Johnny/Luis in the episodes) can only be worn
+  // by a player ped; CREATE_CHAR with it crashes in game code. Anything that is not a ped
+  // model in the image (a bad hash from a peer) would too. Both fall back to the default.
+  constexpr std::uint32_t kProtagonist = 0x6F0783F5; // joaat("player")
+  if (model_hash == kProtagonist || (model_hash && !(n::IsModelInCdimage(model_hash) && n::IsThisModelAPed(model_hash)))) {
+    if (model_hash != rejected_model_) log::info("Puppet model 0x{:08X} can't be a ped; using the default", model_hash);
+    rejected_model_ = model_hash;
+    model_hash = 0;
+  }
   if (model_hash == model_override_) return;
   model_override_ = model_hash;
   if (ped_) {

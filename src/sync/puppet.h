@@ -87,6 +87,7 @@ class Puppet {
 
   // Appearance state.
   std::uint32_t model_override_ = 0;
+  std::uint32_t rejected_model_ = 0; // last model set_model refused (logged once)
   std::uint8_t worn_drawable_[11] = {};
   std::uint8_t worn_texture_[11] = {};
   bool outfit_applied_ = false;

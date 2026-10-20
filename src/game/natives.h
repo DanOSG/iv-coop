@@ -72,6 +72,8 @@ inline std::uint32_t GetHashKey(const char* s) { return invoke<std::uint32_t>(0x
 
 inline void RequestModel(std::uint32_t model) { invoke(0x502B5185, model); }
 inline bool HasModelLoaded(std::uint32_t model) { return invoke<bool>(0x4E61480A, model); }
+inline bool IsModelInCdimage(std::uint32_t model) { return invoke<bool>(0x771C2838, model); }
+inline bool IsThisModelAPed(std::uint32_t model) { return invoke<bool>(0x0E2438E5, model); }
 inline void MarkModelAsNoLongerNeeded(std::uint32_t model) { invoke(0x00FA0E33, model); }
 
 inline Ped CreateChar(std::int32_t ped_type, std::uint32_t model, Vector3 at) {
