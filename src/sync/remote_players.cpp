@@ -90,6 +90,8 @@ void handle_hotkeys() {
 void configure(const Settings& s) {
   g_cfg = s;
   g_vehicles.interp_delay_ms = s.interp_delay_ms;
+  g_vehicles.physics_follow = s.physics_follow;
+  g_vehicles.force_type = s.vehicle_force_type;
 }
 
 void tick() {
@@ -190,8 +192,8 @@ void tick() {
   if (!vehicles.empty() && now - last_vlog >= 10000) {
     last_vlog = now;
     for (const auto& v : vehicles)
-      log::info("Remote vehicle 0x{:08X} (owner #{}): {} err {:.1f} m, {} snaps", v.vehicle_id, v.owner,
-                v.spawned ? "spawned" : "loading", v.error_m, v.snaps);
+      log::info("Remote vehicle 0x{:08X} (owner #{}): {} err {:.1f} m, {} snaps, gain {:.3f}", v.vehicle_id, v.owner,
+                v.spawned ? "spawned" : "loading", v.error_m, v.snaps, v.gain);
   }
 
   std::lock_guard lock(g_status_mutex);

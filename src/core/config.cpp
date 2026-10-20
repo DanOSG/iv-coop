@@ -93,6 +93,9 @@ Config load_config(const std::filesystem::path& ini) {
       static_cast<std::uint32_t>(read_int(p, L"Net", L"InterpDelayMs", static_cast<int>(n.interp_delay_ms)));
   n.puppet_model = read_str(p, L"Net", L"PuppetModel", n.puppet_model);
   n.animated_puppets = read_int(p, L"Net", L"AnimatedPuppets", n.animated_puppets) != 0;
+  n.physics_follow = read_int(p, L"Net", L"PhysicsFollow", n.physics_follow) != 0;
+  n.vehicle_force_type =
+      static_cast<std::uint32_t>(read_int(p, L"Net", L"VehicleForceType", static_cast<int>(n.vehicle_force_type)));
   n.host_key = read_int(p, L"Net", L"HostKey", n.host_key);
   n.join_key = read_int(p, L"Net", L"JoinKey", n.join_key);
   if (n.send_hz == 0) n.send_hz = 1;

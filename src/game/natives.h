@@ -136,6 +136,15 @@ inline bool IsCarSirenOn(Vehicle v) { return invoke<bool>(0x129A1569, v); }
 inline void SwitchCarSiren(Vehicle v, bool on) { invoke(0x7781290F, v, on); }
 inline void SetCarEngineOn(Vehicle v, bool on, bool instantly) { invoke(0x0CAA42D0, v, on, instantly); }
 inline void SetCarAsMissionCar(Vehicle v) { invoke(0x210A33B2, v); }
+// APPLY_FORCE_TO_CAR. Argument layout read from its implementation (0xBC8E40 in 1.2.0.59):
+// (car, type, force xyz, offset xyz, component, force_relative, offset_relative, scale_by_mass).
+// type 0/1 go to two physics-instance slots (+0x80/+0x8C), 2/3 to the fragment path.
+// scale_by_mass multiplies the force by the archetype's mass, so for an impulse type the
+// vector is a velocity change in m/s.
+inline void ApplyForceToCar(Vehicle v, std::uint32_t type, Vector3 f, Vector3 offset = {}, bool force_relative = false,
+                            bool scale_by_mass = true) {
+  invoke(0x434611A3, v, type, f.x, f.y, f.z, offset.x, offset.y, offset.z, 0u, force_relative, false, scale_by_mass);
+}
 inline void SetCarCanBeDamaged(Vehicle v, bool b) { invoke(0x394E733E, v, b); }
 
 // Ped types for CREATE_CHAR.

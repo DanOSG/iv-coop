@@ -21,6 +21,8 @@ struct Settings {
   std::uint32_t interp_delay_ms = 100;
   std::string puppet_model = "M_Y_MULTIPLAYER";
   bool animated_puppets = true;
+  bool physics_follow = true;       // stand-in cars react to traffic/walls (vs. kinematic)
+  std::uint32_t vehicle_force_type = 1;
   int host_key = 0x79; // VK_F10: host / leave
   int join_key = 0x7A; // VK_F11: join / leave
 };

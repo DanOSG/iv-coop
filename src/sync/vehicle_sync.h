@@ -28,12 +28,17 @@ struct RemoteVehicleStatus {
   bool spawned;
   float error_m;
   std::uint32_t snaps;
+  float gain; // physics-follow: learned velocity change per requested m/s (1 = impulse)
 };
 
 class VehicleSync {
  public:
   std::uint32_t interp_delay_ms = 100;
   std::uint32_t timeout_ms = 3000; // drop a remote car this long after its last update
+  // Physics-follow: stand-ins stay physical (react to traffic/walls) and are steered with
+  // APPLY_FORCE_TO_CAR. Off = kinematic (placed exactly on the pose every frame).
+  bool physics_follow = true;
+  std::uint32_t force_type = 1;
 
   // Returns the player id whose puppet is `ped`, if any (supplied by the player sync).
   using PuppetLookup = std::function<std::optional<std::uint8_t>(natives::Ped)>;
@@ -65,10 +70,18 @@ class VehicleSync {
     std::uint8_t siren = 0;
     float error_m = 0;
     std::uint32_t snaps = 0;
+    // Physics-follow controller state.
+    natives::Vector3 last_vel{};
+    natives::Vector3 last_request{}; // velocity change we asked for last frame (world, m/s)
+    bool have_last = false;
+    float gain = 1.0f;
   };
 
   std::uint32_t local_id_for(natives::Vehicle v, std::uint8_t my_id);
   void drive(Remote& r, const VehicleState& t);
+  void drive_kinematic(Remote& r, const VehicleState& t);
+  void drive_physics(Remote& r, const VehicleState& t);
+  void snap(Remote& r, const VehicleState& t);
   void despawn(Remote& r, natives::Ped me);
 
   std::map<natives::Vehicle, std::uint32_t> local_ids_; // our cars -> network id

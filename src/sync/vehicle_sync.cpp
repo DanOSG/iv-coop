@@ -113,16 +113,86 @@ void VehicleSync::push_remote(const net::VehicleUpdate& u) {
   r.interp.push(u.state, u.arrival_ms);
 }
 
-void VehicleSync::drive(Remote& r, const VehicleState& t) {
-  const n::Vector3 cur = n::GetCarCoordinates(r.handle);
-  r.error_m = std::hypot(t.x - cur.x, t.y - cur.y, t.z - cur.z);
-  if (r.error_m > kSnapDist) ++r.snaps;
-  // Kinematic: place the car exactly on the interpolated pose every frame, and give it the
-  // owner's forward speed so wheels turn and the physics step carries it smoothly to the
-  // next frame's pose.
+void VehicleSync::snap(Remote& r, const VehicleState& t) {
   n::SetCarCoordinatesNoOffset(r.handle, {t.x, t.y, t.z});
   n::SetVehicleQuaternion(r.handle, {t.qx, t.qy, t.qz, t.qw});
   n::SetCarForwardSpeed(r.handle, t.speed);
+  r.have_last = false; // the teleport invalidates the velocity measurement
+  ++r.snaps;
+}
+
+// Kinematic: place the car exactly on the interpolated pose every frame, and give it the
+// owner's forward speed so wheels turn and the physics step carries it smoothly to the
+// next frame's pose. Exact, but passes through anything local (walls, local traffic).
+void VehicleSync::drive_kinematic(Remote& r, const VehicleState& t) {
+  if (r.error_m > kSnapDist) ++r.snaps;
+  n::SetCarCoordinatesNoOffset(r.handle, {t.x, t.y, t.z});
+  n::SetVehicleQuaternion(r.handle, {t.qx, t.qy, t.qz, t.qw});
+  n::SetCarForwardSpeed(r.handle, t.speed);
+}
+
+// Physics-follow: the stand-in stays a physical car; each frame we request the velocity
+// change that brings it onto the owner's track (their velocity plus a pull toward their
+// position) through APPLY_FORCE_TO_CAR with mass scaling. Which force type is an impulse
+// isn't known statically, so the controller measures how much velocity change it actually
+// got per m/s requested (horizontal only, gravity-free) and scales its requests by that.
+void VehicleSync::drive_physics(Remote& r, const VehicleState& t) {
+  constexpr float kPull = 2.0f;        // 1/s: position error -> corrective velocity
+  constexpr float kMaxPull = 8.0f;     // m/s cap on the corrective part
+  constexpr float kMaxDvPerFrame = 3.0f;
+  constexpr float kRotBlend = 0.25f;   // fraction of the orientation error closed per frame
+
+  if (r.error_m > kSnapDist) {
+    snap(r, t);
+    return;
+  }
+  const n::Vector3 cur = n::GetCarCoordinates(r.handle);
+  const n::Vector3 vel = n::GetCarSpeedVector(r.handle);
+
+  // Learn the gain from last frame's request (horizontal, only when the request was big
+  // enough to measure over noise from friction, collisions and the engine).
+  if (r.have_last) {
+    const float rx = r.last_request.x, ry = r.last_request.y;
+    const float req2 = rx * rx + ry * ry;
+    if (req2 > 0.25f) {
+      const float got = ((vel.x - r.last_vel.x) * rx + (vel.y - r.last_vel.y) * ry) / req2;
+      if (got > 0.001f && got < 3.0f) r.gain += (got - r.gain) * 0.1f;
+    }
+  }
+
+  float ex = t.x - cur.x, ey = t.y - cur.y, ez = t.z - cur.z;
+  const float pull = std::hypot(ex, ey, ez) * kPull;
+  const float pull_scale = pull > kMaxPull ? kMaxPull / pull : 1.0f;
+  const float dvx = t.vx + ex * kPull * pull_scale - vel.x;
+  const float dvy = t.vy + ey * kPull * pull_scale - vel.y;
+  const float dvz = t.vz + ez * kPull * pull_scale - vel.z;
+  const float dv = std::hypot(dvx, dvy, dvz);
+  const float dv_scale = dv > kMaxDvPerFrame ? kMaxDvPerFrame / dv : 1.0f;
+  const n::Vector3 want{dvx * dv_scale, dvy * dv_scale, dvz * dv_scale};
+
+  const float g = std::max(r.gain, 0.005f);
+  n::ApplyForceToCar(r.handle, force_type, {want.x / g, want.y / g, want.z / g});
+  r.last_vel = vel;
+  r.last_request = want;
+  r.have_last = true;
+
+  // Ease the orientation toward the owner's (short-arc nlerp of the current one).
+  const n::Vector4 q = n::GetVehicleQuaternion(r.handle);
+  const float dot = q.x * t.qx + q.y * t.qy + q.z * t.qz + q.w * t.qw;
+  const float s = dot < 0 ? -1.0f : 1.0f;
+  n::Vector4 o{q.x + (s * t.qx - q.x) * kRotBlend, q.y + (s * t.qy - q.y) * kRotBlend,
+               q.z + (s * t.qz - q.z) * kRotBlend, q.w + (s * t.qw - q.w) * kRotBlend};
+  const float len = std::sqrt(o.x * o.x + o.y * o.y + o.z * o.z + o.w * o.w);
+  if (len > 1e-6f) n::SetVehicleQuaternion(r.handle, {o.x / len, o.y / len, o.z / len, o.w / len});
+}
+
+void VehicleSync::drive(Remote& r, const VehicleState& t) {
+  const n::Vector3 cur = n::GetCarCoordinates(r.handle);
+  r.error_m = std::hypot(t.x - cur.x, t.y - cur.y, t.z - cur.z);
+  if (physics_follow)
+    drive_physics(r, t);
+  else
+    drive_kinematic(r, t);
 
   if (std::memcmp(r.colour, t.colour, 4) != 0) {
     n::ChangeCarColour(r.handle, t.colour[0], t.colour[1]);
@@ -209,7 +279,7 @@ void VehicleSync::clear() {
 
 std::vector<RemoteVehicleStatus> VehicleSync::status() const {
   std::vector<RemoteVehicleStatus> out;
-  for (const auto& [id, r] : remotes_) out.push_back({id, r.owner, r.handle != 0, r.error_m, r.snaps});
+  for (const auto& [id, r] : remotes_) out.push_back({id, r.owner, r.handle != 0, r.error_m, r.snaps, r.gain});
   return out;
 }
 
