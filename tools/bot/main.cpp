@@ -147,14 +147,14 @@ int main(int argc, char** argv) {
   std::setvbuf(stdout, nullptr, _IONBF, 0); // output may be redirected to a file; don't buffer it
 
   net::Session session;
-  bool started = a.serve ? session.host(a.port, a.name, "127.0.0.1") : session.join(a.host, a.port, a.name);
+  bool up = a.serve ? session.host(a.port, a.name, "127.0.0.1") : session.join(a.host, a.port, a.name);
   // --retry when serving: wait for the port (e.g. the game is still hosting on it).
-  while (!started && a.serve && a.retry && !g_quit) {
+  while (!up && a.serve && a.retry && !g_quit) {
     std::printf("[%s] host failed (%s); retrying in 2 s\n", a.name.c_str(), session.status().last_error.c_str());
     std::this_thread::sleep_for(std::chrono::seconds(2));
-    started = session.host(a.port, a.name, "127.0.0.1");
+    up = session.host(a.port, a.name, "127.0.0.1");
   }
-  if (!started) {
+  if (!up) {
     std::fprintf(stderr, "%s failed: %s\n", a.serve ? "host" : "join", session.status().last_error.c_str());
     return 1;
   }
