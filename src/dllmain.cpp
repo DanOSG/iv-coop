@@ -16,6 +16,7 @@
 #include "game/native_hooks.h"
 #include "game/netprobe.h"
 #include "story/call_log.h"
+#include "story/story_sync.h"
 #include "game/script.h"
 #include "render/d3d9_hook.h"
 #include "render/overlay.h"
@@ -48,6 +49,8 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
   coop::configure(cfg.net);
   netprobe::configure(cfg.netprobe);
   if (cfg.story_log_calls) story::register_call_logging();
+  story::configure(cfg.story);
+  story::register_hooks();
   native_hooks::set_trace(cfg.story_trace_calls);
   script::on_tick([] {
     // Natives are registered by the time any script runs, so hook them on the first tick.

@@ -55,6 +55,9 @@ using Callback = std::function<void(const Call&)>;
 
 // Register before install(). Several callbacks per native are fine.
 void on(std::uint32_t hash, const char* name, Callback cb);
+// Like on(), but runs *before* the original (e.g. to read a handle that a DELETE_*
+// native zeroes through its pointer argument). results/out values aren't valid yet.
+void before(std::uint32_t hash, const char* name, Callback cb);
 // Game thread (natives must be registered by then; call from the first tick). Idempotent.
 bool install();
 // Log every hooked call before it runs (debug level; for finding a native that crashes).

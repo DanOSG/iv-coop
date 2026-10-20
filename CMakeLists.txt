@@ -65,7 +65,7 @@ set(IVCOOP_WARNINGS /W4 /permissive- /utf-8)
 # --- netcode shared by the plugin and the bot (no game dependencies) ---
 add_library(ivc_net STATIC src/net/session.cpp)
 target_include_directories(ivc_net PUBLIC src)
-target_compile_definitions(ivc_net PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_definitions(ivc_net PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
 target_compile_options(ivc_net PRIVATE ${IVCOOP_WARNINGS})
 target_link_libraries(ivc_net PUBLIC enet)
 
@@ -90,6 +90,7 @@ add_library(iv-coop SHARED
   src/game/netprobe.cpp
   src/game/native_hooks.cpp
   src/story/call_log.cpp
+  src/story/story_sync.cpp
   src/sync/ghost.cpp
   src/sync/local_player.cpp
   src/sync/puppet.cpp

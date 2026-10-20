@@ -48,8 +48,17 @@ class EntitySync {
 
   // --- host only ---
   // Makes an existing local entity networked (we become its sim owner). Returns its id.
+  // `pinned`: the host always simulates it (mission entities, until script task
+  // forwarding exists, since their AI is driven by the host's mission script).
   std::optional<std::uint32_t> host_register(natives::Handle handle, EntityType type, std::uint32_t model,
-                                             net::Session& net);
+                                             net::Session& net, bool pinned = false);
+  // A script deleted/released one of our networked entities: remove it from the network
+  // (clients delete their copies). The host's local entity is left to the script.
+  void host_unregister_handle(natives::Handle handle, net::Session& net);
+  // Networked id of one of the host's local entities (for blips), if it is networked.
+  std::optional<std::uint32_t> id_for_handle(natives::Handle handle) const;
+  // Our local copy of a networked entity (0 if unknown or not spawned yet).
+  natives::Handle handle_for_id(std::uint32_t id) const;
   void host_delete_all(net::Session& net); // removes every networked entity everywhere
   void on_player_joined(std::uint8_t id, net::Session& net); // late joiner: resend creates/owners
   void on_player_left(std::uint8_t id);                       // its entities get reassigned next evaluation
@@ -85,6 +94,7 @@ class EntitySync {
     std::uint32_t last_send_ms = 0;
     std::uint32_t migrations = 0;
     bool shown_dead = false; // follower: owner reported death, we killed our copy
+    bool pinned = false;     // host-only: never migrate (host always simulates)
   };
 
   void apply_create(const EntityCreate& c, std::uint8_t my_id);

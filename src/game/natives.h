@@ -88,6 +88,31 @@ inline void FreezeCharPosition(Ped ped, bool b) { invoke(0x20266A86, ped, b); }
 inline void SetCharCollision(Ped ped, bool b) { invoke(0x2A7413EB, ped, b); }
 inline Blip AddBlipForChar(Ped ped) { Blip b = 0; invoke(0x19A64C5D, ped, &b); return b; }
 inline void RemoveBlip(Blip b) { invoke(0x7BBF3625, b); }
+inline Blip AddBlipForCar(std::int32_t car) { Blip b = 0; invoke(0x6D21564D, car, &b); return b; }
+inline Blip AddBlipForCoord(Vector3 p) { Blip b = 0; invoke(0x3E7D3074, p.x, p.y, p.z, &b); return b; }
+inline Blip AddBlipForContact(Vector3 p) { Blip b = 0; invoke(0x7C671162, p.x, p.y, p.z, &b); return b; }
+inline void ChangeBlipColour(Blip b, std::int32_t c) { invoke(0x1D8800E3, b, c); }
+inline void ChangeBlipSprite(Blip b, std::uint32_t s) { invoke(0x6A90123D, b, s); }
+inline void ChangeBlipScale(Blip b, float s) { invoke(0x44D349D9, b, s); }
+inline void ChangeBlipDisplay(Blip b, std::uint32_t d) { invoke(0x3ACC1794, b, d); }
+inline void SetRoute(Blip b, bool on) { invoke(0x7B8D68E7, b, on); }
+inline void ChangeBlipNameFromTextFile(Blip b, const char* key) { invoke(0x0A9D695E, b, key); }
+
+// On-screen text by game-text (GXT) key.
+inline void Print(const char* key, std::uint32_t ms, bool flag) { invoke(0x0A491CFF, key, ms, flag); }
+inline void PrintNow(const char* key, std::uint32_t ms, bool flag) { invoke(0x73B01573, key, ms, flag); }
+inline void PrintHelp(const char* key) { invoke(0x71076BBA, key); }
+inline void PrintHelpForever(const char* key) { invoke(0x43F7517D, key); }
+inline void ClearPrints() { invoke(0x1D8C324A); }
+inline void ClearHelp() { invoke(0x07244253); }
+inline void ClearThisPrint(const char* key) { invoke(0x08D85CBB, key); }
+inline void PrintStringInStringNow(const char* key, const char* key2, std::uint32_t ms, bool flag) {
+  invoke(0x2BB65467, key, key2, ms, flag);
+}
+inline void PrintWithNumber(const char* key, std::int32_t n, std::uint32_t ms, bool flag) { invoke(0x76A63B4C, key, n, ms, flag); }
+inline void PrintWithNumberNow(const char* key, std::int32_t n, std::uint32_t ms, bool flag) {
+  invoke(0x3BDA562E, key, n, ms, flag);
+}
 
 // Movement / tasks.
 enum class MoveState : std::uint32_t { Walk = 2, Run = 3, Sprint = 4 };

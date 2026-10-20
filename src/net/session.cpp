@@ -3,6 +3,7 @@
 #include <enet/enet.h>
 
 #include <chrono>
+#include <cstdio>
 #include <format>
 
 namespace ivc::net {
@@ -83,6 +84,11 @@ struct Session::Impl {
   };
   std::deque<OutGame> out_game;
   std::deque<GameMessage> in_game;
+
+  // Recording (guarded by m).
+  std::FILE* rec = nullptr;
+  std::uint32_t rec_start_ms = 0;
+  std::uint32_t rec_count = 0;
 
   void push_game(std::uint8_t from, std::span<const std::uint8_t> data) {
     std::lock_guard lock(m);
@@ -382,6 +388,7 @@ Session::Session() : impl_(new Impl) {
 
 Session::~Session() {
   leave();
+  stop_recording();
   delete impl_;
 }
 
@@ -487,8 +494,43 @@ void Session::send_game(std::vector<std::uint8_t> packet, bool reliable) {
   std::lock_guard lock(impl_->m);
   if (impl_->st.mode != Mode::Hosting && impl_->st.mode != Mode::Joined) return;
   packet[1] = impl_->st.my_id;
+  if (impl_->rec) {
+    const std::uint32_t t = steady_ms() - impl_->rec_start_ms;
+    const std::uint8_t rel = reliable ? 1 : 0;
+    const auto len = static_cast<std::uint32_t>(packet.size());
+    std::fwrite(&t, 4, 1, impl_->rec);
+    std::fwrite(&rel, 1, 1, impl_->rec);
+    std::fwrite(&len, 4, 1, impl_->rec);
+    std::fwrite(packet.data(), 1, len, impl_->rec);
+    ++impl_->rec_count;
+  }
   impl_->out_game.push_back({std::move(packet), reliable});
   if (impl_->out_game.size() > 4096) impl_->out_game.pop_front();
+}
+
+bool Session::start_recording(const std::string& path) {
+  std::lock_guard lock(impl_->m);
+  if (impl_->rec) std::fclose(impl_->rec);
+  impl_->rec = std::fopen(path.c_str(), "wb");
+  if (!impl_->rec) return false;
+  const char magic[4] = {'I', 'V', 'C', 'R'};
+  const std::uint32_t version = 1;
+  std::fwrite(magic, 1, 4, impl_->rec);
+  std::fwrite(&version, 4, 1, impl_->rec);
+  impl_->rec_start_ms = steady_ms();
+  impl_->rec_count = 0;
+  return true;
+}
+
+void Session::stop_recording() {
+  std::lock_guard lock(impl_->m);
+  if (impl_->rec) std::fclose(impl_->rec);
+  impl_->rec = nullptr;
+}
+
+bool Session::recording() const {
+  std::lock_guard lock(impl_->m);
+  return impl_->rec != nullptr;
 }
 
 std::vector<GameMessage> Session::drain_game() {

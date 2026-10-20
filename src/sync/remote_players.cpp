@@ -10,6 +10,7 @@
 #include "sync/local_player.h"
 #include "sync/player_state.h"
 #include "sync/puppet.h"
+#include "story/story_sync.h"
 #include "sync/entity_sync.h"
 #include "sync/vehicle_sync.h"
 
@@ -76,8 +77,31 @@ struct PendingSpawn {
 std::optional<PendingSpawn> g_pending_spawn;
 bool g_spawn_ped_down = true, g_spawn_car_down = true, g_delete_down = true;
 
+bool g_record_down = true;
+
 void handle_entity_keys(bool hosting) {
   if (!hosting) return;
+  // Test rig (M6c): record everything we send, for a bot to replay to a client later.
+  if (input::pressed_ctrl_shift('R', g_record_down)) {
+    if (session().recording()) {
+      session().stop_recording();
+      log::info("Recording stopped");
+    } else {
+      SYSTEMTIME t;
+      GetLocalTime(&t);
+      wchar_t dir[MAX_PATH];
+      GetModuleFileNameW(GetModuleHandleW(L"iv-coop.asi"), dir, MAX_PATH);
+      std::wstring d(dir);
+      d = d.substr(0, d.find_last_of(L"\\/") + 1);
+      std::string path;
+      for (wchar_t ch : d) path.push_back(static_cast<char>(ch));
+      path += std::format("iv-coop-{:02}{:02}{:02}.ivcrec", t.wHour, t.wMinute, t.wSecond);
+      if (session().start_recording(path))
+        log::info("Recording session to {}", path);
+      else
+        log::error("Could not open recording {}", path);
+    }
+  }
   if (input::pressed_ctrl_shift('P', g_spawn_ped_down))
     g_pending_spawn = PendingSpawn{sync::EntityType::Ped, n::GetHashKey("F_Y_MULTIPLAYER")};
   if (input::pressed_ctrl_shift('V', g_spawn_car_down))
@@ -164,6 +188,7 @@ void tick() {
         drop_all();
         g_vehicles.clear();
         g_entities.clear(g_was_host);
+        story::clear();
         break;
     }
   }
@@ -291,14 +316,20 @@ void tick() {
         }
         continue;
       }
+      if (story::client_on_message(m, g_entities)) continue; // story text/blips from the host
       g_entities.on_message(m, ss.my_id);
     }
+    // Story (M6): the host sends what its story scripts did this frame; clients retry
+    // blips whose entity copy wasn't there yet.
+    story::host_tick(g_was_host, net, g_entities);
+    if (!g_was_host) story::client_tick(g_entities);
     g_entities.tick(now, ss.my_id, g_was_host, positions, net);
     for (const auto& hit : g_entities.collect_hits(me)) {
       net.send_game(sync::encode_damage({hit.kind, hit.target, hit.amount, local ? local->weapon : 0}), true);
       log::info("Hit entity {} for {}", hit.target, hit.amount);
     }
   }
+  if (!active) story::host_tick(false, net, g_entities); // no session: capture stays off
   if (me) g_my_last_health = n::GetCharHealth(me);
   const auto entities = g_entities.status();
   static std::uint32_t last_elog = now;

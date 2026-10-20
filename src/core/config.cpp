@@ -102,6 +102,12 @@ Config load_config(const std::filesystem::path& ini) {
 
   c.story_log_calls = read_int(p, L"Story", L"LogCalls", c.story_log_calls) != 0;
   c.story_trace_calls = read_int(p, L"Story", L"TraceCalls", c.story_trace_calls) != 0;
+  c.story.replicate = read_int(p, L"Story", L"Replicate", c.story.replicate) != 0;
+  {
+    std::string def;
+    for (const auto& s : c.story.local_scripts) def += (def.empty() ? "" : ",") + s;
+    c.story.local_scripts = split_csv(read_str(p, L"Story", L"LocalScripts", def));
+  }
 
   auto& np = c.netprobe;
   np.enabled = read_int(p, L"NetProbe", L"Enabled", np.enabled) != 0;

@@ -119,7 +119,7 @@ void draw_status() {
     }
     if (s.mode == net::Mode::Hosting || !c.entities.empty()) {
       ImGui::Separator();
-      ImGui::TextUnformatted("networked entities  [host: Ctrl+Shift+P ped | V car | X delete all]");
+      ImGui::TextUnformatted("networked entities  [host: Ctrl+Shift+P ped | V car | X delete all | R record]");
       for (const auto& e : c.entities)
         ImGui::Text("  %4u %-7s owner #%u %-10s  %.0f %.0f %.0f  migrations %u", e.id,
                     e.type == sync::EntityType::Ped ? "ped" : "vehicle", e.sim_owner, e.live ? "LIVE here" : "follower",

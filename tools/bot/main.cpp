@@ -4,7 +4,7 @@
 //
 //   iv-coop-bot [--host 127.0.0.1] [--port 41300] [--name Bot] [--radius 4] [--speed 1.6]
 //               [--phase 0] [--skew 123456] [--fixed] [--serve] [--seconds N] [--retry]
-//               [--drive MODEL] [--ride [--seat N]]
+//               [--drive MODEL] [--ride [--seat N]] [--replay FILE.ivcrec]
 //
 // --drive sultan: circle the host in that car (sends VehicleState as the car's owner).
 // --ride: sit in the host's car (passenger seat --seat, default 0) whenever they drive one.
@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <format>
 #include <optional>
 #include <map>
@@ -60,7 +61,36 @@ struct Args {
   bool armed = false;       // hold a pistol (weapon type 7) and aim at the host
   int shoot_host = 0;       // fire at the host every N seconds (10 damage per hit); implies armed
   int health = 200;         // starting (and respawn) health
+  std::string replay;       // --serve: replay a recorded host session (.ivcrec) to the first client
 };
+
+struct Record {
+  std::uint32_t t_ms;
+  bool reliable;
+  std::vector<std::uint8_t> data;
+};
+
+std::vector<Record> load_recording(const std::string& path) {
+  std::vector<Record> out;
+  std::FILE* f = std::fopen(path.c_str(), "rb");
+  if (!f) return out;
+  char magic[4];
+  std::uint32_t version = 0;
+  if (std::fread(magic, 1, 4, f) == 4 && std::memcmp(magic, "IVCR", 4) == 0 && std::fread(&version, 4, 1, f) == 1) {
+    for (;;) {
+      Record r;
+      std::uint8_t rel;
+      std::uint32_t len;
+      if (std::fread(&r.t_ms, 4, 1, f) != 1 || std::fread(&rel, 1, 1, f) != 1 || std::fread(&len, 4, 1, f) != 1) break;
+      r.reliable = rel != 0;
+      r.data.resize(len);
+      if (std::fread(r.data.data(), 1, len, f) != len) break;
+      out.push_back(std::move(r));
+    }
+  }
+  std::fclose(f);
+  return out;
+}
 
 // Model name -> hash, as the game's GET_HASH_KEY does (Jenkins one-at-a-time, lowercase).
 std::uint32_t model_hash(const std::string& name) {
@@ -100,6 +130,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--leave-after") a.leave_after = std::atoi(next());
     else if (k == "--armed") a.armed = true;
     else if (k == "--health") a.health = std::atoi(next());
+    else if (k == "--replay") a.replay = next(), a.serve = true;
     else if (k == "--shoot-host") a.shoot_host = std::atoi(next()), a.armed = true;
     else std::fprintf(stderr, "unknown argument %s\n", k.c_str());
   }
@@ -156,6 +187,14 @@ int main(int argc, char** argv) {
   std::uint32_t last_entity_send = 0;
   unsigned entity_states_received = 0;
 
+  // Replay of a recorded host session (test rig for client-side story playback).
+  std::vector<Record> replay = a.replay.empty() ? std::vector<Record>{} : load_recording(a.replay);
+  std::size_t replay_next = 0;
+  std::uint32_t replay_start = 0; // set when the first client joins
+  if (!a.replay.empty())
+    std::printf("[%s] loaded %zu recorded messages (%.1f s) from %s\n", a.name.c_str(), replay.size(),
+                replay.empty() ? 0.0 : replay.back().t_ms / 1000.0, a.replay.c_str());
+
   // Combat (M5): our health, death/respawn, and shooting at the host.
   constexpr std::uint32_t kPistol = 7;
   int health = a.health;
@@ -178,7 +217,13 @@ int main(int argc, char** argv) {
     for (const auto& e : session.drain_events()) {
       using K = net::SessionEvent::Kind;
       if (e.kind == K::Connected) std::printf("[%s] connected as player #%u\n", a.name.c_str(), e.id);
-      if (e.kind == K::Joined) std::printf("[%s] player #%u '%s' is here\n", a.name.c_str(), e.id, e.text.c_str());
+      if (e.kind == K::Joined) {
+        std::printf("[%s] player #%u '%s' is here\n", a.name.c_str(), e.id, e.text.c_str());
+        if (!replay.empty() && !replay_start) {
+          replay_start = now + 3000; // give the client a moment to settle
+          std::printf("[%s] replay starts in 3 s\n", a.name.c_str());
+        }
+      }
       if (e.kind == K::Left) std::printf("[%s] player #%u '%s' left\n", a.name.c_str(), e.id, e.text.c_str());
       if (e.kind == K::Disconnected) {
         std::printf("[%s] disconnected: %s\n", a.name.c_str(), e.text.c_str());
@@ -255,6 +300,16 @@ int main(int argc, char** argv) {
           ++entity_states_received;
         }
       }
+    }
+
+    // Replay: send recorded messages on their original schedule.
+    if (replay_start && static_cast<std::int32_t>(now - replay_start) >= 0 && replay_next < replay.size()) {
+      const std::uint32_t replay_t = now - replay_start;
+      while (replay_next < replay.size() && replay[replay_next].t_ms <= replay_t) {
+        session.send_game(replay[replay_next].data, replay[replay_next].reliable);
+        ++replay_next;
+      }
+      if (replay_next == replay.size()) std::printf("[%s] replay finished\n", a.name.c_str());
     }
 
     // Offline lane test (serve only): at 3 s create entity 999 (ours), at 5 s hand it to #1.

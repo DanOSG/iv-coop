@@ -86,6 +86,14 @@ class Session {
   // host, which relays it to the other clients. Never echoed back to the sender.
   void send_game(std::vector<std::uint8_t> packet, bool reliable);
   std::vector<GameMessage> drain_game();
+
+  // Recording (test rig): every game message we send is also written, with its time and
+  // reliability, to `path`. A bot can replay the file as host (iv-coop-bot --replay).
+  // Format: "IVCR" u32 version=1, then records of {u32 ms since start, u8 reliable,
+  // u32 length, bytes}.
+  bool start_recording(const std::string& path);
+  void stop_recording();
+  bool recording() const;
   std::vector<SessionEvent> drain_events();
   SessionStatus status() const;
 

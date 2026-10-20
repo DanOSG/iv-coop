@@ -26,11 +26,13 @@ float dist(const EntityState& s, const n::Vector3& p) { return std::hypot(s.x - 
 // ---------------------------------------------------------------- host API
 
 std::optional<std::uint32_t> EntitySync::host_register(n::Handle handle, EntityType type, std::uint32_t model,
-                                                       net::Session& net) {
+                                                       net::Session& net, bool pinned) {
   if (!exists(type, handle)) return std::nullopt;
+  if (auto existing = id_for_handle(handle)) return existing;
   const std::uint32_t id = next_id_++ & 0xFFFFFF; // host-minted (top byte 0 = host)
   Entity& e = ents_[id];
   e.id = id, e.type = type, e.model = model, e.sim_owner = net::kHostId, e.handle = handle, e.live = true;
+  e.pinned = pinned;
   e.last = read_local(e, net::steady_ms());
 
   EntityCreate c;
@@ -49,6 +51,28 @@ void EntitySync::host_delete_all(net::Session& net) {
   }
   log::info("Deleted {} networked entities", ents_.size());
   ents_.clear();
+}
+
+void EntitySync::host_unregister_handle(n::Handle handle, net::Session& net) {
+  for (auto it = ents_.begin(); it != ents_.end(); ++it) {
+    if (it->second.handle == handle) {
+      net.send_game(encode_delete(it->first), true);
+      log::info("Entity {} unregistered (script released handle {})", it->first, handle);
+      ents_.erase(it); // the host's local entity stays with the script that owns it
+      return;
+    }
+  }
+}
+
+std::optional<std::uint32_t> EntitySync::id_for_handle(n::Handle handle) const {
+  for (const auto& [id, e] : ents_)
+    if (e.handle == handle) return id;
+  return std::nullopt;
+}
+
+n::Handle EntitySync::handle_for_id(std::uint32_t id) const {
+  const auto it = ents_.find(id);
+  return it != ents_.end() && exists(it->second.type, it->second.handle) ? it->second.handle : 0;
 }
 
 void EntitySync::on_player_joined(std::uint8_t player, net::Session& net) {
@@ -138,6 +162,7 @@ void EntitySync::set_owner(Entity& e, std::uint8_t owner, std::uint8_t my_id) {
 void EntitySync::evaluate_ownership(const std::vector<PlayerPos>& players, std::uint8_t my_id, net::Session& net) {
   if (players.empty()) return;
   for (auto& [id, e] : ents_) {
+    if (e.pinned) continue; // mission entities stay with the host (its script drives them)
     const PlayerPos* nearest = nullptr;
     float d_near = std::numeric_limits<float>::max();
     float d_cur = std::numeric_limits<float>::max();

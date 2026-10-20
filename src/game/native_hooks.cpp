@@ -26,7 +26,8 @@ struct Slot {
   const char* name = "";
   void* target = nullptr;
   Handler orig = nullptr;
-  std::vector<Callback> callbacks;
+  std::vector<Callback> before;    // run before the original
+  std::vector<Callback> callbacks; // run after it
 };
 
 std::array<Slot, kMaxHooks> g_slots;
@@ -38,9 +39,10 @@ bool g_trace = false;       // log each hooked call *before* it runs (crash bise
 constexpr int kMaxArgs = 16;
 
 // Runs a slot's callbacks (C++ objects live here, so it can't hold the SEH guard itself).
-__declspec(noinline) void run_callbacks(Slot& s, natives::CallContext* ctx, const std::uint32_t* args, int argc) {
+__declspec(noinline) void run_callbacks(Slot& s, natives::CallContext* ctx, const std::uint32_t* args, int argc,
+                                        bool pre) {
   const Call call{ctx, s.hash, s.name, script::current_script_name(), args, argc};
-  for (const auto& cb : s.callbacks) {
+  for (const auto& cb : pre ? s.before : s.callbacks) {
     try {
       cb(call);
     } catch (const std::exception& e) {
@@ -53,9 +55,9 @@ __declspec(noinline) void run_callbacks(Slot& s, natives::CallContext* ctx, cons
 // an "argument" isn't what we think) must never take the game down: catch the hardware
 // exception here, remember which native did it, and carry on.
 bool g_faulted[kMaxHooks] = {};
-void guarded_callbacks(int n, natives::CallContext* ctx, const std::uint32_t* args, int argc) {
+void guarded_callbacks(int n, natives::CallContext* ctx, const std::uint32_t* args, int argc, bool pre) {
   __try {
-    run_callbacks(g_slots[n], ctx, args, argc);
+    run_callbacks(g_slots[n], ctx, args, argc, pre);
   } __except (EXCEPTION_EXECUTE_HANDLER) {
     g_faulted[n] = true;
   }
@@ -71,10 +73,15 @@ void __cdecl detour(natives::CallContext* ctx) {
   std::uint32_t args[kMaxArgs];
   const int argc = report ? std::clamp(ctx->arg_count, 0, kMaxArgs) : 0;
   if (argc) std::memcpy(args, ctx->args, static_cast<std::size_t>(argc) * 4);
+  if (report && !s.before.empty()) {
+    g_in_callback = true;
+    guarded_callbacks(N, ctx, args, argc, true);
+    g_in_callback = false;
+  }
   s.orig(ctx);
-  if (!report) return;
+  if (!report || s.callbacks.empty()) return;
   g_in_callback = true;
-  guarded_callbacks(N, ctx, args, argc);
+  guarded_callbacks(N, ctx, args, argc, false);
   g_in_callback = false;
   if (g_faulted[N]) {
     g_faulted[N] = false;
@@ -114,20 +121,27 @@ std::string Call::str(int i) const {
   return p;
 }
 
-void on(std::uint32_t hash, const char* name, Callback cb) {
-  for (int i = 0; i < g_count; ++i) {
-    if (g_slots[i].hash == hash) {
-      g_slots[i].callbacks.push_back(std::move(cb));
-      return;
-    }
-  }
+namespace {
+Slot* slot_for(std::uint32_t hash, const char* name) {
+  for (int i = 0; i < g_count; ++i)
+    if (g_slots[i].hash == hash) return &g_slots[i];
   if (g_count == kMaxHooks) {
     log::error("Native hooks full; {} not hooked", name);
-    return;
+    return nullptr;
   }
+  if (g_installed) log::warn("Native hook {} registered after install(); it won't be active", name);
   Slot& s = g_slots[g_count++];
   s.hash = hash, s.name = name;
-  s.callbacks.push_back(std::move(cb));
+  return &s;
+}
+} // namespace
+
+void on(std::uint32_t hash, const char* name, Callback cb) {
+  if (Slot* s = slot_for(hash, name)) s->callbacks.push_back(std::move(cb));
+}
+
+void before(std::uint32_t hash, const char* name, Callback cb) {
+  if (Slot* s = slot_for(hash, name)) s->before.push_back(std::move(cb));
 }
 
 bool install() {
