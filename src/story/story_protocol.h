@@ -21,6 +21,7 @@ enum class StoryMsg : std::uint8_t {
   BlipAdd = 22,
   BlipRemove = 23,
   BlipProp = 24,
+  TextBlock = 25,
 };
 
 using Key = std::array<char, 32>;
@@ -61,6 +62,19 @@ struct BlipProp {
   Key name{};
 };
 
+// Mission lines live in per-mission text blocks the script loads into a slot first
+// (REQUEST_ADDITIONAL_TEXT); a joiner's frozen scripts never do, so the host sends it.
+// An empty name clears the slot.
+struct TextBlock {
+  std::uint8_t slot = 0;
+  Key name{};
+};
+
+inline std::vector<std::uint8_t> encode(const TextBlock& b) {
+  net::Writer w;
+  w.put(StoryMsg::TextBlock).put(std::uint8_t{0}).put(b.slot).put(b.name);
+  return std::move(w.data());
+}
 inline std::vector<std::uint8_t> encode(const Text& t) {
   net::Writer w;
   w.put(StoryMsg::Text).put(std::uint8_t{0}).put(t.kind).put(t.key).put(t.key2).put(t.number).put(t.time_ms).put(t.flag);
@@ -88,11 +102,12 @@ struct Decoded {
   BlipAdd blip_add;
   std::uint32_t blip_id = 0; // BlipRemove
   BlipProp blip_prop;
+  TextBlock text_block;
 };
 
 inline bool is_story_msg(std::span<const std::uint8_t> d) {
   return !d.empty() && d[0] >= static_cast<std::uint8_t>(StoryMsg::Text) &&
-         d[0] <= static_cast<std::uint8_t>(StoryMsg::BlipProp);
+         d[0] <= static_cast<std::uint8_t>(StoryMsg::TextBlock);
 }
 
 inline std::optional<Decoded> decode(std::span<const std::uint8_t> d) {
@@ -113,6 +128,9 @@ inline std::optional<Decoded> decode(std::span<const std::uint8_t> d) {
     }
     case StoryMsg::BlipRemove:
       r.get(m.blip_id);
+      break;
+    case StoryMsg::TextBlock:
+      r.get(m.text_block.slot), r.get(m.text_block.name);
       break;
     case StoryMsg::BlipProp: {
       auto& p = m.blip_prop;

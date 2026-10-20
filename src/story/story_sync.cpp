@@ -54,6 +54,14 @@ void text(const Call& c, TextKind kind, int key_arg, int key2_arg, int number_ar
   ++g_status.texts;
 }
 
+void text_block(const Call& c, int name_arg, int slot_arg) {
+  if (!capture(c)) return;
+  TextBlock b;
+  b.slot = static_cast<std::uint8_t>(c.arg<std::uint32_t>(slot_arg));
+  if (name_arg >= 0) b.name = make_key(c.str(name_arg));
+  send(encode(b));
+}
+
 void blip_coord(const Call& c, BlipKind kind) {
   if (!capture(c)) return;
   BlipAdd b;
@@ -100,6 +108,11 @@ struct ClientBlip {
   std::vector<BlipProp> props; // applied on creation, and live afterwards
 };
 std::map<std::uint32_t, ClientBlip> g_client_blips;
+
+// Text blocks the host loaded into slots on our side, and lines held back until they load
+// (a PRINT for a key whose block isn't in yet shows nothing).
+std::set<std::uint8_t> g_loading_slots, g_loaded_slots;
+std::deque<Text> g_held_texts;
 
 void apply_prop(n::Blip b, const BlipProp& p) {
   switch (p.prop) {
@@ -158,6 +171,8 @@ bool is_story_script(const std::string& name) {
 void register_hooks() {
   using native_hooks::on;
   using native_hooks::before;
+  on(0x6A9F01AF, "REQUEST_ADDITIONAL_TEXT", [](const Call& c) { text_block(c, 0, 1); });
+  on(0x0A1B465C, "CLEAR_ADDITIONAL_TEXT", [](const Call& c) { text_block(c, -1, 0); });
   // Text: (key, [key2 | number], time, flag) per native.
   on(0x73B01573, "PRINT_NOW", [](const Call& c) { text(c, TextKind::PrintNow, 0, -1, -1, 1, 2); });
   on(0x0A491CFF, "PRINT", [](const Call& c) { text(c, TextKind::Print, 0, -1, -1, 1, 2); });
@@ -248,9 +263,23 @@ bool client_on_message(const net::GameMessage& m, sync::EntitySync& ents) {
   ++g_status.messages;
   switch (d->type) {
     case StoryMsg::Text:
-      apply_text(d->text);
+      if (g_loading_slots.empty()) apply_text(d->text);
+      else g_held_texts.push_back(d->text);
       ++g_status.texts;
       break;
+    case StoryMsg::TextBlock: {
+      const std::uint8_t slot = d->text_block.slot;
+      const std::string name = to_string(d->text_block.name);
+      if (name.empty()) {
+        n::ClearAdditionalText(slot, false);
+        g_loading_slots.erase(slot), g_loaded_slots.erase(slot);
+      } else {
+        n::RequestAdditionalText(name.c_str(), slot);
+        g_loading_slots.insert(slot), g_loaded_slots.insert(slot);
+      }
+      log::info("Story: text block slot {} -> {}", slot, name.empty() ? "(cleared)" : name);
+      break;
+    }
     case StoryMsg::BlipAdd: {
       auto& cb = g_client_blips[d->blip_add.id];
       if (cb.local) n::RemoveBlip(cb.local);
@@ -275,6 +304,11 @@ bool client_on_message(const net::GameMessage& m, sync::EntitySync& ents) {
 }
 
 void client_tick(sync::EntitySync& ents) {
+  std::erase_if(g_loading_slots, [](std::uint8_t slot) { return n::HasAdditionalTextLoaded(slot); });
+  while (g_loading_slots.empty() && !g_held_texts.empty()) {
+    apply_text(g_held_texts.front());
+    g_held_texts.pop_front();
+  }
   unsigned live = 0;
   for (auto& [id, cb] : g_client_blips) {
     if (!cb.local) try_create(cb, ents);
@@ -287,6 +321,10 @@ void clear() {
   for (auto& [id, cb] : g_client_blips)
     if (cb.local) n::RemoveBlip(cb.local);
   g_client_blips.clear();
+  // Free what the host's story loaded. Blocks our own (frozen) scripts had in those slots
+  // were replaced when we loaded the host's; restoring them belongs with progression sync.
+  for (std::uint8_t slot : g_loaded_slots) n::ClearAdditionalText(slot, false);
+  g_loading_slots.clear(), g_loaded_slots.clear(), g_held_texts.clear();
   g_host_blips.clear();
   g_ops.clear();
   g_hosting = false;

@@ -18,6 +18,7 @@
 #include "game/natives.h"
 #include "net/session.h"
 #include "sync/player_state.h"
+#include "sync/car_follower.h"
 #include "sync/vehicle_state.h"
 
 namespace ivc::sync {
@@ -70,25 +71,12 @@ class VehicleSync {
     std::uint32_t model = 0;
     std::int8_t colour[4] = {-1, -1, -1, -1};
     std::uint8_t siren = 0;
-    float error_m = 0;
-    std::uint32_t snaps = 0;
-    // Physics-follow controller state.
-    natives::Vector3 last_vel{};
-    natives::Vector3 last_request{}; // velocity change we asked for last frame (world, m/s)
-    bool have_last = false;
-    float gain = 1.0f;
-    std::uint32_t last_drive_ms = 0;
-    float blocked_s = 0;          // time spent pushing without making progress
-    float steer = 0;
-    bool have_yaw = false;
-    float last_target_yaw = 0;    // radians, for the steering estimate
+    CarFollower follow; // also holds error_m/snaps in kinematic mode
   };
 
   std::uint32_t local_id_for(natives::Vehicle v, std::uint8_t my_id);
   void drive(Remote& r, const VehicleState& t, std::uint32_t now_ms);
   void drive_kinematic(Remote& r, const VehicleState& t);
-  void drive_physics(Remote& r, const VehicleState& t, float dt);
-  void snap(Remote& r, const VehicleState& t);
   void despawn(Remote& r, natives::Ped me);
 
   std::map<natives::Vehicle, std::uint32_t> local_ids_; // our cars -> network id

@@ -65,12 +65,16 @@ struct HiddenBlip {
 std::vector<HiddenBlip> g_hidden_blips;
 constexpr std::uint32_t kBlipSprites = 128; // sprite ids to scan; IV uses fewer
 
-void hide_own_blips() {
+void hide_own_blips(n::Ped me) {
   g_hidden_blips.clear();
   for (std::uint32_t sprite = 0; sprite < kBlipSprites; ++sprite) {
     for (n::Blip b = n::GetFirstBlipInfoId(sprite); n::DoesBlipExist(b); b = n::GetNextBlipInfoId(sprite)) {
       const std::uint32_t display = n::GetBlipInfoIdDisplay(b);
       if (display == 0) continue;
+      const std::uint32_t type = n::GetBlipInfoIdType(b);
+      const n::Ped ped = n::GetBlipInfoIdPedIndex(b);
+      log::debug("Client mode: own blip {} sprite {} type {} display {} ped {}", b, sprite, type, display, ped);
+      if (ped == me) continue; // the radar's centre arrow is our own ped's blip
       g_hidden_blips.push_back({b, display});
     }
   }
@@ -95,7 +99,7 @@ void update_client_mode(n::Ped me) {
       g_original_model = original;
       g_client_mode = true;
       if (g_cfg.freeze_story_scripts) script::set_suppress_predicate(story::is_story_script);
-      hide_own_blips();
+      hide_own_blips(me);
       log::info("Client mode: playing as {} (was 0x{:08X}); story scripts {}", g_cfg.joiner_model, original,
                 g_cfg.freeze_story_scripts ? "frozen" : "left running");
     }

@@ -242,9 +242,12 @@ void EntitySync::make_follower(Entity& e) {
       n::SetCharHealth(e.handle, kPedBuffer);
     }
   } else {
-    n::FreezeCarPosition(e.handle, true);
-    n::SetCarCollision(e.handle, false);
+    // Stays physical: pushed along the owner's track (see pose_follower), so its wheels
+    // roll and it reacts to what is around it here.
+    n::FreezeCarPosition(e.handle, false);
+    n::SetCarCollision(e.handle, true);
     n::SetCarHealth(e.handle, kCarBuffer);
+    e.car.reset();
   }
 }
 
@@ -270,7 +273,7 @@ EntityState EntitySync::read_local(const Entity& e, std::uint32_t now_ms) {
   return s;
 }
 
-void EntitySync::pose_follower(Entity& e, const EntityState& s) {
+void EntitySync::pose_follower(Entity& e, const EntityState& s, std::uint32_t now_ms) {
   if (e.type == EntityType::Ped) {
     if (s.health == 0) { // the owner's copy died: die here too, once, and stop posing it
       if (!e.shown_dead) {
@@ -283,8 +286,9 @@ void EntitySync::pose_follower(Entity& e, const EntityState& s) {
     n::SetCharCoordinatesNoOffset(e.handle, {s.x, s.y, s.z});
     n::SetCharHeading(e.handle, s.heading());
   } else {
-    n::SetCarCoordinatesNoOffset(e.handle, {s.x, s.y, s.z});
-    n::SetVehicleQuaternion(e.handle, {s.qx, s.qy, s.qz, s.qw});
+    CarPose t{s.x, s.y, s.z, s.qx, s.qy, s.qz, s.qw, s.vx, s.vy, s.vz, 0.0f};
+    t.speed = forward_speed(t);
+    e.car.drive(e.handle, t, now_ms);
   }
 }
 
@@ -336,7 +340,7 @@ void EntitySync::tick(std::uint32_t now_ms, std::uint8_t my_id, bool hosting, co
       }
     } else {
       if (e.live) make_follower(e);
-      if (auto s = e.interp.sample(now_ms)) pose_follower(e, *s);
+      if (auto s = e.interp.sample(now_ms)) pose_follower(e, *s, now_ms);
     }
   }
 }

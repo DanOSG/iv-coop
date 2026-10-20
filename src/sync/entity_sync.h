@@ -21,6 +21,7 @@
 
 #include "game/natives.h"
 #include "net/session.h"
+#include "sync/car_follower.h"
 #include "sync/entity_protocol.h"
 
 namespace ivc::sync {
@@ -95,6 +96,7 @@ class EntitySync {
     std::uint32_t migrations = 0;
     bool shown_dead = false; // follower: owner reported death, we killed our copy
     bool pinned = false;     // host-only: never migrate (host always simulates)
+    CarFollower car;         // vehicle followers: physics-follow (wheels roll, collisions)
   };
 
   void apply_create(const EntityCreate& c, std::uint8_t my_id);
@@ -103,7 +105,7 @@ class EntitySync {
   void make_live(Entity& e);
   void make_follower(Entity& e);
   EntityState read_local(const Entity& e, std::uint32_t now_ms);
-  void pose_follower(Entity& e, const EntityState& s);
+  void pose_follower(Entity& e, const EntityState& s, std::uint32_t now_ms);
   void evaluate_ownership(const std::vector<PlayerPos>& players, std::uint8_t my_id, net::Session& net);
   void destroy_copy(Entity& e);
 
