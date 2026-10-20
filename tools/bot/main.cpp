@@ -56,6 +56,7 @@ struct Args {
   bool ride = false;      // sit in the host's vehicle whenever they're in one
   int seat = 0;           // passenger seat for --ride
   bool test_entity = false; // --serve only: create entity 999, then hand it to player #1
+  int leave_after = 0;      // leave the session N seconds after joining (0 = never)
 };
 
 // Model name -> hash, as the game's GET_HASH_KEY does (Jenkins one-at-a-time, lowercase).
@@ -93,6 +94,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--ride") a.ride = true;
     else if (k == "--seat") a.seat = std::atoi(next());
     else if (k == "--test-entity") a.test_entity = true;
+    else if (k == "--leave-after") a.leave_after = std::atoi(next());
     else std::fprintf(stderr, "unknown argument %s\n", k.c_str());
   }
   if (a.radius < 0.5f) a.radius = 0.5f;
@@ -149,6 +151,7 @@ int main(int argc, char** argv) {
   unsigned entity_states_received = 0;
   auto prev = std::chrono::steady_clock::now();
   bool was_joined = false;
+  std::uint32_t joined_at = 0;
 
   while (!g_quit) {
     std::this_thread::sleep_for(std::chrono::milliseconds(16));
@@ -274,7 +277,12 @@ int main(int argc, char** argv) {
 
     const net::SessionStatus st = session.status();
     const bool active = st.mode == net::Mode::Joined || st.mode == net::Mode::Hosting;
+    if (active && !was_joined) joined_at = now;
     if (active) was_joined = true;
+    if (active && a.leave_after > 0 && now - joined_at >= static_cast<std::uint32_t>(a.leave_after) * 1000) {
+      std::printf("[%s] leaving after %d s, as asked\n", a.name.c_str(), a.leave_after);
+      break;
+    }
     if (!active || !have_center) continue;
 
     // Walk the circle at constant speed; heading follows the direction of travel.
