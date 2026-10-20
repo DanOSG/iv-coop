@@ -28,6 +28,7 @@
 #include <thread>
 
 #include "net/session.h"
+#include "sync/entity_protocol.h"
 
 namespace {
 
@@ -54,6 +55,7 @@ struct Args {
   std::string drive;      // vehicle model name: circle in this car instead of on foot
   bool ride = false;      // sit in the host's vehicle whenever they're in one
   int seat = 0;           // passenger seat for --ride
+  bool test_entity = false; // --serve only: create entity 999, then hand it to player #1
 };
 
 // Model name -> hash, as the game's GET_HASH_KEY does (Jenkins one-at-a-time, lowercase).
@@ -90,6 +92,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--drive") a.drive = next();
     else if (k == "--ride") a.ride = true;
     else if (k == "--seat") a.seat = std::atoi(next());
+    else if (k == "--test-entity") a.test_entity = true;
     else std::fprintf(stderr, "unknown argument %s\n", k.c_str());
   }
   if (a.radius < 0.5f) a.radius = 0.5f;
@@ -131,6 +134,19 @@ int main(int argc, char** argv) {
   std::map<std::uint8_t, Gaps> gaps; // per sender, reset each report
   std::map<std::uint32_t, unsigned> vehicles_received;
   std::uint32_t host_vehicle = sync::kNoVehicle;
+
+  // Networked entities (M4). When the host makes us an entity's sim owner we "simulate"
+  // it: a ped walks a small circle around where we got it, a car holds still.
+  struct BotEntity {
+    sync::EntityType type{};
+    std::uint8_t owner = 0;
+    sync::EntityState last{};
+    float cx = 0, cy = 0, cz = 0, angle = 0;
+    std::uint16_t seq = 0;
+  };
+  std::map<std::uint32_t, BotEntity> entities;
+  std::uint32_t last_entity_send = 0;
+  unsigned entity_states_received = 0;
   auto prev = std::chrono::steady_clock::now();
   bool was_joined = false;
 
@@ -178,6 +194,81 @@ int main(int argc, char** argv) {
       }
     }
     for (const auto& u : session.drain_vehicles()) ++vehicles_received[u.state.vehicle_id];
+
+    const std::uint8_t my_id = session.status().my_id;
+    for (const auto& gm : session.drain_game()) {
+      const auto m = sync::decode_entity_msg(gm.data);
+      if (!m) continue;
+      if (m->type == sync::GameMsg::EntityCreate) {
+        auto& e = entities[m->create.id];
+        e.type = m->create.type;
+        e.owner = m->create.sim_owner;
+        e.last.id = m->create.id, e.last.x = m->create.x, e.last.y = m->create.y, e.last.z = m->create.z;
+        e.last.qx = m->create.qx, e.last.qy = m->create.qy, e.last.qz = m->create.qz, e.last.qw = m->create.qw;
+        std::printf("[%s] entity %u created (owner #%u)\n", a.name.c_str(), m->create.id, e.owner);
+      } else if (m->type == sync::GameMsg::EntityDelete) {
+        entities.erase(m->id);
+        std::printf("[%s] entity %u deleted\n", a.name.c_str(), m->id);
+      } else if (m->type == sync::GameMsg::EntityOwner) {
+        if (auto it = entities.find(m->id); it != entities.end()) {
+          auto& e = it->second;
+          e.owner = m->owner;
+          if (e.owner == my_id) {
+            e.cx = e.last.x, e.cy = e.last.y, e.cz = e.last.z, e.angle = 0;
+            std::printf("[%s] entity %u: now simulated by us\n", a.name.c_str(), m->id);
+          } else {
+            std::printf("[%s] entity %u: sim owner -> #%u\n", a.name.c_str(), m->id, e.owner);
+          }
+        }
+      } else if (m->type == sync::GameMsg::EntityState) {
+        if (auto it = entities.find(m->state.id); it != entities.end() && gm.from == it->second.owner) {
+          it->second.last = m->state;
+          ++entity_states_received;
+        }
+      }
+    }
+
+    // Offline lane test (serve only): at 3 s create entity 999 (ours), at 5 s hand it to #1.
+    if (a.serve && a.test_entity) {
+      static int stage = 0;
+      const std::uint32_t elapsed = now - started;
+      if (stage == 0 && elapsed > 3000) {
+        sync::EntityCreate c;
+        c.id = 999, c.type = sync::EntityType::Ped, c.model = model_hash("F_Y_MULTIPLAYER"), c.sim_owner = 0;
+        session.send_game(sync::encode_create(c), true);
+        entities[999] = {sync::EntityType::Ped, 0, {}, 0, 0, 0, 0, 0};
+        std::printf("[%s] test: created entity 999\n", a.name.c_str());
+        stage = 1;
+      } else if (stage == 1 && elapsed > 5000) {
+        session.send_game(sync::encode_owner(999, 1), true);
+        entities[999].owner = 1;
+        std::printf("[%s] test: entity 999 -> #1\n", a.name.c_str());
+        stage = 2;
+      }
+    }
+
+    // Simulate and stream the entities we own (15 Hz).
+    if (now - last_entity_send >= 66) {
+      last_entity_send = now;
+      for (auto& [id, e] : entities) {
+        if (e.owner != my_id) continue;
+        sync::EntityState s = e.last;
+        if (e.type == sync::EntityType::Ped) {
+          constexpr float kR = 2.0f, kV = 1.4f;
+          e.angle += kV / kR * 0.066f;
+          s.x = e.cx + std::cos(e.angle) * kR - kR, s.y = e.cy + std::sin(e.angle) * kR, s.z = e.cz;
+          s.vx = -std::sin(e.angle) * kV, s.vy = std::cos(e.angle) * kV, s.vz = 0;
+          sync::EntityState::set_heading(s, e.angle * 180.0f / kPi);
+        } else {
+          s.vx = s.vy = s.vz = 0;
+        }
+        s.id = id;
+        s.seq = ++e.seq;
+        s.time_ms = now + static_cast<std::uint32_t>(a.skew);
+        e.last = s;
+        session.send_game(sync::encode_entity_state(s), false);
+      }
+    }
 
     for (auto& [id, ip] : interps) ip.sample(now);
 
@@ -251,6 +342,9 @@ int main(int argc, char** argv) {
       for (const auto& p : st.players)
         if (p.id != st.my_id && (a.serve || p.id == net::kHostId)) line += std::format("  rtt#{} {} ms", p.id, p.rtt_ms);
       for (const auto& [vid, n] : vehicles_received) line += std::format("  veh 0x{:08X}={}", vid, n);
+      for (const auto& [eid, e] : entities)
+        line += std::format("  ent {}:owner#{}{}", eid, e.owner, e.owner == st.my_id ? "(us)" : "");
+      if (entity_states_received) line += std::format("  entity states recv {}", entity_states_received);
       line += '\n';
       std::fwrite(line.data(), 1, line.size(), stdout);
       last_report_cost = net::steady_ms() - now;

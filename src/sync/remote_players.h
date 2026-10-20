@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "net/session.h"
+#include "sync/entity_sync.h"
 #include "sync/vehicle_sync.h"
 
 namespace ivc::coop {
@@ -43,6 +44,7 @@ struct Status {
   net::SessionStatus session;
   std::vector<RemoteStatus> remotes;
   std::vector<sync::RemoteVehicleStatus> vehicles;
+  std::vector<sync::EntityStatus> entities;
 };
 
 void configure(const Settings& s);

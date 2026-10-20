@@ -48,6 +48,12 @@ struct VehicleUpdate {
   std::uint32_t arrival_ms;
 };
 
+struct GameMessage {
+  std::uint8_t from;              // sending player
+  std::vector<std::uint8_t> data; // whole packet: [type][sender][payload]
+  std::uint32_t arrival_ms;
+};
+
 struct SessionEvent {
   enum class Kind { Joined, Left, Connected, Disconnected } kind;
   std::uint8_t id = 0; // Joined/Left
@@ -74,6 +80,12 @@ class Session {
   void send_vehicle(const sync::VehicleState& v);
   std::vector<StateUpdate> drain_states();
   std::vector<VehicleUpdate> drain_vehicles();
+
+  // Game-message lane (see net/protocol.h kFirstGameMsg). `packet` is the whole message;
+  // byte 1 (sender) is filled in here. Host: goes to every client. Client: goes to the
+  // host, which relays it to the other clients. Never echoed back to the sender.
+  void send_game(std::vector<std::uint8_t> packet, bool reliable);
+  std::vector<GameMessage> drain_game();
   std::vector<SessionEvent> drain_events();
   SessionStatus status() const;
 

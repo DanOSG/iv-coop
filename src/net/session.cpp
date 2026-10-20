@@ -77,6 +77,18 @@ struct Session::Impl {
   std::deque<std::vector<std::uint8_t>> out_states;
   std::deque<StateUpdate> in_states;
   std::deque<VehicleUpdate> in_vehicles;
+  struct OutGame {
+    std::vector<std::uint8_t> data;
+    bool reliable;
+  };
+  std::deque<OutGame> out_game;
+  std::deque<GameMessage> in_game;
+
+  void push_game(std::uint8_t from, std::span<const std::uint8_t> data) {
+    std::lock_guard lock(m);
+    in_game.push_back({from, {data.begin(), data.end()}, steady_ms()});
+    if (in_game.size() > 2048) in_game.pop_front();
+  }
   std::deque<SessionEvent> events;
 
   void start() {
@@ -99,6 +111,7 @@ struct Session::Impl {
     std::lock_guard lock(m);
     roster.clear();
     out_states.clear();
+    out_game.clear();
     st = {};
   }
 
@@ -193,6 +206,13 @@ struct Session::Impl {
       restamp_state(data, c->id); // never trust the sender's id
       for (auto& other : clients)
         if (other.greeted && other.peer != ev.peer) send_packet(other.peer, kChanState, data, false);
+    } else if (static_cast<std::uint8_t>(type) >= kFirstGameMsg && c->greeted && data.size() >= 2) {
+      restamp_state(data, c->id);
+      push_game(c->id, data);
+      const bool reliable = (ev.packet->flags & ENET_PACKET_FLAG_RELIABLE) != 0;
+      for (auto& other : clients)
+        if (other.greeted && other.peer != ev.peer)
+          send_packet(other.peer, reliable ? kChanControl : kChanState, data, reliable);
     }
   }
 
@@ -258,17 +278,31 @@ struct Session::Impl {
     } else if (type == MsgType::PlayerState || type == MsgType::VehicleState) {
       // The sender id is the byte right after the type; skip our own echoes.
       if (ev.packet->dataLength > 1 && ev.packet->data[1] != st.my_id) accept_state(type, r, ev.packet->data[1]);
+    } else if (static_cast<std::uint8_t>(type) >= kFirstGameMsg && ev.packet->dataLength >= 2 &&
+               ev.packet->data[1] != st.my_id) {
+      push_game(ev.packet->data[1], std::span<const std::uint8_t>(ev.packet->data, ev.packet->dataLength));
     }
   }
 
   void loop() {
     while (running) {
       std::deque<std::vector<std::uint8_t>> out;
+      std::deque<OutGame> game;
       Mode mode;
       {
         std::lock_guard lock(m);
         out.swap(out_states);
+        game.swap(out_game);
         mode = st.mode;
+      }
+      for (const auto& g : game) {
+        const std::uint8_t ch = g.reliable ? kChanControl : kChanState;
+        if (mode == Mode::Hosting) {
+          for (auto& c : clients)
+            if (c.greeted) send_packet(c.peer, ch, g.data, g.reliable);
+        } else if (mode == Mode::Joined && server) {
+          send_packet(server, ch, g.data, g.reliable);
+        }
       }
       for (const auto& pkt : out) {
         if (mode == Mode::Hosting) {
@@ -446,6 +480,23 @@ void Session::send_vehicle(const sync::VehicleState& v) {
   if (impl_->st.mode != Mode::Hosting && impl_->st.mode != Mode::Joined) return;
   impl_->out_states.push_back(encode_vehicle(impl_->st.my_id, v));
   while (impl_->out_states.size() > 8) impl_->out_states.pop_front();
+}
+
+void Session::send_game(std::vector<std::uint8_t> packet, bool reliable) {
+  if (packet.size() < 2) return;
+  std::lock_guard lock(impl_->m);
+  if (impl_->st.mode != Mode::Hosting && impl_->st.mode != Mode::Joined) return;
+  packet[1] = impl_->st.my_id;
+  impl_->out_game.push_back({std::move(packet), reliable});
+  if (impl_->out_game.size() > 4096) impl_->out_game.pop_front();
+}
+
+std::vector<GameMessage> Session::drain_game() {
+  std::lock_guard lock(impl_->m);
+  std::vector<GameMessage> v(std::make_move_iterator(impl_->in_game.begin()),
+                             std::make_move_iterator(impl_->in_game.end()));
+  impl_->in_game.clear();
+  return v;
 }
 
 std::vector<VehicleUpdate> Session::drain_vehicles() {

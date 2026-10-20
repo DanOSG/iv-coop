@@ -117,6 +117,14 @@ void draw_status() {
         ImGui::Text("  0x%08X #%u  err %4.1f m  snaps %3u  gain %.2f  steer %+.2f%s", v.vehicle_id, v.owner, v.error_m,
                     v.snaps, v.gain, v.steer, v.blocked ? "  BLOCKED" : "");
     }
+    if (s.mode == net::Mode::Hosting || !c.entities.empty()) {
+      ImGui::Separator();
+      ImGui::TextUnformatted("networked entities  [host: Ctrl+Shift+P ped | V car | X delete all]");
+      for (const auto& e : c.entities)
+        ImGui::Text("  %4u %-7s owner #%u %-10s  %.0f %.0f %.0f  migrations %u", e.id,
+                    e.type == sync::EntityType::Ped ? "ped" : "vehicle", e.sim_owner, e.live ? "LIVE here" : "follower",
+                    e.x, e.y, e.z, e.migrations);
+    }
     ImGui::TextDisabled("F7 scripts  |  F8 overlay  |  F9 ghost  |  built " __DATE__ " " __TIME__);
   }
   ImGui::End();

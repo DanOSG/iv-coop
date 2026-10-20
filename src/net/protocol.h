@@ -17,7 +17,14 @@
 
 namespace ivc::net {
 
-inline constexpr std::uint16_t kProtocolVersion = 2; // 2: vehicle id/seat in PlayerState, VehicleState
+// 2: vehicle id/seat in PlayerState, VehicleState. 3: game-message lane (entities).
+inline constexpr std::uint16_t kProtocolVersion = 3;
+
+// Message types >= kFirstGameMsg are "game messages": [type][sender id][payload]. The
+// session layer doesn't interpret them; the host stamps the sender id and relays them to
+// every other client with the reliability they arrived with. Gameplay systems (entities,
+// combat, story events, ...) define their own types in this range.
+inline constexpr std::uint8_t kFirstGameMsg = 16;
 inline constexpr int kMaxPlayers = 4; // host + 3
 inline constexpr std::uint8_t kHostId = 0;
 inline constexpr std::size_t kNameLen = 24;

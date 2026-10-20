@@ -1,0 +1,149 @@
+#pragma once
+// Networked-entity messages (M4), carried on the session's game-message lane.
+//
+//   EntityCreate  host -> all, reliable   : a new networked entity exists
+//   EntityDelete  host -> all, reliable
+//   EntityOwner   host -> all, reliable   : its sim owner changed
+//   EntityState   sim owner -> all, unreliable: pose/velocity/health stream
+//
+// Every entity's *script owner* is the host (its copy is what story scripts read and
+// write). Its *sim owner* is the player whose copy runs physics/AI, normally the nearest.
+
+#include <cmath>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <vector>
+
+#include "net/bytes.h"
+#include "net/protocol.h"
+#include "sync/snapshot_buffer.h"
+
+namespace ivc::sync {
+
+enum class GameMsg : std::uint8_t {
+  EntityCreate = net::kFirstGameMsg, // 16
+  EntityDelete = 17,
+  EntityOwner = 18,
+  EntityState = 19,
+};
+
+enum class EntityType : std::uint8_t { Ped = 1, Vehicle = 2 };
+
+struct EntityState {
+  std::uint32_t time_ms = 0;
+  std::uint16_t seq = 0;
+  std::uint32_t id = 0;
+  float x = 0, y = 0, z = 0;
+  float vx = 0, vy = 0, vz = 0;
+  float qx = 0, qy = 0, qz = 0, qw = 1; // vehicles: full orientation; peds: yaw only
+  std::uint16_t health = 200;
+
+  static EntityState lerp(const EntityState& a, const EntityState& b, float k) {
+    EntityState o = b;
+    o.x = a.x + (b.x - a.x) * k, o.y = a.y + (b.y - a.y) * k, o.z = a.z + (b.z - a.z) * k;
+    const float dot = a.qx * b.qx + a.qy * b.qy + a.qz * b.qz + a.qw * b.qw;
+    const float s = dot < 0 ? -1.0f : 1.0f;
+    o.qx = a.qx + (s * b.qx - a.qx) * k, o.qy = a.qy + (s * b.qy - a.qy) * k;
+    o.qz = a.qz + (s * b.qz - a.qz) * k, o.qw = a.qw + (s * b.qw - a.qw) * k;
+    const float len = std::sqrt(o.qx * o.qx + o.qy * o.qy + o.qz * o.qz + o.qw * o.qw);
+    if (len > 1e-6f) o.qx /= len, o.qy /= len, o.qz /= len, o.qw /= len;
+    return o;
+  }
+  static EntityState extrapolate(const EntityState& s, float dt) {
+    EntityState o = s;
+    o.x += s.vx * dt, o.y += s.vy * dt, o.z += s.vz * dt;
+    return o;
+  }
+
+  // Peds: heading (degrees, IV convention) <-> yaw quaternion about +Z.
+  static void set_heading(EntityState& s, float heading_deg) {
+    const float h = heading_deg * 3.14159265f / 180.0f;
+    s.qx = s.qy = 0, s.qz = std::sin(h / 2), s.qw = std::cos(h / 2);
+  }
+  float heading() const {
+    float h = std::atan2(2.0f * (qw * qz + qx * qy), 1.0f - 2.0f * (qy * qy + qz * qz)) * 180.0f / 3.14159265f;
+    return h < 0 ? h + 360.0f : h;
+  }
+};
+
+using EntityInterpolator = SnapshotBuffer<EntityState>;
+
+struct EntityCreate {
+  std::uint32_t id = 0;
+  EntityType type = EntityType::Ped;
+  std::uint32_t model = 0;
+  float x = 0, y = 0, z = 0;
+  float qx = 0, qy = 0, qz = 0, qw = 1;
+  std::uint8_t sim_owner = 0;
+};
+
+// --- encoding: [type][sender (stamped by the session)][payload] ---
+
+inline std::vector<std::uint8_t> encode_create(const EntityCreate& c) {
+  net::Writer w;
+  w.put(GameMsg::EntityCreate).put(std::uint8_t{0}).put(c.id).put(c.type).put(c.model).put(c.x).put(c.y).put(c.z)
+      .put(c.qx).put(c.qy).put(c.qz).put(c.qw).put(c.sim_owner);
+  return std::move(w.data());
+}
+
+inline std::vector<std::uint8_t> encode_delete(std::uint32_t id) {
+  net::Writer w;
+  w.put(GameMsg::EntityDelete).put(std::uint8_t{0}).put(id);
+  return std::move(w.data());
+}
+
+inline std::vector<std::uint8_t> encode_owner(std::uint32_t id, std::uint8_t sim_owner) {
+  net::Writer w;
+  w.put(GameMsg::EntityOwner).put(std::uint8_t{0}).put(id).put(sim_owner);
+  return std::move(w.data());
+}
+
+inline std::vector<std::uint8_t> encode_entity_state(const EntityState& s) {
+  net::Writer w;
+  w.put(GameMsg::EntityState).put(std::uint8_t{0}).put(s.id).put(s.seq).put(s.time_ms).put(s.x).put(s.y).put(s.z)
+      .put(s.vx).put(s.vy).put(s.vz).put(s.qx).put(s.qy).put(s.qz).put(s.qw).put(s.health);
+  return std::move(w.data());
+}
+
+// Decoded form of any entity message.
+struct EntityMsg {
+  GameMsg type{};
+  std::uint8_t sender = 0;
+  EntityCreate create;    // EntityCreate
+  std::uint32_t id = 0;   // EntityDelete / EntityOwner
+  std::uint8_t owner = 0; // EntityOwner
+  EntityState state;      // EntityState
+};
+
+inline std::optional<EntityMsg> decode_entity_msg(std::span<const std::uint8_t> data) {
+  net::Reader r(data);
+  EntityMsg m;
+  r.get(m.type), r.get(m.sender);
+  switch (m.type) {
+    case GameMsg::EntityCreate: {
+      auto& c = m.create;
+      r.get(c.id), r.get(c.type), r.get(c.model), r.get(c.x), r.get(c.y), r.get(c.z);
+      r.get(c.qx), r.get(c.qy), r.get(c.qz), r.get(c.qw), r.get(c.sim_owner);
+      break;
+    }
+    case GameMsg::EntityDelete:
+      r.get(m.id);
+      break;
+    case GameMsg::EntityOwner:
+      r.get(m.id), r.get(m.owner);
+      break;
+    case GameMsg::EntityState: {
+      auto& s = m.state;
+      r.get(s.id), r.get(s.seq), r.get(s.time_ms), r.get(s.x), r.get(s.y), r.get(s.z), r.get(s.vx), r.get(s.vy);
+      r.get(s.vz), r.get(s.qx), r.get(s.qy), r.get(s.qz), r.get(s.qw), r.get(s.health);
+      break;
+    }
+    default:
+      return std::nullopt;
+  }
+  if (!r.ok()) return std::nullopt;
+  return m;
+}
+
+} // namespace ivc::sync

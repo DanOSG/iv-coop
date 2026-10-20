@@ -13,6 +13,7 @@
 
 namespace ivc::natives {
 
+using Handle = std::int32_t; // any script entity handle (ped, vehicle, object)
 using Ped = std::int32_t;
 using Player = std::int32_t;
 using Blip = std::int32_t;
@@ -99,6 +100,15 @@ inline void SetCharKeepTask(Ped ped, bool b) { invoke(0x264009D3, ped, b); }
 inline void SetPedDontDoEvasiveDives(Ped ped, bool b) { invoke(0x1EAD1D7D, ped, b); }
 inline void SetDontActivateRagdollFromPlayerImpact(Ped ped, bool b) { invoke(0x5A676BCD, ped, b); }
 inline void SetCharWillMoveWhenInjured(Ped ped, bool b) { invoke(0x1EF36397, ped, b); }
+inline void TaskWanderStandard(Ped ped) { invoke(0x43F5151F, ped); }
+inline std::uint32_t GetCharHealth(Ped ped) { std::uint32_t h = 0; invoke(0x4B6C2256, ped, &h); return h; }
+inline void SetCharHealth(Ped ped, std::uint32_t h) { invoke(0x575E2880, ped, h); }
+inline bool IsCharDead(Ped ped) { return invoke<bool>(0x6A6B4F18, ped); }
+inline Vector3 GetOffsetFromCharInWorldCoords(Ped ped, Vector3 off) {
+  Vector3 o{};
+  invoke(0x737F24F9, ped, off.x, off.y, off.z, &o.x, &o.y, &o.z);
+  return o;
+}
 
 // Vehicles.
 using Vehicle = std::int32_t;
@@ -137,6 +147,8 @@ inline void SwitchCarSiren(Vehicle v, bool on) { invoke(0x7781290F, v, on); }
 inline void SetCarEngineOn(Vehicle v, bool on, bool instantly) { invoke(0x0CAA42D0, v, on, instantly); }
 inline void SetCarAsMissionCar(Vehicle v) { invoke(0x210A33B2, v); }
 inline void SetVehicleSteerBias(Vehicle v, float bias) { invoke(0x091D1480, v, bias); }
+inline void FreezeCarPosition(Vehicle v, bool frozen) { invoke(0x295C4C52, v, frozen); }
+inline void SetCarCollision(Vehicle v, bool on) { invoke(0x6A9033B3, v, on); }
 // APPLY_FORCE_TO_CAR. Argument layout read from its implementation (0xBC8E40 in 1.2.0.59):
 // (car, type, force xyz, offset xyz, component, force_relative, offset_relative, scale_by_mass).
 // type 0/1 go to two physics-instance slots (+0x80/+0x8C), 2/3 to the fragment path.
