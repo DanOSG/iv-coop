@@ -11,10 +11,7 @@ namespace {
 
 using native_hooks::Call;
 
-std::string str(const Call& c, int i) {
-  const char* s = c.arg<const char*>(i);
-  return s ? std::string(s) : std::string("(null)");
-}
+std::string str(const Call& c, int i) { return c.str(i); } // pointer-validated
 
 void report(const Call& c, const std::string& detail) { log::info("[story] {:<14} {}({})", c.script, c.name, detail); }
 

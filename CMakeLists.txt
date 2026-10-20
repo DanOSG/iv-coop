@@ -103,6 +103,8 @@ target_compile_definitions(iv-coop PRIVATE UNICODE _UNICODE)
 target_compile_options(iv-coop PRIVATE ${IVCOOP_WARNINGS})
 target_link_libraries(iv-coop PRIVATE ivc_net minhook imgui d3d9 version)
 set_target_properties(iv-coop PROPERTIES SUFFIX ".asi" OUTPUT_NAME "iv-coop")
+# Linker map, so crash-logger offsets (iv-coop.asi+0x...) can be resolved to functions.
+target_link_options(iv-coop PRIVATE /MAP:$<TARGET_FILE_DIR:iv-coop>/iv-coop.map)
 
 if(IVCOOP_DEPLOY)
   # -D must precede -P for script mode.

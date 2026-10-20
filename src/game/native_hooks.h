@@ -34,7 +34,13 @@ struct Call {
   T result() const {
     return *reinterpret_cast<const T*>(ctx->result);
   }
+  // Argument i as a C string, only if it really points at readable, terminated text
+  // (signatures in the community native list are not always right). Otherwise a marker.
+  std::string str(int i) const;
 };
+
+// True if `p` points at readable memory containing a NUL within `max` bytes.
+bool readable_cstr(const char* p, std::size_t max = 512);
 
 using Callback = std::function<void(const Call&)>;
 
