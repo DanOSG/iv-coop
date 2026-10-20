@@ -214,6 +214,13 @@ docs/
   ownership/migration.
 - **M6:** story layer: client script suppression, progression-state sync on join, and replication of blips, HUD,
   subtitles and dialogue.
+  - Done (verified on Roman 2 via record/replay, 2026-10-20): capture of story calls, mission entity
+    replication, blips with routes, PRINT/help text including the mission text blocks (REQUEST_ADDITIONAL_TEXT);
+    client mode (joiner model, frozen story scripts, own story blips hidden and restored); the host shown as
+    the protagonist through extra player peds (game/player_slots); followed mission cars use physics-follow.
+  - Left: progression sync on join (incl. text blocks/blips already active), dialogue/conversations, the
+    mission-vehicle duplicate for partners, task forwarding for mission entities, objects, blips on
+    non-networked entities.
 - **M7:** cutscenes and scripted cameras, mission teleport/"join host".
 - **M8:** mission audit: play IV start to finish with 4 players and fill in `docs/missions.md`, applying
   concessions as needed.
