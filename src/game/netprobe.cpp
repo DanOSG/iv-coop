@@ -167,7 +167,6 @@ void follow_attempt() {
 // Can a second *player* (slot 1) exist in a story save? Only player peds may wear the
 // protagonist model, so this is how a remote host could appear as Niko. Logs what the
 // game does with it: does it copy our input, take the camera, get police attention.
-constexpr std::uint32_t kCreatePlayer = 0x335E3951;
 constexpr std::uint32_t kSetPlayerControl = 0x1A6203EA;
 constexpr std::uint32_t kSetPoliceIgnorePlayer = 0x619D51D3;
 constexpr std::uint32_t kSetEveryoneIgnorePlayer = 0x059901B9;
@@ -176,7 +175,7 @@ constexpr std::uint32_t kConvertIntToPlayerIndex = 0x5996315E;
 constexpr std::uint32_t kPlayerHasChar = 0x22545844;
 constexpr std::uint32_t kStoreWantedLevel = 0x12AA6D71;
 
-bool g_f5_down = true, g_f6_down = true;
+bool g_f4_down = true, g_f5_down = true, g_f6_down = true;
 natives::Player g_extra = -1;
 std::uint32_t g_extra_frames = 0; // frames since it was created (follow for ~20 s)
 
@@ -202,29 +201,87 @@ void log_extra(const char* when) {
   }
 }
 
+// Engine internals (static VAs, GTAIV.exe 1.2.0.59). CREATE_PLAYER only (re)creates the
+// *local* player and crashes if one exists, so we call what it calls, with a slot of our
+// own and the "not local" flags (no camera/pad hookup).
+//   create(flags, slot, model_index, flag): CPlayerInfo + player ped into slot; returns ped
+//   remove(slot): deletes that slot's ped and CPlayerInfo
+//   model_index(name)
+constexpr std::uintptr_t kFnCreatePlayerSlot = 0x0093E960;
+constexpr std::uintptr_t kFnRemovePlayerSlot = 0x0093EB70;
+constexpr std::uintptr_t kFnModelIndex = 0x009DC680;
+constexpr std::uintptr_t kPlayerInfos = 0x011A8808; // CPlayerInfo* [32]
+constexpr std::uint32_t kExtraSlot = 1;
+
+template <class T> T at_static(std::uintptr_t va) {
+  return reinterpret_cast<T>(va - 0x400000 + reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr)));
+}
+
+void* slot_info(std::uint32_t slot) { return at_static<void**>(kPlayerInfos)[slot]; }
+
+void* guarded_create(std::uint32_t slot, std::int32_t model) {
+  using Create = void*(__cdecl*)(const std::uint8_t*, std::uint32_t, std::int32_t, std::uint8_t);
+  const std::uint8_t flags[2] = {1, 0}; // not the local player
+  __try {
+    return at_static<Create>(kFnCreatePlayerSlot)(flags, slot, model, 0);
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return reinterpret_cast<void*>(-1);
+  }
+}
+
+bool guarded_remove(std::uint32_t slot) {
+  __try {
+    at_static<void(__cdecl*)(std::uint32_t)>(kFnRemovePlayerSlot)(slot);
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
 void create_extra_player() {
   using namespace natives;
-  if (g_extra >= 0) {
-    log::warn("ExtraPlayer: already created (slot {}); restart the game to try again", g_extra);
+  if (g_extra >= 0 || slot_info(kExtraSlot)) {
+    log::warn("ExtraPlayer: slot {} is already in use (remove it with Ctrl+Shift+F4)", kExtraSlot);
     return;
   }
   const Ped me = GetPlayerChar(GetPlayerId());
   const Vector3 at = GetOffsetFromCharInWorldCoords(me, {2.0f, 2.0f, 0.0f});
-  log::warn("ExtraPlayer: CREATE_PLAYER(1) at ({:.1f},{:.1f},{:.1f})", at.x, at.y, at.z);
-  Player p = -1;
-  invoke(kCreatePlayer, 1u, at.x, at.y, at.z, &p);
-  log::info("ExtraPlayer: CREATE_PLAYER returned index {} (slot 1 index is {})", p,
-            invoke<Player>(kConvertIntToPlayerIndex, 1u));
-  if (p < 0) return;
+  const std::int32_t model = at_static<std::int32_t(__cdecl*)(const char*)>(kFnModelIndex)("player");
+  log::warn("ExtraPlayer: creating slot {} (model index {}) at ({:.1f},{:.1f},{:.1f})", kExtraSlot, model, at.x, at.y,
+            at.z);
+  void* ped = guarded_create(kExtraSlot, model);
+  if (ped == reinterpret_cast<void*>(-1)) {
+    log::error("ExtraPlayer: the engine faulted creating the slot; slot info now {}", slot_info(kExtraSlot));
+    return;
+  }
+  log::info("ExtraPlayer: created: ped object {}, slot info {}", ped, slot_info(kExtraSlot));
+  if (!ped) return;
+  const Player p = invoke<Player>(kConvertIntToPlayerIndex, kExtraSlot);
   g_extra = p;
   g_extra_frames = 0;
   log_extra("created");
+  if (invoke<bool>(kPlayerHasChar, p)) {
+    const Ped h = GetPlayerChar(p);
+    invoke(0x689D0F5F, h, at.x, at.y, at.z); // SET_CHAR_COORDINATES
+    SetCharHeading(h, GetCharHeading(me));
+  }
   // Keep it out of the single-player game: no input, no police, no hostility, no dying.
   invoke(kSetPlayerControl, p, false);
   invoke(kSetPoliceIgnorePlayer, p, true);
   invoke(kSetEveryoneIgnorePlayer, p, true);
   invoke(kSetPlayerInvincible, p, true);
   log_extra("configured");
+}
+
+void remove_extra_player() {
+  if (!slot_info(kExtraSlot)) {
+    log::warn("ExtraPlayer: slot {} is empty", kExtraSlot);
+    return;
+  }
+  log::warn("ExtraPlayer: removing slot {}", kExtraSlot);
+  const bool ok = guarded_remove(kExtraSlot);
+  log::info("ExtraPlayer: remove {}; slot info now {}", ok ? "returned" : "FAULTED", slot_info(kExtraSlot));
+  g_extra = -1;
 }
 
 void walk_extra_player() {
@@ -243,6 +300,7 @@ void walk_extra_player() {
 void tick_extra_player() {
   if (chord(VK_F5, g_f5_down)) create_extra_player();
   if (chord(VK_F6, g_f6_down)) walk_extra_player();
+  if (chord(VK_F4, g_f4_down)) remove_extra_player();
   if (g_extra >= 0 && g_extra_frames < 60 * 20) {
     if (++g_extra_frames % 60 == 0) log_extra("follow");
   }
