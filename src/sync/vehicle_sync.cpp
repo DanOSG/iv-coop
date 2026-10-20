@@ -216,8 +216,23 @@ void VehicleSync::drive_physics(Remote& r, const VehicleState& t, float dt) {
   r.last_request = want;
   r.have_last = true;
 
-  // Ease the orientation toward the owner's (short-arc nlerp of the current one).
   const n::Vector4 q = n::GetVehicleQuaternion(r.handle);
+
+  // Wheel sync: impulses move the body but not the wheels, so the game hears tyres
+  // dragged over the road at full speed (constant screech). While the car isn't sliding,
+  // re-assert its *own current* forward speed, which spins the wheels to match without
+  // adding any push. Skipped while sliding (collisions, spins) so those still play out.
+  if (wheel_sync) {
+    const float fx = 2 * (q.x * q.y - q.w * q.z), fy = 1 - 2 * (q.x * q.x + q.z * q.z);
+    const float flen = std::hypot(fx, fy);
+    if (flen > 0.1f) {
+      const float forward = (vel.x * fx + vel.y * fy) / flen;
+      const float lateral = std::fabs((vel.x * -fy + vel.y * fx) / flen);
+      if (lateral < 2.0f) n::SetCarForwardSpeed(r.handle, forward);
+    }
+  }
+
+  // Ease the orientation toward the owner's (short-arc nlerp of the current one).
   const float dot = q.x * t.qx + q.y * t.qy + q.z * t.qz + q.w * t.qw;
   const float s = dot < 0 ? -1.0f : 1.0f;
   n::Vector4 o{q.x + (s * t.qx - q.x) * kRotBlend, q.y + (s * t.qy - q.y) * kRotBlend,

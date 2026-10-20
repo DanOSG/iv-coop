@@ -59,7 +59,7 @@ void drop_all() {
   g_remotes.clear();
 }
 
-bool g_action_was_down = true, g_steer_was_down = true;
+bool g_action_was_down = true, g_steer_was_down = true, g_wheel_was_down = true;
 
 void handle_hotkeys() {
   // Vehicle tuning chords (physics-follow calibration).
@@ -72,6 +72,11 @@ void handle_hotkeys() {
     log::info("Vehicle tuning: steering = {}", g_vehicles.steer_mode == 0   ? "off"
                                               : g_vehicles.steer_mode == 1 ? "normal"
                                                                            : "inverted");
+  }
+
+  if (input::pressed_ctrl_shift(VK_F6, g_wheel_was_down)) {
+    g_vehicles.wheel_sync = !g_vehicles.wheel_sync;
+    log::info("Vehicle tuning: wheel sync {}", g_vehicles.wheel_sync ? "on" : "off");
   }
 
   const net::Mode mode = session().status().mode;
@@ -218,6 +223,7 @@ void tick() {
   g_status.vehicles = vehicles;
   g_status.temp_action = g_vehicles.temp_action;
   g_status.steer_mode = g_vehicles.steer_mode;
+  g_status.wheel_sync = g_vehicles.wheel_sync;
 }
 
 Status status() {
