@@ -147,7 +147,14 @@ int main(int argc, char** argv) {
   std::setvbuf(stdout, nullptr, _IONBF, 0); // output may be redirected to a file; don't buffer it
 
   net::Session session;
-  if (a.serve ? !session.host(a.port, a.name, "127.0.0.1") : !session.join(a.host, a.port, a.name)) {
+  bool started = a.serve ? session.host(a.port, a.name, "127.0.0.1") : session.join(a.host, a.port, a.name);
+  // --retry when serving: wait for the port (e.g. the game is still hosting on it).
+  while (!started && a.serve && a.retry && !g_quit) {
+    std::printf("[%s] host failed (%s); retrying in 2 s\n", a.name.c_str(), session.status().last_error.c_str());
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    started = session.host(a.port, a.name, "127.0.0.1");
+  }
+  if (!started) {
     std::fprintf(stderr, "%s failed: %s\n", a.serve ? "host" : "join", session.status().last_error.c_str());
     return 1;
   }
@@ -188,12 +195,11 @@ int main(int argc, char** argv) {
   unsigned entity_states_received = 0;
 
   // Replay of a recorded host session (test rig for client-side story playback).
-  std::vector<Record> replay = a.replay.empty() ? std::vector<Record>{} : load_recording(a.replay);
+  // Loaded when the first client joins, so the bot can be started before the recording
+  // has been finished and saved.
+  std::vector<Record> replay;
   std::size_t replay_next = 0;
   std::uint32_t replay_start = 0; // set when the first client joins
-  if (!a.replay.empty())
-    std::printf("[%s] loaded %zu recorded messages (%.1f s) from %s\n", a.name.c_str(), replay.size(),
-                replay.empty() ? 0.0 : replay.back().t_ms / 1000.0, a.replay.c_str());
 
   // Combat (M5): our health, death/respawn, and shooting at the host.
   constexpr std::uint32_t kPistol = 7;
@@ -219,9 +225,14 @@ int main(int argc, char** argv) {
       if (e.kind == K::Connected) std::printf("[%s] connected as player #%u\n", a.name.c_str(), e.id);
       if (e.kind == K::Joined) {
         std::printf("[%s] player #%u '%s' is here\n", a.name.c_str(), e.id, e.text.c_str());
-        if (!replay.empty() && !replay_start) {
-          replay_start = now + 3000; // give the client a moment to settle
-          std::printf("[%s] replay starts in 3 s\n", a.name.c_str());
+        if (!a.replay.empty() && !replay_start) {
+          replay = load_recording(a.replay);
+          std::printf("[%s] loaded %zu recorded messages (%.1f s) from %s\n", a.name.c_str(), replay.size(),
+                      replay.empty() ? 0.0 : replay.back().t_ms / 1000.0, a.replay.c_str());
+          if (!replay.empty()) {
+            replay_start = now + 3000; // give the client a moment to settle
+            std::printf("[%s] replay starts in 3 s\n", a.name.c_str());
+          }
         }
       }
       if (e.kind == K::Left) std::printf("[%s] player #%u '%s' left\n", a.name.c_str(), e.id, e.text.c_str());
