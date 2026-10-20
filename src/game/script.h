@@ -27,6 +27,10 @@ void set_host_scripts(std::vector<std::string> preferred);
 // Scripts whose names are in this set are frozen: their Run is skipped. This is the M1
 // stand-in for client-side script suppression (M6 blocks them at launch instead).
 void suppress(const std::string& name, bool on);
+// Freeze every script for which `pred(name)` is true (client mode: all story scripts).
+// Frozen scripts keep their state and resume where they were when this is cleared.
+// Pass nullptr to clear.
+void set_suppress_predicate(std::function<bool(const std::string&)> pred);
 
 // Snapshot of all script threads, refreshed every tick (safe to call from any thread).
 std::vector<ThreadInfo> threads();

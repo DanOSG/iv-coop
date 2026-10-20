@@ -7,6 +7,7 @@
 
 #include "core/input.h"
 #include "core/log.h"
+#include "game/script.h"
 #include "sync/local_player.h"
 #include "sync/player_state.h"
 #include "sync/puppet.h"
@@ -36,6 +37,45 @@ sync::VehicleSync g_vehicles;
 sync::EntitySync g_entities;
 bool g_was_host = false;
 std::uint32_t g_my_last_health = 0; // our player's health at the end of last frame
+
+// Client mode (M6d).
+bool g_want_client_mode = false; // joined: switch to the joiner character
+bool g_client_mode = false;      // switched
+bool g_restore_pending = false;  // left: switch back to the original character
+std::uint32_t g_original_model = 0;
+
+// Model swaps wait for the model to stream in; returns true once done.
+bool swap_player_model(std::uint32_t model) {
+  n::RequestModel(model);
+  if (!n::HasModelLoaded(model)) return false;
+  const n::Player player = n::GetPlayerId();
+  n::ChangePlayerModel(player, model);
+  n::SetCharDefaultComponentVariation(n::GetPlayerChar(player));
+  n::MarkModelAsNoLongerNeeded(model);
+  return true;
+}
+
+void update_client_mode(n::Ped me) {
+  if (!me) return;
+  if (g_want_client_mode && !g_client_mode) {
+    const std::uint32_t model = n::GetHashKey(g_cfg.joiner_model.c_str());
+    const std::uint32_t original = n::GetCharModel(me);
+    if (swap_player_model(model)) {
+      g_original_model = original;
+      g_client_mode = true;
+      if (g_cfg.freeze_story_scripts) script::set_suppress_predicate(story::is_story_script);
+      log::info("Client mode: playing as {} (was 0x{:08X}); story scripts {}", g_cfg.joiner_model, original,
+                g_cfg.freeze_story_scripts ? "frozen" : "left running");
+    }
+  }
+  if (g_restore_pending && g_original_model) {
+    if (swap_player_model(g_original_model)) {
+      g_restore_pending = false;
+      g_client_mode = false;
+      log::info("Client mode ended: back to model 0x{:08X}", g_original_model);
+    }
+  }
+}
 bool g_host_was_down = true, g_join_was_down = true;
 std::uint32_t g_last_send = 0;
 std::uint16_t g_seq = 0;
@@ -183,6 +223,7 @@ void tick() {
         break;
       case K::Connected:
         log::info("Connected; we are player {}", e.id);
+        g_want_client_mode = true;
         break;
       case K::Disconnected:
         log::info("Disconnected: {}", e.text);
@@ -190,6 +231,11 @@ void tick() {
         g_vehicles.clear();
         g_entities.clear(g_was_host);
         story::clear();
+        if (g_want_client_mode || g_client_mode) {
+          script::set_suppress_predicate(nullptr); // our story scripts resume where they were
+          g_want_client_mode = false;
+          g_restore_pending = g_client_mode;
+        }
         break;
     }
   }
@@ -197,6 +243,10 @@ void tick() {
   const std::uint32_t now = net::steady_ms();
   const net::SessionStatus ss = net.status();
   const bool active = ss.mode == net::Mode::Hosting || ss.mode == net::Mode::Joined;
+  {
+    const n::Ped p = n::GetPlayerChar(n::GetPlayerId());
+    update_client_mode(p && n::DoesCharExist(p) ? p : 0);
+  }
   auto local = sync::capture_local(now);
   const n::Ped me = local ? n::GetPlayerChar(n::GetPlayerId()) : 0;
 
@@ -253,7 +303,9 @@ void tick() {
     if (auto smp = r.interp.sample(now)) { // once per frame: sampling advances the timeline
       const n::Vector3 at{smp->x, smp->y, smp->z};
       positions.push_back({id, at});
+      r.puppet.set_model(smp->model); // their real model (host: Niko); 0 -> configured fallback
       if (r.puppet.ensure(at)) {
+        r.puppet.apply_outfit(*smp);
         const n::Vehicle veh = g_vehicles.handle_for(smp->vehicle_id);
         if (veh) {
           r.puppet.sit_in(veh, smp->seat);

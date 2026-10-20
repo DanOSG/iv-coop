@@ -62,6 +62,10 @@ std::optional<PlayerState> capture_local(std::uint32_t now_ms) {
   if (n::IsPlayerTargettingAnything(player) || now_ms - g_last_shot_ms < 1500) s.flags |= PlayerState::kAiming;
   if (n::IsPlayerDead(player) || n::IsCharDead(me)) s.flags |= PlayerState::kDead;
   s.wanted = static_cast<std::uint8_t>(std::min<std::uint32_t>(n::StoreWantedLevel(player), 6));
+  for (std::uint32_t c = 0; c < n::kPedComponents; ++c) {
+    s.drawable[c] = static_cast<std::uint8_t>(n::GetCharDrawableVariation(me, c));
+    s.texture[c] = static_cast<std::uint8_t>(n::GetCharTextureVariation(me, c));
+  }
   return s;
 }
 

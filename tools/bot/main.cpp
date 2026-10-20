@@ -62,6 +62,7 @@ struct Args {
   int shoot_host = 0;       // fire at the host every N seconds (10 damage per hit); implies armed
   int health = 200;         // starting (and respawn) health
   std::string replay;       // --serve: replay a recorded host session (.ivcrec) to the first client
+  std::string model;        // appear as this model (e.g. PLAYER = Niko); empty = receivers' fallback
 };
 
 struct Record {
@@ -131,6 +132,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--armed") a.armed = true;
     else if (k == "--health") a.health = std::atoi(next());
     else if (k == "--replay") a.replay = next(), a.serve = true;
+    else if (k == "--model") a.model = next();
     else if (k == "--shoot-host") a.shoot_host = std::atoi(next()), a.armed = true;
     else std::fprintf(stderr, "unknown argument %s\n", k.c_str());
   }
@@ -414,6 +416,7 @@ int main(int argc, char** argv) {
       }
     }
     s.shots = shots;
+    if (!a.model.empty()) s.model = model_hash(a.model);
 
     std::optional<sync::VehicleState> car;
     if (a.ride && host_vehicle != sync::kNoVehicle) {

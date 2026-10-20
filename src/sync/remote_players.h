@@ -23,6 +23,10 @@ struct Settings {
   std::string puppet_model = "M_Y_MULTIPLAYER";
   bool animated_puppets = true;
   bool physics_follow = true;       // stand-in cars react to traffic/walls (vs. kinematic)
+  // Client mode (M6d): while joined, play as this character (not the story protagonist) and
+  // freeze our own story scripts (the host runs the story). Both undone on leaving.
+  std::string joiner_model = "M_Y_MULTIPLAYER";
+  bool freeze_story_scripts = true;
   std::uint32_t vehicle_force_type = 1;
   int host_key = 0x79; // VK_F10: host / leave
   int join_key = 0x7A; // VK_F11: join / leave

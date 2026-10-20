@@ -161,6 +161,21 @@ inline void SetCharMaxHealth(Ped ped, std::uint32_t h) { invoke(0x08A453C9, ped,
 inline void SetCharAccuracy(Ped ped, std::uint32_t acc) { invoke(0x1958471A, ped, acc); }
 inline std::uint32_t StoreWantedLevel(Player p) { std::uint32_t w = 0; invoke(0x12AA6D71, p, &w); return w; }
 inline Camera GetGameCam() { Camera c = 0; invoke(0x0B2A2801, &c); return c; }
+
+// Appearance.
+inline constexpr std::uint32_t kPedComponents = 11; // head, uppr, lowr, suse, hand, feet, jacket, hair, suse2, teef, face
+inline void ChangePlayerModel(Player p, std::uint32_t model) { invoke(0x232F1A85, p, model); }
+inline void SetCharComponentVariation(Ped ped, std::uint32_t comp, std::uint32_t drawable, std::uint32_t texture) {
+  invoke(0x71A52973, ped, comp, drawable, texture);
+}
+inline std::uint32_t GetCharDrawableVariation(Ped ped, std::uint32_t comp) { return invoke<std::uint32_t>(0x1A1A6D83, ped, comp); }
+inline std::uint32_t GetCharTextureVariation(Ped ped, std::uint32_t comp) { return invoke<std::uint32_t>(0x3A7B78C5, ped, comp); }
+inline void SetCharDefaultComponentVariation(Ped ped) { invoke(0x4FB30DB6, ped); }
+
+// Road nodes.
+inline bool GetClosestCarNodeWithHeading(Vector3 at, Vector3& out, float& heading) {
+  return invoke<bool>(0x371467E0, at.x, at.y, at.z, &out.x, &out.y, &out.z, &heading);
+}
 inline Vector3 GetCamPos(Camera c) { Vector3 p{}; invoke(0x60C22E93, c, &p.x, &p.y, &p.z); return p; }
 inline Vector3 GetCamRot(Camera c) { Vector3 r{}; invoke(0x51A06698, c, &r.x, &r.y, &r.z); return r; }
 inline std::uint32_t GetCharHealth(Ped ped) { std::uint32_t h = 0; invoke(0x4B6C2256, ped, &h); return h; }

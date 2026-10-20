@@ -49,6 +49,11 @@ std::chrono::steady_clock::time_point g_last_heartbeat;
 
 std::mutex g_mutex; // guards the members below (read from the render thread)
 std::set<std::string> g_suppressed;
+std::function<bool(const std::string&)> g_suppress_pred; // game thread only
+
+bool is_suppressed_locked(const std::string& name) {
+  return g_suppressed.contains(name) || (g_suppress_pred && g_suppress_pred(name));
+}
 std::vector<ThreadInfo> g_snapshot;
 std::string g_host_snapshot;
 
@@ -93,7 +98,7 @@ void scan_threads() {
   }
 
   std::lock_guard lock(g_mutex);
-  for (auto& ti : list) ti.suppressed = g_suppressed.contains(ti.name);
+  for (auto& ti : list) ti.suppressed = is_suppressed_locked(ti.name);
   g_snapshot = std::move(list);
   g_host_snapshot = g_host_name;
 }
@@ -139,7 +144,7 @@ std::int32_t __fastcall hk_Run(game::scrThread* t, void* edx, std::int32_t budge
   bool suppressed = false;
   {
     std::lock_guard lock(g_mutex);
-    if (!g_suppressed.empty()) suppressed = g_suppressed.contains(name_of(t));
+    if (!g_suppressed.empty() || g_suppress_pred) suppressed = is_suppressed_locked(name_of(t));
   }
   return suppressed ? field<std::int32_t>(t, kOffState) : o_Run(t, edx, budget);
 }
@@ -175,6 +180,12 @@ void suppress(const std::string& name, bool on) {
   std::lock_guard lock(g_mutex);
   if (on ? g_suppressed.insert(name).second : g_suppressed.erase(name) > 0)
     log::info("Script '{}' {}", name, on ? "suppressed" : "released");
+}
+
+void set_suppress_predicate(std::function<bool(const std::string&)> pred) {
+  std::lock_guard lock(g_mutex);
+  g_suppress_pred = std::move(pred);
+  log::info("Script suppression rule {}", g_suppress_pred ? "set" : "cleared");
 }
 
 std::vector<ThreadInfo> threads() {

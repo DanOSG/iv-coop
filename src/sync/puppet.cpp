@@ -37,7 +37,7 @@ bool Puppet::ensure(const n::Vector3& at) {
     ped_ = 0;
     blip_ = 0; // the game removes blips attached to deleted peds
   }
-  if (!model_) model_ = n::GetHashKey(model_name_.c_str());
+  model_ = model_override_ ? model_override_ : n::GetHashKey(model_name_.c_str());
   n::RequestModel(model_);
   if (!n::HasModelLoaded(model_)) {
     phase_ = "loading model";
@@ -55,7 +55,7 @@ bool Puppet::ensure(const n::Vector3& at) {
   n::SetCharMaxHealth(ped_, kPuppetHealthBuffer);
   n::SetCharHealth(ped_, kPuppetHealthBuffer);
   n::SetCharAccuracy(ped_, 100); // its shots go where the remote player aimed
-  dead_ = false, weapon_ = 0, have_shots_ = false;
+  dead_ = false, weapon_ = 0, have_shots_ = false, outfit_applied_ = false;
   if (animated_) {
     // A real, physical ped that walks on the ground and keeps the tasks we give it.
     n::SetCharKeepTask(ped_, true);
@@ -200,6 +200,25 @@ void Puppet::leave_vehicle(const n::Vector3& at) {
     n::SetCharCollision(ped_, false);
     n::FreezeCharPosition(ped_, true);
   }
+}
+
+void Puppet::set_model(std::uint32_t model_hash) {
+  if (model_hash == model_override_) return;
+  model_override_ = model_hash;
+  if (ped_) {
+    log::info("Puppet model -> 0x{:08X}; respawning", model_hash);
+    despawn(); // ensure() spawns the new model next frame
+  }
+}
+
+void Puppet::apply_outfit(const PlayerState& s) {
+  if (!ped_ || dead_) return;
+  for (std::uint32_t c = 0; c < n::kPedComponents; ++c) {
+    if (outfit_applied_ && worn_drawable_[c] == s.drawable[c] && worn_texture_[c] == s.texture[c]) continue;
+    n::SetCharComponentVariation(ped_, c, s.drawable[c], s.texture[c]);
+    worn_drawable_[c] = s.drawable[c], worn_texture_[c] = s.texture[c];
+  }
+  outfit_applied_ = true;
 }
 
 std::uint16_t Puppet::take_hits_from(n::Ped attacker) {

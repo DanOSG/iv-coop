@@ -35,6 +35,10 @@ struct PlayerState {
   static constexpr std::uint8_t kAiming = 1;
   static constexpr std::uint8_t kDead = 2;
 
+  // Outfit (M6d): drawable + texture variation for each of the 11 ped components.
+  std::uint8_t drawable[11] = {};
+  std::uint8_t texture[11] = {};
+
   static float lerp_angle(float a, float b, float k) {
     float d = std::fmod(b - a + 540.0f, 360.0f) - 180.0f;
     return std::fmod(a + d * k + 360.0f, 360.0f);

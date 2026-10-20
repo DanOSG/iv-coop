@@ -45,6 +45,13 @@ class Puppet {
   void apply_combat(const PlayerState& s, std::uint32_t now_ms);
   bool dead() const { return dead_; }
 
+  // --- appearance (M6d) ---
+  // Use this exact model (the remote player's real model, e.g. Niko for the host) instead
+  // of the configured fallback; 0 = fallback. A change respawns the puppet.
+  void set_model(std::uint32_t model_hash);
+  // Wears the remote player's outfit (re-applied whenever it changes).
+  void apply_outfit(const PlayerState& s);
+
   bool spawned() const { return ped_ != 0; }
   natives::Ped ped() const { return ped_; }
   // Short description of what the puppet is doing, for status displays.
@@ -77,6 +84,12 @@ class Puppet {
   std::uint32_t snaps_ = 0;
   natives::Vehicle vehicle_ = 0;
   std::int8_t seat_ = -1;
+
+  // Appearance state.
+  std::uint32_t model_override_ = 0;
+  std::uint8_t worn_drawable_[11] = {};
+  std::uint8_t worn_texture_[11] = {};
+  bool outfit_applied_ = false;
 
   // Combat state.
   bool dead_ = false;
