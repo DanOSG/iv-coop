@@ -177,8 +177,17 @@ docs/
   - enter/exit animations instead of warps.
   - deformation/damage sync.
   - seat reservation for script-tasked seats (with M6).
-- **M4:** networked entities with **script owner vs sim owner** and migration. Testbed: entities spawned on the
-  host while a client is across the map.
+- **M4:** networked entities with **script owner vs sim owner** and migration. ✅ Verified in-game with a bot:
+  - A host-spawned ped/car migrates to the nearer player once the host walks away, and the bot simulates it over
+    the network.
+  - When the owner leaves, ownership returns to the host in the same frame, and the ped resumes AI locally.
+  - The handover margin (25 m) means a player standing next to an entity keeps it. Ownership returns by distance
+    only once they move away.
+  - Generic game-message lane (types ≥ 16) carries it.
+  Follow-ups:
+  - followers are kinematic (peds slide; reuse animated puppets);
+  - the live copy's AI is a placeholder (M6 replays the host script's tasks on the sim owner);
+  - no streaming radius yet (every client spawns every entity).
 - **M5:** combat, damage, deaths/respawns, wanted level rules.
 - **M5b:** ambient world sync: **city pedestrians and traffic** near more than one player become networked
   entities (sim owner = nearest player), so everyone sees the same people and cars, including the same ped
