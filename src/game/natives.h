@@ -15,6 +15,7 @@ namespace ivc::natives {
 
 using Handle = std::int32_t; // any script entity handle (ped, vehicle, object)
 using Ped = std::int32_t;
+using Vehicle = std::int32_t;
 using Player = std::int32_t;
 using Blip = std::int32_t;
 
@@ -101,6 +102,32 @@ inline void SetPedDontDoEvasiveDives(Ped ped, bool b) { invoke(0x1EAD1D7D, ped, 
 inline void SetDontActivateRagdollFromPlayerImpact(Ped ped, bool b) { invoke(0x5A676BCD, ped, b); }
 inline void SetCharWillMoveWhenInjured(Ped ped, bool b) { invoke(0x1EF36397, ped, b); }
 inline void TaskWanderStandard(Ped ped) { invoke(0x43F5151F, ped); }
+
+// Combat.
+using Camera = std::int32_t;
+inline bool HasCharBeenDamagedByChar(Ped victim, Ped attacker) { return invoke<bool>(0x1DD624A0, victim, attacker, false); }
+inline bool HasCarBeenDamagedByChar(Vehicle v, Ped attacker) { return invoke<bool>(0x61487DBF, v, attacker); }
+inline void ClearCharLastDamageEntity(Ped ped) { invoke(0x0AB9317B, ped); }
+inline void ClearCarLastDamageEntity(Vehicle v) { invoke(0x4D6665F7, v); }
+inline std::uint32_t GetCurrentCharWeapon(Ped ped) { std::uint32_t w = 0; invoke(0x5AB8289F, ped, &w); return w; }
+inline void GiveWeaponToChar(Ped ped, std::uint32_t weapon, std::uint32_t ammo) { invoke(0x03E90416, ped, weapon, ammo, false); }
+inline void SetCurrentCharWeapon(Ped ped, std::uint32_t weapon) { invoke(0x6CF44DD6, ped, weapon, true); }
+inline void RemoveAllCharWeapons(Ped ped) { invoke(0x6BA520F0, ped); }
+inline std::uint32_t GetAmmoInCharWeapon(Ped ped, std::uint32_t weapon) { std::uint32_t a = 0; invoke(0x23E140A9, ped, weapon, &a); return a; }
+inline void SetCharAmmo(Ped ped, std::uint32_t weapon, std::uint32_t ammo) { invoke(0x437D247E, ped, weapon, ammo); }
+inline void TaskAimGunAtCoord(Ped ped, Vector3 at, std::uint32_t duration_ms) { invoke(0x0AA202B0, ped, at.x, at.y, at.z, duration_ms); }
+inline void FirePedWeapon(Ped ped, Vector3 at) { invoke(0x25BB7D67, ped, at.x, at.y, at.z); }
+inline bool IsPlayerTargettingAnything(Player p) { return invoke<bool>(0x665F6BB7, p); }
+inline std::uint32_t GetCharArmour(Ped ped) { std::uint32_t a = 0; invoke(0x3C756E54, ped, &a); return a; }
+inline void AddArmourToChar(Ped ped, std::uint32_t amount) { invoke(0x1C623537, ped, amount); }
+inline bool IsPlayerDead(Player p) { return invoke<bool>(0x12AE0E27, p); }
+inline bool IsCharFatallyInjured(Ped ped) { return invoke<bool>(0x4A7802CB, ped); }
+inline void SetCharMaxHealth(Ped ped, std::uint32_t h) { invoke(0x08A453C9, ped, h); }
+inline void SetCharAccuracy(Ped ped, std::uint32_t acc) { invoke(0x1958471A, ped, acc); }
+inline std::uint32_t StoreWantedLevel(Player p) { std::uint32_t w = 0; invoke(0x12AA6D71, p, &w); return w; }
+inline Camera GetGameCam() { Camera c = 0; invoke(0x0B2A2801, &c); return c; }
+inline Vector3 GetCamPos(Camera c) { Vector3 p{}; invoke(0x60C22E93, c, &p.x, &p.y, &p.z); return p; }
+inline Vector3 GetCamRot(Camera c) { Vector3 r{}; invoke(0x51A06698, c, &r.x, &r.y, &r.z); return r; }
 inline std::uint32_t GetCharHealth(Ped ped) { std::uint32_t h = 0; invoke(0x4B6C2256, ped, &h); return h; }
 inline void SetCharHealth(Ped ped, std::uint32_t h) { invoke(0x575E2880, ped, h); }
 inline bool IsCharDead(Ped ped) { return invoke<bool>(0x6A6B4F18, ped); }
@@ -111,7 +138,6 @@ inline Vector3 GetOffsetFromCharInWorldCoords(Ped ped, Vector3 off) {
 }
 
 // Vehicles.
-using Vehicle = std::int32_t;
 inline constexpr std::int32_t kDriverSeat = -1;
 inline bool DoesVehicleExist(Vehicle v) { return invoke<bool>(0x67A42263, v); }
 inline Vehicle StoreCarCharIsInNoSave(Ped ped) { Vehicle v = 0; invoke(0x21CC647F, ped, &v); return v; }

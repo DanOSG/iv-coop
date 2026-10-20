@@ -38,6 +38,10 @@ struct RemoteStatus {
   const char* action; // what the puppet is doing (walking, standing, snapped, ...)
   float error_m;      // puppet's distance from the true (interpolated) position
   std::uint32_t snaps;
+  std::uint16_t health;
+  std::uint32_t weapon;
+  bool dead;
+  std::uint8_t wanted;
 };
 
 struct Status {

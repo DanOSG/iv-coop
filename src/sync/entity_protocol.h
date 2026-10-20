@@ -26,6 +26,17 @@ enum class GameMsg : std::uint8_t {
   EntityDelete = 17,
   EntityOwner = 18,
   EntityState = 19,
+  Damage = 20, // attacker -> all, reliable: the target's owner applies it (M5)
+};
+
+// Damage dealt by the sender to a player or a networked entity, as detected on the
+// sender's copy of the target. Only the target's owner applies it.
+enum class DamageTarget : std::uint8_t { Player = 0, Entity = 1 };
+struct Damage {
+  DamageTarget kind = DamageTarget::Player;
+  std::uint32_t target = 0; // player id or entity id
+  std::uint16_t amount = 0;
+  std::uint32_t weapon = 0;
 };
 
 enum class EntityType : std::uint8_t { Ped = 1, Vehicle = 2 };
@@ -106,7 +117,13 @@ inline std::vector<std::uint8_t> encode_entity_state(const EntityState& s) {
   return std::move(w.data());
 }
 
-// Decoded form of any entity message.
+inline std::vector<std::uint8_t> encode_damage(const Damage& d) {
+  net::Writer w;
+  w.put(GameMsg::Damage).put(std::uint8_t{0}).put(d.kind).put(d.target).put(d.amount).put(d.weapon);
+  return std::move(w.data());
+}
+
+// Decoded form of any entity/combat message.
 struct EntityMsg {
   GameMsg type{};
   std::uint8_t sender = 0;
@@ -114,6 +131,7 @@ struct EntityMsg {
   std::uint32_t id = 0;   // EntityDelete / EntityOwner
   std::uint8_t owner = 0; // EntityOwner
   EntityState state;      // EntityState
+  Damage damage;          // Damage
 };
 
 inline std::optional<EntityMsg> decode_entity_msg(std::span<const std::uint8_t> data) {
@@ -139,6 +157,9 @@ inline std::optional<EntityMsg> decode_entity_msg(std::span<const std::uint8_t> 
       r.get(s.vz), r.get(s.qx), r.get(s.qy), r.get(s.qz), r.get(s.qw), r.get(s.health);
       break;
     }
+    case GameMsg::Damage:
+      r.get(m.damage.kind), r.get(m.damage.target), r.get(m.damage.amount), r.get(m.damage.weapon);
+      break;
     default:
       return std::nullopt;
   }

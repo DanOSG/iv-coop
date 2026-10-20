@@ -23,6 +23,18 @@ struct PlayerState {
   std::uint32_t vehicle_id = kNoVehicle;
   std::int8_t seat = -1;
 
+  // Combat (M5).
+  std::uint16_t health = 200;
+  std::uint16_t armour = 0;
+  std::uint32_t weapon = 0;  // weapon type in hand (0 = unarmed)
+  std::uint16_t shots = 0;   // cumulative shots fired (wraps); receivers fire the difference
+  float ax = 0, ay = 0, az = 0; // aim point (world)
+  std::uint8_t flags = 0;    // kAiming | kDead
+  std::uint8_t wanted = 0;   // wanted level 0-6
+
+  static constexpr std::uint8_t kAiming = 1;
+  static constexpr std::uint8_t kDead = 2;
+
   static float lerp_angle(float a, float b, float k) {
     float d = std::fmod(b - a + 540.0f, 360.0f) - 180.0f;
     return std::fmod(a + d * k + 360.0f, 360.0f);

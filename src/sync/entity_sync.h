@@ -64,6 +64,13 @@ class EntitySync {
 
   std::vector<EntityStatus> status() const;
 
+  // --- combat (M5) ---
+  // Damage our player did to follower copies since the last call (copies sit on a
+  // refilled health buffer, so local hits never kill them; the sim owner decides).
+  std::vector<Damage> collect_hits(natives::Ped attacker);
+  // Damage reported against an entity: applied only if we are its sim owner.
+  void apply_damage(std::uint32_t id, std::uint16_t amount, std::uint8_t my_id);
+
  private:
   struct Entity {
     std::uint32_t id = 0;
@@ -77,6 +84,7 @@ class EntitySync {
     std::uint16_t seq = 0;
     std::uint32_t last_send_ms = 0;
     std::uint32_t migrations = 0;
+    bool shown_dead = false; // follower: owner reported death, we killed our copy
   };
 
   void apply_create(const EntityCreate& c, std::uint8_t my_id);

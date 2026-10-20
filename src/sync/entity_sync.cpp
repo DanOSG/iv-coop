@@ -1,5 +1,6 @@
 #include "sync/entity_sync.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -10,6 +11,8 @@ namespace n = natives;
 namespace {
 
 constexpr std::uint32_t kEvalIntervalMs = 500;
+constexpr std::uint32_t kPedBuffer = 2000;   // follower ped health buffer
+constexpr std::uint32_t kCarBuffer = 1000;   // follower vehicle health buffer (cars burn below ~250)
 
 bool exists(EntityType t, n::Handle h) {
   if (!h) return false;
@@ -189,6 +192,9 @@ void EntitySync::make_live(Entity& e) {
     n::SetCharCollision(e.handle, true);
     n::SetCharCoordinatesNoOffset(e.handle, {s.x, s.y, s.z});
     n::SetCharHeading(e.handle, s.heading());
+    // Real health again (followers sit on a buffer). A dead entity stays dead.
+    n::SetCharMaxHealth(e.handle, std::max<std::uint32_t>(200, s.health));
+    if (!n::IsCharDead(e.handle)) n::SetCharHealth(e.handle, s.health ? s.health : 1);
     n::TaskWanderStandard(e.handle); // M4 test behaviour; M6 replays the host script's tasks
   } else {
     n::FreezeCarPosition(e.handle, false);
@@ -196,6 +202,7 @@ void EntitySync::make_live(Entity& e) {
     n::SetCarCoordinatesNoOffset(e.handle, {s.x, s.y, s.z});
     n::SetVehicleQuaternion(e.handle, {s.qx, s.qy, s.qz, s.qw});
     n::SetCarForwardSpeed(e.handle, std::hypot(s.vx, s.vy));
+    n::SetCarHealth(e.handle, s.health);
   }
 }
 
@@ -205,9 +212,14 @@ void EntitySync::make_follower(Entity& e) {
     n::ClearCharTasks(e.handle);
     n::FreezeCharPosition(e.handle, true);
     n::SetCharCollision(e.handle, false);
+    if (!n::IsCharDead(e.handle)) {
+      n::SetCharMaxHealth(e.handle, kPedBuffer);
+      n::SetCharHealth(e.handle, kPedBuffer);
+    }
   } else {
     n::FreezeCarPosition(e.handle, true);
     n::SetCarCollision(e.handle, false);
+    n::SetCarHealth(e.handle, kCarBuffer);
   }
 }
 
@@ -219,7 +231,10 @@ EntityState EntitySync::read_local(const Entity& e, std::uint32_t now_ms) {
     const n::Vector3 p = n::GetCharCoordinates(e.handle), v = n::GetCharVelocity(e.handle);
     s.x = p.x, s.y = p.y, s.z = p.z, s.vx = v.x, s.vy = v.y, s.vz = v.z;
     EntityState::set_heading(s, n::GetCharHeading(e.handle));
-    s.health = static_cast<std::uint16_t>(std::min<std::uint32_t>(n::GetCharHealth(e.handle), 0xFFFF));
+    // Health 0 is the "dead" signal followers act on.
+    s.health = n::IsCharDead(e.handle)
+                   ? 0
+                   : static_cast<std::uint16_t>(std::clamp<std::uint32_t>(n::GetCharHealth(e.handle), 1, 0xFFFF));
   } else {
     const n::Vector3 p = n::GetCarCoordinates(e.handle), v = n::GetCarSpeedVector(e.handle);
     const n::Vector4 q = n::GetVehicleQuaternion(e.handle);
@@ -232,9 +247,16 @@ EntityState EntitySync::read_local(const Entity& e, std::uint32_t now_ms) {
 
 void EntitySync::pose_follower(Entity& e, const EntityState& s) {
   if (e.type == EntityType::Ped) {
+    if (s.health == 0) { // the owner's copy died: die here too, once, and stop posing it
+      if (!e.shown_dead) {
+        n::FreezeCharPosition(e.handle, false);
+        n::SetCharHealth(e.handle, 0);
+        e.shown_dead = true;
+      }
+      return;
+    }
     n::SetCharCoordinatesNoOffset(e.handle, {s.x, s.y, s.z});
     n::SetCharHeading(e.handle, s.heading());
-    if (std::abs(static_cast<int>(n::GetCharHealth(e.handle)) - s.health) > 5) n::SetCharHealth(e.handle, s.health);
   } else {
     n::SetCarCoordinatesNoOffset(e.handle, {s.x, s.y, s.z});
     n::SetVehicleQuaternion(e.handle, {s.qx, s.qy, s.qz, s.qw});
@@ -287,6 +309,48 @@ void EntitySync::clear(bool was_host) {
     }
   }
   ents_.clear();
+}
+
+std::vector<Damage> EntitySync::collect_hits(n::Ped attacker) {
+  std::vector<Damage> hits;
+  if (!attacker) return hits;
+  for (auto& [id, e] : ents_) {
+    if (e.live || e.shown_dead || !exists(e.type, e.handle)) continue;
+    std::uint32_t lost = 0;
+    bool by_attacker = false;
+    if (e.type == EntityType::Ped) {
+      const std::uint32_t h = n::GetCharHealth(e.handle);
+      lost = h < kPedBuffer ? kPedBuffer - h : 0;
+      by_attacker = n::HasCharBeenDamagedByChar(e.handle, attacker);
+      if (lost) n::SetCharHealth(e.handle, kPedBuffer);
+      n::ClearCharLastDamageEntity(e.handle);
+    } else {
+      const std::uint32_t h = n::GetCarHealth(e.handle);
+      lost = h < kCarBuffer ? kCarBuffer - h : 0;
+      by_attacker = n::HasCarBeenDamagedByChar(e.handle, attacker);
+      if (lost) n::SetCarHealth(e.handle, kCarBuffer);
+      n::ClearCarLastDamageEntity(e.handle);
+    }
+    if (lost && by_attacker)
+      hits.push_back({DamageTarget::Entity, id, static_cast<std::uint16_t>(std::min<std::uint32_t>(lost, 0xFFFF)), 0});
+  }
+  return hits;
+}
+
+void EntitySync::apply_damage(std::uint32_t id, std::uint16_t amount, std::uint8_t my_id) {
+  auto it = ents_.find(id);
+  if (it == ents_.end()) return;
+  Entity& e = it->second;
+  if (e.sim_owner != my_id || !exists(e.type, e.handle)) return;
+  if (e.type == EntityType::Ped) {
+    if (n::IsCharDead(e.handle)) return;
+    const std::uint32_t h = n::GetCharHealth(e.handle);
+    n::SetCharHealth(e.handle, h > amount ? h - amount : 0);
+  } else {
+    const std::uint32_t h = n::GetCarHealth(e.handle);
+    n::SetCarHealth(e.handle, h > amount ? h - amount : 0);
+  }
+  log::info("Entity {}: took {} damage (owner-applied)", id, amount);
 }
 
 std::vector<EntityStatus> EntitySync::status() const {

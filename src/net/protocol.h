@@ -18,7 +18,8 @@
 namespace ivc::net {
 
 // 2: vehicle id/seat in PlayerState, VehicleState. 3: game-message lane (entities).
-inline constexpr std::uint16_t kProtocolVersion = 3;
+// 4: combat fields in PlayerState.
+inline constexpr std::uint16_t kProtocolVersion = 4;
 
 // Message types >= kFirstGameMsg are "game messages": [type][sender id][payload]. The
 // session layer doesn't interpret them; the host stamps the sender id and relays them to
@@ -87,13 +88,16 @@ inline std::vector<std::uint8_t> encode_left(std::uint8_t id) {
 inline std::vector<std::uint8_t> encode_state(std::uint8_t id, const sync::PlayerState& s) {
   Writer w;
   w.put(MsgType::PlayerState).put(id).put(s.seq).put(s.time_ms).put(s.x).put(s.y).put(s.z).put(s.vx).put(s.vy)
-      .put(s.vz).put(s.heading).put(s.model).put(s.in_vehicle).put(s.vehicle_id).put(s.seat);
+      .put(s.vz).put(s.heading).put(s.model).put(s.in_vehicle).put(s.vehicle_id).put(s.seat).put(s.health)
+      .put(s.armour).put(s.weapon).put(s.shots).put(s.ax).put(s.ay).put(s.az).put(s.flags).put(s.wanted);
   return std::move(w.data());
 }
 
 inline bool decode_state(Reader& r, std::uint8_t& id, sync::PlayerState& s) {
   r.get(id), r.get(s.seq), r.get(s.time_ms), r.get(s.x), r.get(s.y), r.get(s.z), r.get(s.vx), r.get(s.vy);
   r.get(s.vz), r.get(s.heading), r.get(s.model), r.get(s.in_vehicle), r.get(s.vehicle_id), r.get(s.seat);
+  r.get(s.health), r.get(s.armour), r.get(s.weapon), r.get(s.shots), r.get(s.ax), r.get(s.ay), r.get(s.az);
+  r.get(s.flags), r.get(s.wanted);
   return r.ok();
 }
 

@@ -57,6 +57,8 @@ struct Args {
   int seat = 0;           // passenger seat for --ride
   bool test_entity = false; // --serve only: create entity 999, then hand it to player #1
   int leave_after = 0;      // leave the session N seconds after joining (0 = never)
+  bool armed = false;       // hold a pistol (weapon type 7) and aim at the host
+  int shoot_host = 0;       // fire at the host every N seconds (10 damage per hit); implies armed
 };
 
 // Model name -> hash, as the game's GET_HASH_KEY does (Jenkins one-at-a-time, lowercase).
@@ -95,6 +97,8 @@ Args parse(int argc, char** argv) {
     else if (k == "--seat") a.seat = std::atoi(next());
     else if (k == "--test-entity") a.test_entity = true;
     else if (k == "--leave-after") a.leave_after = std::atoi(next());
+    else if (k == "--armed") a.armed = true;
+    else if (k == "--shoot-host") a.shoot_host = std::atoi(next()), a.armed = true;
     else std::fprintf(stderr, "unknown argument %s\n", k.c_str());
   }
   if (a.radius < 0.5f) a.radius = 0.5f;
@@ -149,6 +153,14 @@ int main(int argc, char** argv) {
   std::map<std::uint32_t, BotEntity> entities;
   std::uint32_t last_entity_send = 0;
   unsigned entity_states_received = 0;
+
+  // Combat (M5): our health, death/respawn, and shooting at the host.
+  constexpr std::uint32_t kPistol = 7;
+  int health = 200;
+  std::uint32_t dead_until = 0; // respawn time while dead
+  std::uint16_t shots = 0;
+  std::uint32_t last_shot_ms = 0;
+  unsigned damage_taken = 0, damage_dealt = 0;
   auto prev = std::chrono::steady_clock::now();
   bool was_joined = false;
   std::uint32_t joined_at = 0;
@@ -223,6 +235,18 @@ int main(int argc, char** argv) {
             std::printf("[%s] entity %u: sim owner -> #%u\n", a.name.c_str(), m->id, e.owner);
           }
         }
+      } else if (m->type == sync::GameMsg::Damage) {
+        const auto& d = m->damage;
+        if (d.kind == sync::DamageTarget::Player && d.target == my_id && !dead_until) {
+          health -= d.amount;
+          damage_taken += d.amount;
+          std::printf("[%s] hit by #%u for %u (weapon %u), health %d\n", a.name.c_str(), gm.from, d.amount, d.weapon,
+                      std::max(health, 0));
+          if (health <= 0) {
+            dead_until = now + 5000;
+            std::printf("[%s] died; respawning in 5 s\n", a.name.c_str());
+          }
+        }
       } else if (m->type == sync::GameMsg::EntityState) {
         if (auto it = entities.find(m->state.id); it != entities.end() && gm.from == it->second.owner) {
           it->second.last = m->state;
@@ -287,7 +311,7 @@ int main(int argc, char** argv) {
 
     // Walk the circle at constant speed; heading follows the direction of travel.
     const bool paused = a.pause_every > 0 && ((now - started) / 1000) % static_cast<std::uint32_t>(a.pause_every) < 3;
-    const float speed = paused ? 0.0f : a.speed;
+    const float speed = (paused || dead_until) ? 0.0f : a.speed; // the dead don't walk
     angle += speed / a.radius * dt;
     sync::PlayerState s;
     s.x = cx + std::cos(angle) * a.radius;
@@ -300,6 +324,28 @@ int main(int argc, char** argv) {
     // paused bot keeps facing the way it was walking.
     float h = std::atan2(std::sin(angle), std::cos(angle)) * 180.0f / kPi;
     s.heading = h < 0 ? h + 360.0f : h;
+
+    // Combat: dead for 5 s (standing still), then respawn at full health.
+    if (dead_until && now >= dead_until) {
+      dead_until = 0, health = 200;
+      std::printf("[%s] respawned\n", a.name.c_str());
+    }
+    s.health = static_cast<std::uint16_t>(std::max(health, 0));
+    if (dead_until) {
+      s.flags |= sync::PlayerState::kDead;
+      s.vx = s.vy = s.vz = 0;
+    } else if (a.armed) {
+      s.weapon = kPistol;
+      s.ax = cx, s.ay = cy, s.az = cz + 0.5f; // aim at the host
+      s.flags |= sync::PlayerState::kAiming;
+      if (a.shoot_host > 0 && now - last_shot_ms >= static_cast<std::uint32_t>(a.shoot_host) * 1000) {
+        last_shot_ms = now;
+        ++shots;
+        damage_dealt += 10;
+        session.send_game(sync::encode_damage({sync::DamageTarget::Player, net::kHostId, 10, kPistol}), true);
+      }
+    }
+    s.shots = shots;
 
     std::optional<sync::VehicleState> car;
     if (a.ride && host_vehicle != sync::kNoVehicle) {
@@ -353,6 +399,9 @@ int main(int argc, char** argv) {
       for (const auto& [eid, e] : entities)
         line += std::format("  ent {}:owner#{}{}", eid, e.owner, e.owner == st.my_id ? "(us)" : "");
       if (entity_states_received) line += std::format("  entity states recv {}", entity_states_received);
+      if (a.armed || damage_taken)
+        line += std::format("  hp {}{}  dmg taken {} dealt {}", std::max(health, 0), dead_until ? " DEAD" : "",
+                            damage_taken, damage_dealt);
       line += '\n';
       std::fwrite(line.data(), 1, line.size(), stdout);
       last_report_cost = net::steady_ms() - now;

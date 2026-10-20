@@ -50,7 +50,12 @@ bool Puppet::ensure(const n::Vector3& at) {
     return false;
   }
   n::SetBlockingOfNonTemporaryEvents(ped_, true);
-  n::SetCharInvincible(ped_, true);
+  // Not invincible (hits must register so we can report them), but on a big health buffer
+  // that is refilled every frame, so a local hit can never kill it: only its owner decides.
+  n::SetCharMaxHealth(ped_, kPuppetHealthBuffer);
+  n::SetCharHealth(ped_, kPuppetHealthBuffer);
+  n::SetCharAccuracy(ped_, 100); // its shots go where the remote player aimed
+  dead_ = false, weapon_ = 0, have_shots_ = false;
   if (animated_) {
     // A real, physical ped that walks on the ground and keeps the tasks we give it.
     n::SetCharKeepTask(ped_, true);
@@ -88,6 +93,7 @@ void Puppet::drive(const PlayerState& t, std::uint32_t now_ms) {
 }
 
 void Puppet::drive_animated(const PlayerState& t, std::uint32_t now_ms) {
+  if (dead_) return;
   const n::Vector3 cur = n::GetCharCoordinates(ped_);
   const float dx = t.x - cur.x, dy = t.y - cur.y;
   error_m_ = std::hypot(dx, dy);
@@ -99,6 +105,12 @@ void Puppet::drive_animated(const PlayerState& t, std::uint32_t now_ms) {
   }
 
   const float speed = std::hypot(t.vx, t.vy);
+
+  // Standing with a gun up: the aim task (apply_combat) owns the ped; don't fight it.
+  if ((t.flags & PlayerState::kAiming) && t.weapon && speed < kStillSpeed && error_m_ < kSettleDist) {
+    phase_ = "aiming";
+    return;
+  }
 
   // --- remote player is standing still ---
   if (speed < kStillSpeed) {
@@ -176,12 +188,68 @@ void Puppet::leave_vehicle(const n::Vector3& at) {
   }
 }
 
+std::uint16_t Puppet::take_hits_from(n::Ped attacker) {
+  if (!ped_ || dead_ || !n::DoesCharExist(ped_)) return 0;
+  const std::uint32_t h = n::GetCharHealth(ped_);
+  const std::uint32_t lost = h < kPuppetHealthBuffer ? kPuppetHealthBuffer - h : 0;
+  const bool by_attacker = attacker && n::HasCharBeenDamagedByChar(ped_, attacker);
+  if (lost) n::SetCharHealth(ped_, kPuppetHealthBuffer);
+  n::ClearCharLastDamageEntity(ped_);
+  return by_attacker ? static_cast<std::uint16_t>(std::min<std::uint32_t>(lost, 0xFFFF)) : 0;
+}
+
+void Puppet::apply_combat(const PlayerState& s, std::uint32_t now_ms) {
+  if (!ped_) return;
+
+  // Death: follow the owner's state. Dying here is cosmetic (ragdoll); when they're alive
+  // again (respawned at a hospital) the dead puppet is replaced by a fresh one.
+  if (s.flags & PlayerState::kDead) {
+    if (!dead_) {
+      n::SetCharHealth(ped_, 0);
+      dead_ = true;
+      phase_ = "dead";
+    }
+    return;
+  }
+  if (dead_ || n::IsCharDead(ped_)) {
+    despawn(); // ensure() respawns it next frame at their current position
+    return;
+  }
+
+  // Weapon in hand.
+  if (s.weapon != weapon_) {
+    if (s.weapon) n::GiveWeaponToChar(ped_, s.weapon, 9999);
+    n::SetCurrentCharWeapon(ped_, s.weapon);
+    weapon_ = s.weapon;
+  }
+
+  // Shots: fire the difference of their cumulative counter (wraps at 16 bits), so lost
+  // packets never lose shots. Cap per frame so a long stall doesn't empty a magazine.
+  const n::Vector3 aim{s.ax, s.ay, s.az};
+  if (have_shots_ && weapon_) {
+    const std::uint16_t diff = static_cast<std::uint16_t>(s.shots - last_shots_);
+    if (diff > 0 && diff < 200) {
+      for (std::uint16_t i = 0; i < std::min<std::uint16_t>(diff, 5); ++i) n::FirePedWeapon(ped_, aim);
+      n::SetCharAmmo(ped_, weapon_, 9999);
+    }
+  }
+  last_shots_ = s.shots, have_shots_ = true;
+
+  // Aiming (on foot): keep the aim task fresh while their gun is up.
+  if ((s.flags & PlayerState::kAiming) && weapon_ && !vehicle_ && now_ms - last_aim_ms_ > 250) {
+    n::TaskAimGunAtCoord(ped_, aim, 600);
+    last_aim_ms_ = now_ms;
+    action_ = Action::None; // movement re-issues its task when they move again
+  }
+}
+
 void Puppet::despawn() {
   if (blip_) n::RemoveBlip(blip_), blip_ = 0;
   if (ped_ && n::DoesCharExist(ped_)) n::DeleteChar(ped_);
   ped_ = 0;
   vehicle_ = 0;
   action_ = Action::None;
+  dead_ = false;
   phase_ = "idle";
 }
 

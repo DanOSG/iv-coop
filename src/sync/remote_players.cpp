@@ -21,6 +21,11 @@ struct Remote {
   std::string name;
   sync::Interpolator interp;
   sync::Puppet puppet;
+  // Latest combat state, for status displays.
+  std::uint16_t health = 0;
+  std::uint32_t weapon = 0;
+  bool dead = false;
+  std::uint8_t wanted = 0;
 };
 
 Settings g_cfg;
@@ -29,6 +34,7 @@ std::map<std::uint8_t, Remote> g_remotes;
 sync::VehicleSync g_vehicles;
 sync::EntitySync g_entities;
 bool g_was_host = false;
+std::uint32_t g_my_last_health = 0; // our player's health at the end of last frame
 bool g_host_was_down = true, g_join_was_down = true;
 std::uint32_t g_last_send = 0;
 std::uint16_t g_seq = 0;
@@ -230,8 +236,18 @@ void tick() {
           if (r.puppet.in_vehicle()) r.puppet.leave_vehicle(at);
           r.puppet.drive(*smp, now);
         }
+        r.puppet.apply_combat(*smp, now);
+        r.health = smp->health, r.weapon = smp->weapon, r.dead = (smp->flags & sync::PlayerState::kDead) != 0;
+        r.wanted = smp->wanted;
       }
       if (local) dist = std::hypot(smp->x - local->x, smp->y - local->y, smp->z - local->z);
+    }
+    // Our hits on their puppet go to them; they apply the damage to themselves.
+    if (active && me) {
+      if (const std::uint16_t dmg = r.puppet.take_hits_from(me)) {
+        net.send_game(sync::encode_damage({sync::DamageTarget::Player, id, dmg, local ? local->weapon : 0}), true);
+        log::info("Hit player #{} '{}' for {}", id, r.name, dmg);
+      }
     }
     const auto& st = r.interp.stats();
     const unsigned frames = st.interpolated + st.extrapolated;
@@ -240,17 +256,50 @@ void tick() {
       if (p.id == id) rtt = p.rtt_ms;
     remotes.push_back({id, r.name, rtt, r.puppet.spawned(),
                        frames ? 100.0f * static_cast<float>(st.extrapolated) / static_cast<float>(frames) : 0.0f,
-                       dist, r.puppet.phase(), r.puppet.error_m(), r.puppet.snaps()});
+                       dist, r.puppet.phase(), r.puppet.error_m(), r.puppet.snaps(), r.health, r.weapon, r.dead,
+                       r.wanted});
   }
 
-  // Networked entities (M4).
+  // Combat: damage our player took from a puppet's local bullets is undone; the shooter
+  // reports the real hit (which arrives as a Damage message below).
+  if (active && me) {
+    bool by_puppet = false;
+    for (const auto& [id, r] : g_remotes)
+      if (r.puppet.ped() && n::HasCharBeenDamagedByChar(me, r.puppet.ped())) by_puppet = true;
+    if (by_puppet && g_my_last_health) {
+      n::SetCharHealth(me, g_my_last_health);
+      n::ClearCharLastDamageEntity(me);
+    }
+  }
+
+  // Networked entities (M4) and combat messages (M5).
   if (active) {
     g_was_host = ss.mode == net::Mode::Hosting;
     process_pending_spawn(me);
-    for (const auto& m : net.drain_game())
-      if (in_session(m.from)) g_entities.on_message(m, ss.my_id);
+    for (const auto& m : net.drain_game()) {
+      if (!in_session(m.from)) continue;
+      const auto msg = sync::decode_entity_msg(m.data);
+      if (msg && msg->type == sync::GameMsg::Damage) {
+        const auto& d = msg->damage;
+        if (d.kind == sync::DamageTarget::Player && d.target == ss.my_id && me && !n::IsCharDead(me)) {
+          const std::uint32_t h = n::GetCharHealth(me);
+          n::SetCharHealth(me, h > d.amount ? h - d.amount : 0);
+          log::info("Took {} damage from player #{} (weapon {}), health {} -> {}", d.amount, m.from, d.weapon, h,
+                    h > d.amount ? h - d.amount : 0);
+        } else if (d.kind == sync::DamageTarget::Entity) {
+          g_entities.apply_damage(d.target, d.amount, ss.my_id);
+        }
+        continue;
+      }
+      g_entities.on_message(m, ss.my_id);
+    }
     g_entities.tick(now, ss.my_id, g_was_host, positions, net);
+    for (const auto& hit : g_entities.collect_hits(me)) {
+      net.send_game(sync::encode_damage({hit.kind, hit.target, hit.amount, local ? local->weapon : 0}), true);
+      log::info("Hit entity {} for {}", hit.target, hit.amount);
+    }
   }
+  if (me) g_my_last_health = n::GetCharHealth(me);
   const auto entities = g_entities.status();
   static std::uint32_t last_elog = now;
   if (!entities.empty() && now - last_elog >= 10000) {
@@ -265,8 +314,10 @@ void tick() {
   if (!remotes.empty() && now - last_log >= 10000) {
     last_log = now;
     for (const auto& r : remotes)
-      log::info("Remote #{} '{}': {} err {:.1f} m, {} snaps, {:.1f} m away, extrap {:.1f}%", r.id, r.name, r.action,
-                r.error_m, r.snaps, r.distance_m, r.extrapolated_pct);
+      log::info("Remote #{} '{}': {} err {:.1f} m, {} snaps, {:.1f} m away, extrap {:.1f}%, hp {}{}, weapon {}, "
+                "wanted {}",
+                r.id, r.name, r.action, r.error_m, r.snaps, r.distance_m, r.extrapolated_pct, r.health,
+                r.dead ? " (DEAD)" : "", r.weapon, r.wanted);
   }
 
   const auto vehicles = g_vehicles.status();

@@ -35,6 +35,16 @@ class Puppet {
   void leave_vehicle(const natives::Vector3& at);
   bool in_vehicle() const { return vehicle_ != 0; }
 
+  // --- combat (M5) ---
+  // The puppet never really loses health: it sits on a large buffer that is refilled every
+  // frame. Returns how much damage `attacker` (normally our own player) did to it since
+  // the last call, so it can be reported to the player it stands for.
+  std::uint16_t take_hits_from(natives::Ped attacker);
+  // Mirrors the remote player's weapon, shots (fires the difference of their cumulative
+  // counter at their aim point), aiming, and death/respawn. Call after drive()/sit_in().
+  void apply_combat(const PlayerState& s, std::uint32_t now_ms);
+  bool dead() const { return dead_; }
+
   bool spawned() const { return ped_ != 0; }
   natives::Ped ped() const { return ped_; }
   // Short description of what the puppet is doing, for status displays.
@@ -65,6 +75,15 @@ class Puppet {
   std::uint32_t snaps_ = 0;
   natives::Vehicle vehicle_ = 0;
   std::int8_t seat_ = -1;
+
+  // Combat state.
+  bool dead_ = false;
+  std::uint32_t weapon_ = 0;
+  std::uint16_t last_shots_ = 0;
+  bool have_shots_ = false;
+  std::uint32_t last_aim_ms_ = 0;
 };
+
+inline constexpr std::uint32_t kPuppetHealthBuffer = 2000;
 
 } // namespace ivc::sync
