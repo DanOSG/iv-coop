@@ -59,7 +59,21 @@ void drop_all() {
   g_remotes.clear();
 }
 
+bool g_action_was_down = true, g_steer_was_down = true;
+
 void handle_hotkeys() {
+  // Vehicle tuning chords (physics-follow calibration).
+  if (input::pressed_ctrl_shift(VK_F8, g_action_was_down)) {
+    g_vehicles.temp_action = (g_vehicles.temp_action + 1) % 13;
+    log::info("Vehicle tuning: stand-in driver temp action = {}", g_vehicles.temp_action);
+  }
+  if (input::pressed_ctrl_shift(VK_F7, g_steer_was_down)) {
+    g_vehicles.steer_mode = g_vehicles.steer_mode == 0 ? 1 : g_vehicles.steer_mode == 1 ? -1 : 0;
+    log::info("Vehicle tuning: steering = {}", g_vehicles.steer_mode == 0   ? "off"
+                                              : g_vehicles.steer_mode == 1 ? "normal"
+                                                                           : "inverted");
+  }
+
   const net::Mode mode = session().status().mode;
   if (input::pressed(g_cfg.host_key, g_host_was_down)) {
     if (mode == net::Mode::Idle) {
@@ -192,14 +206,18 @@ void tick() {
   if (!vehicles.empty() && now - last_vlog >= 10000) {
     last_vlog = now;
     for (const auto& v : vehicles)
-      log::info("Remote vehicle 0x{:08X} (owner #{}): {} err {:.1f} m, {} snaps, gain {:.3f}", v.vehicle_id, v.owner,
-                v.spawned ? "spawned" : "loading", v.error_m, v.snaps, v.gain);
+      log::info("Remote vehicle 0x{:08X} (owner #{}): {} err {:.1f} m, {} snaps, gain {:.3f}, steer {:+.2f}{} "
+                "[action {}, steer mode {}]",
+                v.vehicle_id, v.owner, v.spawned ? "spawned" : "loading", v.error_m, v.snaps, v.gain, v.steer,
+                v.blocked ? ", BLOCKED" : "", g_vehicles.temp_action, g_vehicles.steer_mode);
   }
 
   std::lock_guard lock(g_status_mutex);
   g_status.session = ss;
   g_status.remotes = std::move(remotes);
   g_status.vehicles = vehicles;
+  g_status.temp_action = g_vehicles.temp_action;
+  g_status.steer_mode = g_vehicles.steer_mode;
 }
 
 Status status() {

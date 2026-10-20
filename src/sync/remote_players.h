@@ -43,6 +43,8 @@ struct Status {
   net::SessionStatus session;
   std::vector<RemoteStatus> remotes;
   std::vector<sync::RemoteVehicleStatus> vehicles;
+  std::uint32_t temp_action = 0;
+  int steer_mode = 1;
 };
 
 void configure(const Settings& s);

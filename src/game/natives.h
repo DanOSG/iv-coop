@@ -136,6 +136,10 @@ inline bool IsCarSirenOn(Vehicle v) { return invoke<bool>(0x129A1569, v); }
 inline void SwitchCarSiren(Vehicle v, bool on) { invoke(0x7781290F, v, on); }
 inline void SetCarEngineOn(Vehicle v, bool on, bool instantly) { invoke(0x0CAA42D0, v, on, instantly); }
 inline void SetCarAsMissionCar(Vehicle v) { invoke(0x210A33B2, v); }
+inline void SetVehicleSteerBias(Vehicle v, float bias) { invoke(0x091D1480, v, bias); }
+inline void TaskCarTempAction(Ped ped, Vehicle v, std::uint32_t action, std::uint32_t duration_ms) {
+  invoke(0x11612815, ped, v, action, duration_ms);
+}
 // APPLY_FORCE_TO_CAR. Argument layout read from its implementation (0xBC8E40 in 1.2.0.59):
 // (car, type, force xyz, offset xyz, component, force_relative, offset_relative, scale_by_mass).
 // type 0/1 go to two physics-instance slots (+0x80/+0x8C), 2/3 to the fragment path.

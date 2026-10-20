@@ -110,6 +110,14 @@ void draw_status() {
           ImGui::Text("  #%u %-16s rtt %3u ms  (no state yet)", p.id, p.name.c_str(), p.rtt_ms);
       }
     }
+    if (!c.vehicles.empty()) {
+      ImGui::Separator();
+      ImGui::Text("vehicles  [Ctrl+Shift+F8] driver action %u   [Ctrl+Shift+F7] steering %s", c.temp_action,
+                  c.steer_mode == 0 ? "off" : c.steer_mode == 1 ? "normal" : "inverted");
+      for (const auto& v : c.vehicles)
+        ImGui::Text("  0x%08X #%u  err %4.1f m  snaps %3u  gain %.2f  steer %+.2f%s", v.vehicle_id, v.owner, v.error_m,
+                    v.snaps, v.gain, v.steer, v.blocked ? "  BLOCKED" : "");
+    }
     ImGui::TextDisabled("F7 scripts  |  F8 overlay  |  F9 ghost  |  built " __DATE__ " " __TIME__);
   }
   ImGui::End();

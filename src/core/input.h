@@ -20,4 +20,13 @@ inline bool pressed(int vk, bool& was_down) {
   return edge;
 }
 
+// Same, for Ctrl+Shift+<vk> (debug/tuning chords that must not collide with game keys).
+inline bool pressed_ctrl_shift(int vk, bool& was_down) {
+  const bool down = (GetAsyncKeyState(vk) & 0x8000) && (GetAsyncKeyState(VK_CONTROL) & 0x8000) &&
+                    (GetAsyncKeyState(VK_SHIFT) & 0x8000);
+  const bool edge = down && !was_down && game_focused();
+  was_down = down;
+  return edge;
+}
+
 } // namespace ivc::input
