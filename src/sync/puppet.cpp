@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "core/log.h"
+#include "game/player_slots.h"
 
 namespace ivc::sync {
 namespace n = natives;
@@ -34,6 +35,7 @@ bool Puppet::ensure(const n::Vector3& at) {
   if (ped_ && n::DoesCharExist(ped_)) return true;
   if (ped_) {
     log::warn("Puppet ped {} vanished; respawning", ped_);
+    player_slots::release(ped_);
     ped_ = 0;
     blip_ = 0; // the game removes blips attached to deleted peds
   }
@@ -43,11 +45,20 @@ bool Puppet::ensure(const n::Vector3& at) {
     phase_ = "loading model";
     return false;
   }
-  ped_ = n::CreateChar(n::kPedTypeCivMale, model_, at);
-  n::MarkModelAsNoLongerNeeded(model_);
-  if (!ped_) {
-    phase_ = "CREATE_CHAR failed";
-    return false;
+  if (model_ == player_slots::kProtagonistModel) {
+    // Only a player ped can wear the protagonist model: borrow an extra player slot.
+    ped_ = player_slots::acquire(at, 0.0f);
+    if (!ped_) {
+      phase_ = "no player slot";
+      return false;
+    }
+  } else {
+    ped_ = n::CreateChar(n::kPedTypeCivMale, model_, at);
+    n::MarkModelAsNoLongerNeeded(model_);
+    if (!ped_) {
+      phase_ = "CREATE_CHAR failed";
+      return false;
+    }
   }
   n::SetBlockingOfNonTemporaryEvents(ped_, true);
   // Not invincible (hits must register so we can report them), but on a big health buffer
@@ -203,11 +214,11 @@ void Puppet::leave_vehicle(const n::Vector3& at) {
 }
 
 void Puppet::set_model(std::uint32_t model_hash) {
-  // The protagonist model ("player": Niko, and Johnny/Luis in the episodes) can only be worn
-  // by a player ped; CREATE_CHAR with it crashes in game code. Anything that is not a ped
-  // model in the image (a bad hash from a peer) would too. Both fall back to the default.
-  constexpr std::uint32_t kProtagonist = 0x6F0783F5; // joaat("player")
-  if (model_hash == kProtagonist || (model_hash && !(n::IsModelInCdimage(model_hash) && n::IsThisModelAPed(model_hash)))) {
+  // The protagonist model ("player") is spawned as an extra player ped (see ensure).
+  // Anything that is not a ped model in the image (a bad hash from a peer) would crash
+  // CREATE_CHAR, so it falls back to the default.
+  if (model_hash && model_hash != player_slots::kProtagonistModel &&
+      !(n::IsModelInCdimage(model_hash) && n::IsThisModelAPed(model_hash))) {
     if (model_hash != rejected_model_) log::info("Puppet model 0x{:08X} can't be a ped; using the default", model_hash);
     rejected_model_ = model_hash;
     model_hash = 0;
@@ -298,7 +309,8 @@ void Puppet::apply_combat(const PlayerState& s, std::uint32_t now_ms) {
 
 void Puppet::despawn() {
   if (blip_) n::RemoveBlip(blip_), blip_ = 0;
-  if (ped_ && n::DoesCharExist(ped_)) n::DeleteChar(ped_);
+  if (player_slots::owns(ped_)) player_slots::release(ped_);
+  else if (ped_ && n::DoesCharExist(ped_)) n::DeleteChar(ped_);
   ped_ = 0;
   vehicle_ = 0;
   action_ = Action::None;

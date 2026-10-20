@@ -208,6 +208,28 @@ reaches another machine (and how remote players appear) while the game stays in 
 the same LAN running `NETWORK_JOIN_GAME` (step 3). The launcher allows one game copy per machine, so this can't be
 done on one PC. Join-side probe keys still have to be added (find/join LAN session).
 
+## 7b. Extra player peds (the host appears as Niko)
+
+Only player peds may wear the protagonist model ("player"); CREATE_CHAR with it crashes
+(static VA 0xDF969A). Findings, all in readable code (src/game/player_slots.cpp):
+
+- The script native CREATE_PLAYER (handler 0xBB53B0) ignores its slot argument in effect: it
+  (re)creates the *local* player (slot 0) and dereferences null if one already exists.
+- Behind it, 0x93E960(flags*, slot, model_index, flag) creates a slot's CPlayerInfo
+  (array at 0x11A8808, 32 slots) and player ped. Flags {0,1} = local (camera, pad); {1,0}
+  crashed in the ped ctor; {1,1} = remote-style player ped. Then 0x9F19C0 (pop type 2) and
+  0x93E380 (position + add to world) as CREATE_PLAYER does.
+- Remote-style player peds have no pad (0xA2B350 returns null when +0x218 is set) and the
+  per-frame player-control code uses it unchecked: crash a frame later. Hooking the getter to
+  return our pad made the ped copy our input (SET_PLAYER_CONTROL off didn't stop it); the
+  second, idle pad (0x1185C08) works.
+- Freeing a slot mid-game (0x93EB70) crashed a frame later on a queued job still
+  referencing the ped. The game only frees slots at session teardown, so we park released
+  slots (hidden, frozen) and reuse them.
+- Verified in a story save (2026-10-20): slot 1 Niko appears, camera stays on the local
+  player, it ignores our input, walks with TASK_GO_STRAIGHT_TO_COORD, peds and police
+  ignore it, park/unpark works, game counts 2 players.
+
 ## 8. Fallbacks if the native session is a dead end
 
 - Keep the M2b-M5 own-sync plan (current architecture).

@@ -52,7 +52,9 @@ The original MP character models are still in the CE data: `M_Y_Multiplayer` and
   our overlay. The original lobby UI was tied to GFWL and the removed network frontend, so it is rebuilt rather
   than revived. The result is saved to `plugins/iv-coop/character.ini` and sent on join.
 - **Fallback:** a random ambient ped with random variations.
-- Only the host is the protagonist (Niko / Johnny / Luis).
+- Only the host is the protagonist (Niko / Johnny / Luis). Others see the host as the
+  protagonist through an extra *player* ped (player slots 1-3), since only player peds can
+  wear that model; see research-native-netcode.md section 7b.
 
 ## Story co-op: how every system is handled
 
