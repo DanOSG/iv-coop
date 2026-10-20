@@ -188,7 +188,23 @@ docs/
   - followers are kinematic (peds slide; reuse animated puppets);
   - the live copy's AI is a placeholder (M6 replays the host script's tasks on the sim owner);
   - no streaming radius yet (every client spawns every entity).
-- **M5:** combat, damage, deaths/respawns, wanted level rules.
+- **M5:** combat, damage, deaths/respawns, wanted level rules. ✅ Verified in-game with bots:
+  - The victim's owner applies damage: the attacker reports hits it detects on its copy, using a `Damage` game
+    message.
+  - Copies never die locally: puppets and follower peds sit on a refilled 2000 HP buffer (cars 1000).
+  - One hit per shot; damage from a puppet's local bullets is reverted.
+  - Melee registers.
+  - Puppets mirror weapon, exact shot count (cumulative counter from ammo) and aim point. They aim while walking
+    (`TASK_GO_TO_COORD_WHILE_AIMING`, layout from its handler) and stop shooting while their local copy is
+    ragdolled.
+  - Death and respawn follow the owner, and entities die on the owner's signal.
+  Follow-ups:
+  - armour isn't drained by remote hits (no set-armour native found yet);
+  - melee/punch damage reads low against the 2000 HP buffer (2–3 per punch), so check whether damage scales with
+    max health;
+  - wanted level: free roam is per player already (each game runs its own police), and shared mission wanted
+    comes with M6;
+  - remote players' vehicles can't be damaged yet (stand-ins are damage-proof).
 - **M5b:** ambient world sync: **city pedestrians and traffic** near more than one player become networked
   entities (sim owner = nearest player), so everyone sees the same people and cars, including the same ped
   getting hit, fleeing or fighting. Ambient entities near only one player stay local (cheap). Builds on M4's
