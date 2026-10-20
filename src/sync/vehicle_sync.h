@@ -41,11 +41,6 @@ class VehicleSync {
   // APPLY_FORCE_TO_CAR. Off = kinematic (placed exactly on the pose every frame).
   bool physics_follow = true;
   std::uint32_t force_type = 1;
-  // Tuning knobs (live-switchable while calibrating): TASK_CAR_TEMP_ACTION code given to
-  // the stand-in's driver (0 = none), and front-wheel steering (0 off, 1 on, -1 inverted).
-  std::uint32_t temp_action = 0;
-  int steer_mode = 1;
-  bool wheel_sync = true; // keep wheel spin matched to ground speed (anti-screech)
 
   // Returns the player id whose puppet is `ped`, if any (supplied by the player sync).
   using PuppetLookup = std::function<std::optional<std::uint8_t>(natives::Ped)>;
@@ -87,7 +82,6 @@ class VehicleSync {
     float steer = 0;
     bool have_yaw = false;
     float last_target_yaw = 0;    // radians, for the steering estimate
-    std::uint32_t last_action_ms = 0;
   };
 
   std::uint32_t local_id_for(natives::Vehicle v, std::uint8_t my_id);

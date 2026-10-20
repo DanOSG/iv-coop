@@ -112,9 +112,7 @@ void draw_status() {
     }
     if (!c.vehicles.empty()) {
       ImGui::Separator();
-      ImGui::Text("vehicles  [C+S+F6] wheel sync %s  [C+S+F7] steering %s  [C+S+F8] driver action %u",
-                  c.wheel_sync ? "ON" : "off", c.steer_mode == 0 ? "off" : c.steer_mode == 1 ? "normal" : "inverted",
-                  c.temp_action);
+      ImGui::TextUnformatted("remote vehicles");
       for (const auto& v : c.vehicles)
         ImGui::Text("  0x%08X #%u  err %4.1f m  snaps %3u  gain %.2f  steer %+.2f%s", v.vehicle_id, v.owner, v.error_m,
                     v.snaps, v.gain, v.steer, v.blocked ? "  BLOCKED" : "");

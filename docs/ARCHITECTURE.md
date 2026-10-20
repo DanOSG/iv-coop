@@ -164,9 +164,16 @@ docs/
 - **M3:** vehicles, including passengers in any vehicle and seat reservation. ✅ base, verified in-game with bots:
   the owner (driver, else lowest-id player inside) sends `VehicleState`, and others drive a stand-in kinematically
   (0.0 m error, 0 snaps). Remote players sit in the right car and seat, including as your passenger.
+  **Physics-follow ✅ (default):** the stand-in stays a physical car, steered toward the owner's track with
+  mass-scaled impulses (`APPLY_FORCE_TO_CAR` type 1, layout read from its implementation). The controller
+  learns its gain (measured 0.3–0.8: tyre grip absorbs the rest) and is limited to 2 g, so walls and traffic win
+  contacts. When it's blocked (>3 m off and not closing for 0.75 s) it stops pushing until the 10 m snap. It
+  steers horizontally only, eases orientation 15%/frame, and turns the front wheels from the owner's yaw rate.
+  Verified with bots: grounded, stops at walls then pops, recovers from bumps. Tight turns screech (realistic).
+  Tried and dropped: driver `TASK_CAR_TEMP_ACTION` codes (no effect); re-asserting forward speed each frame
+  ("wheel sync"), which fights the suspension so the car sinks. Kinematic mode remains behind
+  `[Net] PhysicsFollow=0`.
   Follow-ups:
-  - **physics-follow:** a physical stand-in steered by forces toward the received pose, so it reacts to local
-    traffic and walls instead of passing through them with impact sounds.
   - enter/exit animations instead of warps.
   - deformation/damage sync.
   - seat reservation for script-tasked seats (with M6).

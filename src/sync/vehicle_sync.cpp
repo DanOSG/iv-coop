@@ -166,8 +166,8 @@ void VehicleSync::drive_physics(Remote& r, const VehicleState& t, float dt) {
     }
   }
 
-  // Steering: turn the front wheels by the owner's yaw rate (bicycle model), so the tyres
-  // roll along the curve instead of being dragged sideways (screech). Sign is a tuning knob.
+  // Steering: turn the front wheels by the owner's yaw rate (bicycle model) so they point
+  // into curves. (Tight turns still screech, as a real car would.)
   const float yaw = std::atan2(2.0f * (t.qw * t.qz + t.qx * t.qy), 1.0f - 2.0f * (t.qy * t.qy + t.qz * t.qz));
   if (r.have_yaw) {
     float dyaw = yaw - r.last_target_yaw;
@@ -181,7 +181,7 @@ void VehicleSync::drive_physics(Remote& r, const VehicleState& t, float dt) {
   }
   r.have_yaw = true;
   r.last_target_yaw = yaw;
-  n::SetVehicleSteerBias(r.handle, steer_mode ? r.steer * static_cast<float>(steer_mode) : 0.0f);
+  n::SetVehicleSteerBias(r.handle, r.steer);
 
   // Horizontal only: gravity and suspension keep the car on the road; height mismatches
   // beyond kSnapDz are fixed by snapping.
@@ -216,23 +216,10 @@ void VehicleSync::drive_physics(Remote& r, const VehicleState& t, float dt) {
   r.last_request = want;
   r.have_last = true;
 
-  const n::Vector4 q = n::GetVehicleQuaternion(r.handle);
-
-  // Wheel sync: impulses move the body but not the wheels, so the game hears tyres
-  // dragged over the road at full speed (constant screech). While the car isn't sliding,
-  // re-assert its *own current* forward speed, which spins the wheels to match without
-  // adding any push. Skipped while sliding (collisions, spins) so those still play out.
-  if (wheel_sync) {
-    const float fx = 2 * (q.x * q.y - q.w * q.z), fy = 1 - 2 * (q.x * q.x + q.z * q.z);
-    const float flen = std::hypot(fx, fy);
-    if (flen > 0.1f) {
-      const float forward = (vel.x * fx + vel.y * fy) / flen;
-      const float lateral = std::fabs((vel.x * -fy + vel.y * fx) / flen);
-      if (lateral < 2.0f) n::SetCarForwardSpeed(r.handle, forward);
-    }
-  }
-
   // Ease the orientation toward the owner's (short-arc nlerp of the current one).
+  // (Tried and dropped: re-asserting forward speed each frame to "sync" wheel spin; it
+  // overwrites vertical velocity and fights the suspension, so the car sinks.)
+  const n::Vector4 q = n::GetVehicleQuaternion(r.handle);
   const float dot = q.x * t.qx + q.y * t.qy + q.z * t.qz + q.w * t.qw;
   const float s = dot < 0 ? -1.0f : 1.0f;
   n::Vector4 o{q.x + (s * t.qx - q.x) * kRotBlend, q.y + (s * t.qy - q.y) * kRotBlend,
@@ -246,12 +233,6 @@ void VehicleSync::drive(Remote& r, const VehicleState& t, std::uint32_t now_ms) 
   r.error_m = std::hypot(t.x - cur.x, t.y - cur.y);
   const float dt = r.last_drive_ms ? std::clamp((now_ms - r.last_drive_ms) / 1000.0f, 0.004f, 0.05f) : 1.0f / 60;
   r.last_drive_ms = now_ms;
-
-  // Tuning knob: keep the stand-in's driver on a temp action (e.g. to release brakes).
-  if (temp_action && now_ms - r.last_action_ms > 500) {
-    if (const n::Ped driver = n::GetDriverOfCar(r.handle)) n::TaskCarTempAction(driver, r.handle, temp_action, 1000);
-    r.last_action_ms = now_ms;
-  }
 
   if (physics_follow)
     drive_physics(r, t, dt);
