@@ -29,6 +29,7 @@
 #include <thread>
 
 #include "net/session.h"
+#include "story/story_protocol.h"
 #include "sync/entity_protocol.h"
 
 namespace {
@@ -272,6 +273,32 @@ int main(int argc, char** argv) {
 
     const std::uint8_t my_id = session.status().my_id;
     for (const auto& gm : session.drain_game()) {
+      if (story::is_story_msg(gm.data)) { // print what the host's story sends us
+        if (const auto d = story::decode(gm.data)) {
+          switch (d->type) {
+            case story::StoryMsg::TextBlock:
+              std::printf("[%s] story: text block slot %u -> '%s'\n", a.name.c_str(), d->text_block.slot,
+                          story::to_string(d->text_block.name).c_str());
+              break;
+            case story::StoryMsg::BlipAdd:
+              std::printf("[%s] story: blip %u added (kind %u, entity %u, %.1f %.1f)\n", a.name.c_str(),
+                          d->blip_add.id, static_cast<unsigned>(d->blip_add.kind), d->blip_add.entity, d->blip_add.x,
+                          d->blip_add.y);
+              break;
+            case story::StoryMsg::BlipProp:
+              std::printf("[%s] story: blip %u prop %u = %d\n", a.name.c_str(), d->blip_prop.id,
+                          static_cast<unsigned>(d->blip_prop.prop), d->blip_prop.ivalue);
+              break;
+            case story::StoryMsg::BlipRemove:
+              std::printf("[%s] story: blip %u removed\n", a.name.c_str(), d->blip_id);
+              break;
+            case story::StoryMsg::Text:
+              std::printf("[%s] story: text '%s'\n", a.name.c_str(), story::to_string(d->text.key).c_str());
+              break;
+          }
+        }
+        continue;
+      }
       const auto m = sync::decode_entity_msg(gm.data);
       if (!m) continue;
       if (m->type == sync::GameMsg::EntityCreate) {

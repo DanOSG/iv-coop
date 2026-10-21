@@ -28,7 +28,16 @@ struct EntityBlipOp { std::uint32_t blip; n::Handle handle; };
 using Op = std::variant<SendOp, RegisterOp, UnregisterOp, EntityBlipOp>;
 
 std::deque<Op> g_ops;               // processed in order by host_tick
-std::set<std::uint32_t> g_host_blips; // blips we replicated (only those get props/removal)
+// The host's replicated story state, kept so a late joiner can be sent all of it.
+// Entity blips are recorded when captured (so props and removal right after creation
+// aren't lost) and `resolved` once host_tick knows the entity's network id.
+struct HostBlip {
+  BlipAdd add;
+  bool resolved = false;
+  std::map<BlipPropKind, BlipProp> props; // latest value of each
+};
+std::map<std::uint32_t, HostBlip> g_host_blips;
+std::map<std::uint8_t, std::string> g_host_text_blocks; // slot -> block name
 
 bool wildcard(const std::string& pat, const std::string& s) {
   // '*' matches any run; everything else literal. Small inputs: simple recursion.
@@ -59,6 +68,10 @@ void text_block(const Call& c, int name_arg, int slot_arg) {
   TextBlock b;
   b.slot = static_cast<std::uint8_t>(c.arg<std::uint32_t>(slot_arg));
   if (name_arg >= 0) b.name = make_key(c.str(name_arg));
+  if (name_arg >= 0)
+    g_host_text_blocks[b.slot] = to_string(b.name);
+  else
+    g_host_text_blocks.erase(b.slot);
   send(encode(b));
 }
 
@@ -68,7 +81,7 @@ void blip_coord(const Call& c, BlipKind kind) {
   b.id = static_cast<std::uint32_t>(c.out<std::int32_t>(3));
   b.kind = kind, b.x = c.arg<float>(0), b.y = c.arg<float>(1), b.z = c.arg<float>(2);
   if (!b.id) return;
-  g_host_blips.insert(b.id);
+  g_host_blips[b.id] = HostBlip{b, true, {}};
   send(encode(b));
 }
 
@@ -76,7 +89,8 @@ void blip_prop(const Call& c, BlipPropKind prop) {
   if (!capture(c)) return;
   BlipProp p;
   p.id = c.arg<std::uint32_t>(0);
-  if (!g_host_blips.contains(p.id)) return;
+  const auto hb = g_host_blips.find(p.id);
+  if (hb == g_host_blips.end()) return;
   p.prop = prop;
   if (prop == BlipPropKind::Scale)
     p.fvalue = c.arg<float>(1);
@@ -84,6 +98,7 @@ void blip_prop(const Call& c, BlipPropKind prop) {
     p.name = make_key(c.str(1));
   else
     p.ivalue = c.arg<std::int32_t>(1);
+  hb->second.props[prop] = p;
   send(encode(p));
 }
 
@@ -109,9 +124,14 @@ struct ClientBlip {
 };
 std::map<std::uint32_t, ClientBlip> g_client_blips;
 
+bool same_place(const BlipAdd& a, const BlipAdd& b) {
+  return a.kind == b.kind && a.entity == b.entity && a.x == b.x && a.y == b.y && a.z == b.z;
+}
+
 // Text blocks the host loaded into slots on our side, and lines held back until they load
 // (a PRINT for a key whose block isn't in yet shows nothing).
-std::set<std::uint8_t> g_loading_slots, g_loaded_slots;
+std::set<std::uint8_t> g_loading_slots;
+std::map<std::uint8_t, std::string> g_loaded_slots; // slot -> block we requested there
 std::deque<Text> g_held_texts;
 
 void apply_prop(n::Blip b, const BlipProp& p) {
@@ -192,7 +212,11 @@ void register_hooks() {
   const auto entity_blip = [](const Call& c) {
     if (!capture(c)) return;
     const auto blip = static_cast<std::uint32_t>(c.out<std::int32_t>(1));
-    if (blip) g_ops.push_back(EntityBlipOp{blip, c.arg<n::Handle>(0)});
+    if (!blip) return;
+    BlipAdd add;
+    add.id = blip, add.kind = BlipKind::Entity;
+    g_host_blips[blip] = HostBlip{add, false, {}};
+    g_ops.push_back(EntityBlipOp{blip, c.arg<n::Handle>(0)});
   };
   on(0x19A64C5D, "ADD_BLIP_FOR_CHAR", entity_blip);
   on(0x6D21564D, "ADD_BLIP_FOR_CAR", entity_blip);
@@ -229,6 +253,7 @@ void host_tick(bool hosting, net::Session& net, sync::EntitySync& ents) {
   if (!hosting) {
     g_ops.clear();
     g_host_blips.clear();
+    g_host_text_blocks.clear();
     return;
   }
   while (!g_ops.empty()) {
@@ -242,17 +267,38 @@ void host_tick(bool hosting, net::Session& net, sync::EntitySync& ents) {
     } else if (auto* u = std::get_if<UnregisterOp>(&op)) {
       ents.host_unregister_handle(u->handle, net);
     } else if (auto* b = std::get_if<EntityBlipOp>(&op)) {
+      const auto hb = g_host_blips.find(b->blip);
+      if (hb == g_host_blips.end()) continue; // removed before we got to it
       if (auto id = ents.id_for_handle(b->handle)) {
-        BlipAdd add;
-        add.id = b->blip, add.kind = BlipKind::Entity, add.entity = *id;
-        g_host_blips.insert(b->blip);
-        net.send_game(encode(add), true);
+        hb->second.add.entity = *id;
+        hb->second.resolved = true;
+        net.send_game(encode(hb->second.add), true);
         ++g_status.messages;
       } else {
         log::warn("Story blip {} is on a non-networked entity {}; not replicated", b->blip, b->handle);
+        g_host_blips.erase(hb); // its queued props go to an id clients don't know: ignored
       }
     }
   }
+}
+
+void host_on_player_joined(std::uint8_t player, net::Session& net) {
+  // Broadcast, like entity creates: clients that already have a blip/block keep it as is.
+  // Called after the entity resend, so entity blips' entities arrive first (clients retry
+  // a blip until its entity's copy exists anyway).
+  for (const auto& [slot, name] : g_host_text_blocks) {
+    TextBlock b;
+    b.slot = slot, b.name = make_key(name);
+    net.send_game(encode(b), true);
+  }
+  unsigned blips = 0;
+  for (const auto& [id, hb] : g_host_blips) {
+    if (!hb.resolved) continue; // host_tick sends it when it resolves
+    net.send_game(encode(hb.add), true);
+    for (const auto& [kind, p] : hb.props) net.send_game(encode(p), true);
+    ++blips;
+  }
+  log::info("Story: sent {} text blocks and {} blips to late joiner #{}", g_host_text_blocks.size(), blips, player);
 }
 
 bool client_on_message(const net::GameMessage& m, sync::EntitySync& ents) {
@@ -273,17 +319,24 @@ bool client_on_message(const net::GameMessage& m, sync::EntitySync& ents) {
       if (name.empty()) {
         n::ClearAdditionalText(slot, false);
         g_loading_slots.erase(slot), g_loaded_slots.erase(slot);
+      } else if (auto it = g_loaded_slots.find(slot); it != g_loaded_slots.end() && it->second == name) {
+        break; // already there (a late-join resend)
       } else {
         n::RequestAdditionalText(name.c_str(), slot);
-        g_loading_slots.insert(slot), g_loaded_slots.insert(slot);
+        g_loading_slots.insert(slot), g_loaded_slots[slot] = name;
       }
       log::info("Story: text block slot {} -> {}", slot, name.empty() ? "(cleared)" : name);
       break;
     }
     case StoryMsg::BlipAdd: {
       auto& cb = g_client_blips[d->blip_add.id];
+      const BlipAdd& a = d->blip_add;
+      if (cb.local && same_place(cb.add, a)) {
+        cb.props.clear(); // a late-join resend: keep the blip, its props follow again
+        break;
+      }
       if (cb.local) n::RemoveBlip(cb.local);
-      cb = ClientBlip{0, d->blip_add, {}};
+      cb = ClientBlip{0, a, {}};
       try_create(cb, ents);
       break;
     }
@@ -323,9 +376,10 @@ void clear() {
   g_client_blips.clear();
   // Free what the host's story loaded. Blocks our own (frozen) scripts had in those slots
   // were replaced when we loaded the host's; restoring them belongs with progression sync.
-  for (std::uint8_t slot : g_loaded_slots) n::ClearAdditionalText(slot, false);
+  for (const auto& [slot, name] : g_loaded_slots) n::ClearAdditionalText(slot, false);
   g_loading_slots.clear(), g_loaded_slots.clear(), g_held_texts.clear();
   g_host_blips.clear();
+  g_host_text_blocks.clear();
   g_ops.clear();
   g_hosting = false;
 }

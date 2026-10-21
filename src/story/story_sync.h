@@ -33,6 +33,8 @@ bool is_story_script(const std::string& name);
 // --- per frame, game thread, from the co-op tick ---
 // Host: send what story scripts did since last frame (nothing is captured unless hosting).
 void host_tick(bool hosting, net::Session& net, sync::EntitySync& ents);
+// Host: someone joined; resend the story state (text blocks, blips) after the entities.
+void host_on_player_joined(std::uint8_t player, net::Session& net);
 // Client: apply a story message from the host (returns false if it wasn't one).
 bool client_on_message(const net::GameMessage& m, sync::EntitySync& ents);
 // Client: retry blips waiting for their entity's local copy to spawn.

@@ -253,7 +253,10 @@ void tick() {
       case K::Joined:
         log::info("Player {} '{}' joined", e.id, e.text);
         remote(e.id).name = e.text;
-        if (net.status().mode == net::Mode::Hosting) g_entities.on_player_joined(e.id, net);
+        if (net.status().mode == net::Mode::Hosting) {
+          g_entities.on_player_joined(e.id, net);
+          story::host_on_player_joined(e.id, net);
+        }
         break;
       case K::Left:
         log::info("Player {} '{}' left", e.id, e.text);
