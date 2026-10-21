@@ -9,6 +9,7 @@
 #include <mutex>
 #include <set>
 
+#include "core/crash.h"
 #include "core/log.h"
 #include "game/addresses.h"
 
@@ -122,6 +123,7 @@ void run_tick(game::scrThread* host) {
 // Once per frame on the game thread, after every script has had its turn.
 bool __cdecl hk_UpdateAll(std::int32_t budget) {
   const bool result = o_UpdateAll(budget);
+  crash::beat_tick();
   ++g_frames;
   scan_threads();
   if (g_host) run_tick(g_host);

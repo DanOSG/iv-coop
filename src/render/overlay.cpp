@@ -6,6 +6,7 @@
 #include <imgui_impl_dx9.h>
 #include <imgui_impl_win32.h>
 
+#include "core/crash.h"
 #include "core/log.h"
 #include "game/script.h"
 #include "sync/ghost.h"
@@ -173,6 +174,7 @@ void on_present(IDirect3DDevice9* dev) {
     if (!g_window) return;
     init_imgui(dev);
   }
+  crash::beat_render();
   if (g_frames == 1 || g_frames % 3600 == 0) log::debug("Present frame {}", g_frames);
 
   poll_toggle();

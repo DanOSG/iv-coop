@@ -62,5 +62,8 @@ void before(std::uint32_t hash, const char* name, Callback cb);
 bool install();
 // Log every hooked call before it runs (debug level; for finding a native that crashes).
 void set_trace(bool on);
+// Called after every hooked native (all of them), like an `on` callback on each; for
+// diagnostics such as the mission audit. Register before install().
+void observe(Callback cb);
 
 } // namespace ivc::native_hooks

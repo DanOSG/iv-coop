@@ -140,6 +140,12 @@ void on(std::uint32_t hash, const char* name, Callback cb) {
   if (Slot* s = slot_for(hash, name)) s->callbacks.push_back(std::move(cb));
 }
 
+std::vector<Callback> g_observers;
+void observe(Callback cb) {
+  if (g_installed) log::warn("Native hook observer added after install(); it won't be active");
+  g_observers.push_back(std::move(cb));
+}
+
 void before(std::uint32_t hash, const char* name, Callback cb) {
   if (Slot* s = slot_for(hash, name)) s->before.push_back(std::move(cb));
 }
@@ -147,6 +153,8 @@ void before(std::uint32_t hash, const char* name, Callback cb) {
 bool install() {
   if (g_installed) return true;
   g_installed = true;
+  for (int i = 0; i < g_count; ++i)
+    for (const auto& obs : g_observers) g_slots[i].callbacks.push_back(obs);
   int ok = 0;
   for (int i = 0; i < g_count; ++i) {
     Slot& s = g_slots[i];
