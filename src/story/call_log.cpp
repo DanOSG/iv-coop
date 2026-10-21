@@ -91,6 +91,51 @@ void register_call_logging() {
   });
   on(0x288E50A3, "START_SCRIPT_CONVERSATION",
      [](const Call& c) { report(c, std::format("{}, {}", c.arg<int>(0), c.arg<int>(1))); });
+
+  // --- world state (progression research): what story scripts change persistently ---
+  const auto f6 = [](const Call& c, int at) {
+    return std::format("{:.1f} {:.1f} {:.1f} .. {:.1f} {:.1f} {:.1f}", c.arg<float>(at), c.arg<float>(at + 1),
+                       c.arg<float>(at + 2), c.arg<float>(at + 3), c.arg<float>(at + 4), c.arg<float>(at + 5));
+  };
+  for (auto [hash, name] : {std::pair{0x59FD4E83u, "REQUEST_IPL"}, {0x787F38B5u, "REMOVE_IPL"},
+                            {0x658F21AFu, "REMOVE_IPL_DISCREETLY"}})
+    on(hash, name, [](const Call& c) { report(c, str(c, 0)); });
+  for (auto [hash, name] : {std::pair{0x56553F38u, "SWITCH_ROADS_ON"}, {0x4C3C1F3Cu, "SWITCH_ROADS_OFF"},
+                            {0x6251618Fu, "SWITCH_ROADS_BACK_TO_ORIGINAL"},
+                            {0x6AA20B7Eu, "SWITCH_PED_ROADS_BACK_TO_ORIGINAL"}})
+    on(hash, name, [f6](const Call& c) { report(c, f6(c, 0)); });
+  on(0x69CE154F, "SET_CAR_GENERATORS_ACTIVE_IN_AREA",
+     [f6](const Call& c) { report(c, std::format("{}, {}", f6(c, 0), c.arg<int>(6))); });
+  on(0x5E077484, "SWAP_NEAREST_BUILDING_MODEL", [](const Call& c) {
+    report(c, std::format("{:.1f} {:.1f} {:.1f} r{:.1f}, 0x{:08X} -> 0x{:08X}", c.arg<float>(0), c.arg<float>(1),
+                          c.arg<float>(2), c.arg<float>(3), c.arg<unsigned>(4), c.arg<unsigned>(5)));
+  });
+  on(0x10974B70, "SET_STATE_OF_CLOSEST_DOOR_OF_TYPE", [](const Call& c) {
+    report(c, std::format("0x{:08X}, {:.1f} {:.1f} {:.1f}, state {}, {:.2f}", c.arg<unsigned>(0), c.arg<float>(1),
+                          c.arg<float>(2), c.arg<float>(3), c.arg<int>(4), c.arg<float>(5)));
+  });
+  on(0x0F132F7E, "CREATE_CAR_GENERATOR", [](const Call& c) {
+    report(c, std::format("{:.1f} {:.1f} {:.1f}, model 0x{:08X} -> gen {}", c.arg<float>(0), c.arg<float>(1),
+                          c.arg<float>(2), c.arg<unsigned>(6), c.out<int>(14)));
+  });
+  for (auto [hash, name] : {std::pair{0x4B6E368Du, "SET_EXTRA_HOSPITAL_RESTART_POINT"},
+                            {0x1C4E7A79u, "SET_EXTRA_POLICE_STATION_RESTART_POINT"}})
+    on(hash, name, [](const Call& c) {
+      report(c, std::format("{:.1f} {:.1f} {:.1f}, {:.1f}, {:.1f}", c.arg<float>(0), c.arg<float>(1), c.arg<float>(2),
+                            c.arg<float>(3), c.arg<float>(4)));
+    });
+  for (auto [hash, name] : {std::pair{0x70582D53u, "SET_ZONE_POPULATION_TYPE"}, {0x5E5E4252u, "SET_ZONE_SCUMMINESS"},
+                            {0x64F37F05u, "SET_ZONE_NO_COPS"}})
+    on(hash, name, [](const Call& c) { report(c, std::format("{}, {}", str(c, 0), c.arg<int>(1))); });
+  for (auto [hash, name] : {std::pair{0x7CE83A30u, "SWITCH_CAR_GENERATOR"}, {0x66DD4F67u, "ACTIVATE_INTERIOR"},
+                            {0x208C03C9u, "ENABLE_SAVE_HOUSE"}, {0x581E2306u, "DISABLE_CAR_GENERATORS"},
+                            {0x537379A8u, "ADD_SCORE"}})
+    on(hash, name, [](const Call& c) { report(c, std::format("{}, {}", c.arg<int>(0), c.arg<int>(1))); });
+  for (auto [hash, name] : {std::pair{0x5D622498u, "SET_MAX_WANTED_LEVEL"}, {0x69A72C50u, "ALLOW_EMERGENCY_SERVICES"},
+                            {0x0FFD1A92u, "SWITCH_RANDOM_TRAINS"}, {0x7FC65855u, "SWITCH_RANDOM_BOATS"},
+                            {0x4E637988u, "SWITCH_AMBIENT_PLANES"}, {0x060669FEu, "SWITCH_GARBAGE_TRUCKS"},
+                            {0x3A8531E8u, "SET_GANG_CAR"}})
+    on(hash, name, [](const Call& c) { report(c, std::to_string(c.arg<int>(0))); });
 }
 
 } // namespace ivc::story

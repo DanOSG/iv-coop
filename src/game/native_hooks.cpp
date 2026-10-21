@@ -19,7 +19,7 @@ namespace {
 
 using Handler = void(__cdecl*)(natives::CallContext*);
 
-constexpr int kMaxHooks = 96;
+constexpr int kMaxHooks = 192;
 
 struct Slot {
   std::uint32_t hash = 0;
