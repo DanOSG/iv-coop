@@ -200,6 +200,11 @@ std::string current_script_name() {
   return t ? name_of(t) : std::string();
 }
 
+std::int32_t current_thread_id() {
+  const game::scrThread* t = game::g_addr.current_thread ? *game::g_addr.current_thread : nullptr;
+  return t ? field<std::int32_t>(t, kOffId) : 0;
+}
+
 std::string host_script() {
   std::lock_guard lock(g_mutex);
   return g_host_snapshot;

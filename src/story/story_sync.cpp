@@ -9,6 +9,7 @@
 #include "game/native_hooks.h"
 #include "game/natives.h"
 #include "story/story_protocol.h"
+#include "story/world_state.h"
 
 namespace ivc::story {
 namespace {
@@ -73,6 +74,17 @@ void text_block(const Call& c, int name_arg, int slot_arg) {
   else
     g_host_text_blocks.erase(b.slot);
   send(encode(b));
+}
+
+// Mission payouts: a story script paying the protagonist. Purchases are ADD_SCORE too,
+// but negative and from shop scripts, which run locally on every machine anyway; zero
+// shows up for $0 rewards and owned items.
+void payout(const Call& c) {
+  if (!capture(c)) return;
+  const auto amount = c.arg<std::int32_t>(1);
+  if (c.arg<std::int32_t>(0) != n::GetPlayerId() || amount <= 0) return;
+  log::info("Story: payout ${} from {}", amount, c.script);
+  send(encode_payout(amount));
 }
 
 void blip_coord(const Call& c, BlipKind kind) {
@@ -193,6 +205,8 @@ void register_hooks() {
   using native_hooks::before;
   on(0x6A9F01AF, "REQUEST_ADDITIONAL_TEXT", [](const Call& c) { text_block(c, 0, 1); });
   on(0x0A1B465C, "CLEAR_ADDITIONAL_TEXT", [](const Call& c) { text_block(c, -1, 0); });
+  on(0x537379A8, "ADD_SCORE", payout);
+  world::register_hooks();
   // Text: (key, [key2 | number], time, flag) per native.
   on(0x73B01573, "PRINT_NOW", [](const Call& c) { text(c, TextKind::PrintNow, 0, -1, -1, 1, 2); });
   on(0x0A491CFF, "PRINT", [](const Call& c) { text(c, TextKind::Print, 0, -1, -1, 1, 2); });
@@ -250,6 +264,9 @@ void register_hooks() {
 
 void host_tick(bool hosting, net::Session& net, sync::EntitySync& ents) {
   g_hosting = hosting;
+  world::tick();
+  for (auto& msg : world::take_outbox())
+    if (hosting) net.send_game(std::move(msg), true);
   if (!hosting) {
     g_ops.clear();
     g_host_blips.clear();
@@ -283,6 +300,9 @@ void host_tick(bool hosting, net::Session& net, sync::EntitySync& ents) {
 }
 
 void host_on_player_joined(std::uint8_t player, net::Session& net) {
+  // World state first (progression), then text blocks and blips.
+  const auto ledger = world::encode_ledger();
+  for (const auto& msg : ledger) net.send_game(msg, true);
   // Broadcast, like entity creates: clients that already have a blip/block keep it as is.
   // Called after the entity resend, so entity blips' entities arrive first (clients retry
   // a blip until its entity's copy exists anyway).
@@ -298,7 +318,8 @@ void host_on_player_joined(std::uint8_t player, net::Session& net) {
     for (const auto& [kind, p] : hb.props) net.send_game(encode(p), true);
     ++blips;
   }
-  log::info("Story: sent {} text blocks and {} blips to late joiner #{}", g_host_text_blocks.size(), blips, player);
+  log::info("Story: sent {} world entries, {} text blocks and {} blips to late joiner #{}", ledger.size(),
+            g_host_text_blocks.size(), blips, player);
 }
 
 bool client_on_message(const net::GameMessage& m, sync::EntitySync& ents) {
@@ -312,6 +333,13 @@ bool client_on_message(const net::GameMessage& m, sync::EntitySync& ents) {
       if (g_loading_slots.empty()) apply_text(d->text);
       else g_held_texts.push_back(d->text);
       ++g_status.texts;
+      break;
+    case StoryMsg::World:
+      world::client_apply(m.data);
+      break;
+    case StoryMsg::Payout:
+      n::AddScore(n::GetPlayerId(), d->payout);
+      log::info("Story: mission payout ${} (mirrored from the host)", d->payout);
       break;
     case StoryMsg::TextBlock: {
       const std::uint8_t slot = d->text_block.slot;
@@ -371,6 +399,7 @@ void client_tick(sync::EntitySync& ents) {
 }
 
 void clear() {
+  world::client_restore();
   for (auto& [id, cb] : g_client_blips)
     if (cb.local) n::RemoveBlip(cb.local);
   g_client_blips.clear();

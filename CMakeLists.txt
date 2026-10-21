@@ -92,6 +92,7 @@ add_library(iv-coop SHARED
   src/game/native_hooks.cpp
   src/story/call_log.cpp
   src/story/story_sync.cpp
+  src/story/world_state.cpp
   src/sync/ghost.cpp
   src/sync/local_player.cpp
   src/sync/puppet.cpp

@@ -22,6 +22,8 @@ enum class StoryMsg : std::uint8_t {
   BlipRemove = 23,
   BlipProp = 24,
   TextBlock = 25,
+  World = 26,  // a world-state ledger op (world_state.cpp owns the payload)
+  Payout = 27, // a mission paid the protagonist: int32 amount
 };
 
 using Key = std::array<char, 32>;
@@ -75,6 +77,11 @@ inline std::vector<std::uint8_t> encode(const TextBlock& b) {
   w.put(StoryMsg::TextBlock).put(std::uint8_t{0}).put(b.slot).put(b.name);
   return std::move(w.data());
 }
+inline std::vector<std::uint8_t> encode_payout(std::int32_t amount) {
+  net::Writer w;
+  w.put(StoryMsg::Payout).put(std::uint8_t{0}).put(amount);
+  return std::move(w.data());
+}
 inline std::vector<std::uint8_t> encode(const Text& t) {
   net::Writer w;
   w.put(StoryMsg::Text).put(std::uint8_t{0}).put(t.kind).put(t.key).put(t.key2).put(t.number).put(t.time_ms).put(t.flag);
@@ -103,11 +110,12 @@ struct Decoded {
   std::uint32_t blip_id = 0; // BlipRemove
   BlipProp blip_prop;
   TextBlock text_block;
+  std::int32_t payout = 0;
 };
 
 inline bool is_story_msg(std::span<const std::uint8_t> d) {
   return !d.empty() && d[0] >= static_cast<std::uint8_t>(StoryMsg::Text) &&
-         d[0] <= static_cast<std::uint8_t>(StoryMsg::TextBlock);
+         d[0] <= static_cast<std::uint8_t>(StoryMsg::Payout);
 }
 
 inline std::optional<Decoded> decode(std::span<const std::uint8_t> d) {
@@ -132,6 +140,11 @@ inline std::optional<Decoded> decode(std::span<const std::uint8_t> d) {
     case StoryMsg::TextBlock:
       r.get(m.text_block.slot), r.get(m.text_block.name);
       break;
+    case StoryMsg::Payout:
+      r.get(m.payout);
+      break;
+    case StoryMsg::World:
+      break; // payload decoded by world_state
     case StoryMsg::BlipProp: {
       auto& p = m.blip_prop;
       r.get(p.id), r.get(p.prop), r.get(p.ivalue), r.get(p.fvalue), r.get(p.name);

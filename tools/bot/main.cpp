@@ -272,6 +272,7 @@ int main(int argc, char** argv) {
     for (const auto& u : session.drain_vehicles()) ++vehicles_received[u.state.vehicle_id];
 
     const std::uint8_t my_id = session.status().my_id;
+    static unsigned world_ops = 0;
     for (const auto& gm : session.drain_game()) {
       if (story::is_story_msg(gm.data)) { // print what the host's story sends us
         if (const auto d = story::decode(gm.data)) {
@@ -291,6 +292,15 @@ int main(int argc, char** argv) {
               break;
             case story::StoryMsg::BlipRemove:
               std::printf("[%s] story: blip %u removed\n", a.name.c_str(), d->blip_id);
+              break;
+            case story::StoryMsg::World:
+              ++world_ops;
+              if (world_ops == 1 || world_ops % 25 == 0)
+                std::printf("[%s] story: world op #%u (kind %u)\n", a.name.c_str(), world_ops,
+                            gm.data.size() > 2 ? gm.data[2] : 0u);
+              break;
+            case story::StoryMsg::Payout:
+              std::printf("[%s] story: payout $%d\n", a.name.c_str(), d->payout);
               break;
             case story::StoryMsg::Text:
               std::printf("[%s] story: text '%s'\n", a.name.c_str(), story::to_string(d->text.key).c_str());

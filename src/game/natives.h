@@ -97,6 +97,7 @@ inline Blip GetFirstBlipInfoId(std::uint32_t sprite) { return invoke<Blip>(0x3BD
 inline Blip GetNextBlipInfoId(std::uint32_t sprite) { return invoke<Blip>(0x154932F0, sprite); }
 inline std::uint32_t GetBlipInfoIdDisplay(Blip b) { return invoke<std::uint32_t>(0x1B731C3F, b); }
 inline bool DoesBlipExist(Blip b) { return invoke<bool>(0x590A6FF4, b); }
+inline void AddScore(Player p, std::int32_t amount) { invoke(0x537379A8, p, amount); }
 inline Ped GetBlipInfoIdPedIndex(Blip b) { return invoke<Ped>(0x5FD47B45, b); }
 inline std::uint32_t GetBlipInfoIdType(Blip b) { return invoke<std::uint32_t>(0x6A9E5CE5, b); }
 inline void RequestAdditionalText(const char* name, std::uint32_t slot) { invoke(0x6A9F01AF, name, slot); }
