@@ -21,6 +21,7 @@
 #include "sync/player_state.h"
 #include "sync/puppet.h"
 #include "story/cutscene.h"
+#include "sync/downed.h"
 #include "story/dialogue.h"
 #include "story/story_sync.h"
 #include "sync/entity_sync.h"
@@ -40,6 +41,7 @@ struct Remote {
   bool dead = false;
   std::uint8_t wanted = 0;
   std::uint32_t vehicle_id = 0; // networked vehicle they're in (sync::kNoVehicle on foot)
+  bool downed = false;
 };
 
 Settings g_cfg;
@@ -521,6 +523,17 @@ void tick() {
   handle_phone();
   story::cutscene::client_tick(); // also after leaving, to finish a restore
   hide_puppets_in_cutscenes();
+  {
+    downed::Frame f;
+    const net::SessionStatus st = session().status();
+    f.in_session = st.mode == net::Mode::Hosting || st.mode == net::Mode::Joined;
+    f.hosting = st.mode == net::Mode::Hosting;
+    f.my_id = st.my_id;
+    for (const auto& [id, r] : g_remotes)
+      for (const auto& p : st.players)
+        if (p.id == id && id != st.my_id) f.teammates.push_back({id, r.name, r.puppet.ped(), r.downed});
+    downed::tick(f, session());
+  }
   net::Session& net = session();
 
   for (const auto& e : net.drain_events()) {
@@ -640,6 +653,8 @@ void tick() {
         r.health = smp->health, r.weapon = smp->weapon, r.dead = (smp->flags & sync::PlayerState::kDead) != 0;
         r.wanted = smp->wanted;
         r.vehicle_id = smp->vehicle_id;
+        r.downed = (smp->flags & sync::PlayerState::kDowned) != 0;
+        r.puppet.set_downed_marker(r.downed);
       }
       if (local) dist = std::hypot(smp->x - local->x, smp->y - local->y, smp->z - local->z);
     }
@@ -679,12 +694,16 @@ void tick() {
     process_pending_spawn(me);
     for (const auto& m : net.drain_game()) {
       if (!in_session(m.from)) continue;
+      if (downed::is_msg(m.data)) {
+        downed::on_message(m, ss.my_id);
+        continue;
+      }
       const auto msg = sync::decode_entity_msg(m.data);
       if (msg && msg->type == sync::GameMsg::Damage) {
         const auto& d = msg->damage;
         if (d.kind == sync::DamageTarget::Player && d.target == ss.my_id && me && !n::IsCharDead(me)) {
           const std::uint32_t h = n::GetCharHealth(me);
-          n::SetCharHealth(me, h > d.amount ? h - d.amount : 0);
+          n::SetCharHealth(me, downed::floor_health(h > d.amount ? h - d.amount : 0));
           log::info("Took {} damage from player #{} (weapon {}), health {} -> {}", d.amount, m.from, d.weapon, h,
                     h > d.amount ? h - d.amount : 0);
         } else if (d.kind == sync::DamageTarget::Entity) {

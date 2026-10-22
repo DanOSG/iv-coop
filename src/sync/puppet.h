@@ -27,6 +27,8 @@ class Puppet {
   // Moves the ped toward `target` (animated) or onto it (frozen). Call once per frame.
   void drive(const PlayerState& target, std::uint32_t now_ms);
   void despawn();
+  // Downed partner: red, flashing blip; otherwise the normal partner blip.
+  void set_downed_marker(bool downed);
 
   // Seats the puppet in `vehicle` (seat -1 = driver) if it isn't already there; while
   // seated, don't call drive(). Returns true once seated.
@@ -87,7 +89,8 @@ class Puppet {
 
   // Appearance state.
   std::uint32_t model_override_ = 0;
-  std::uint32_t rejected_model_ = 0; // last model set_model refused (logged once)
+  std::uint32_t rejected_model_ = 0;
+  bool downed_marker_ = false; // last model set_model refused (logged once)
   std::uint8_t worn_drawable_[11] = {};
   std::uint8_t worn_texture_[11] = {};
   bool outfit_applied_ = false;

@@ -60,6 +60,7 @@ struct Args {
   bool test_entity = false; // --serve only: create entity 999, then hand it to player #1
   int leave_after = 0;      // leave the session N seconds after joining (0 = never)
   bool armed = false;       // hold a pistol (weapon type 7) and aim at the host
+  bool downed = false;      // report being downed (stand still) until a partner revives us
   int shoot_host = 0;       // fire at the host every N seconds (10 damage per hit); implies armed
   int health = 200;         // starting (and respawn) health
   std::string replay;       // --serve: replay a recorded host session (.ivcrec) to the first client
@@ -131,6 +132,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--test-entity") a.test_entity = true;
     else if (k == "--leave-after") a.leave_after = std::atoi(next());
     else if (k == "--armed") a.armed = true;
+    else if (k == "--downed") a.downed = true;
     else if (k == "--health") a.health = std::atoi(next());
     else if (k == "--replay") a.replay = next(), a.serve = true;
     else if (k == "--model") a.model = next();
@@ -214,6 +216,7 @@ int main(int argc, char** argv) {
   auto prev = std::chrono::steady_clock::now();
   bool was_joined = false;
   std::uint32_t joined_at = 0;
+  bool downed = a.downed; // --downed, until a partner revives us
 
   while (!g_quit) {
     std::this_thread::sleep_for(std::chrono::milliseconds(16));
@@ -274,6 +277,12 @@ int main(int argc, char** argv) {
     const std::uint8_t my_id = session.status().my_id;
     static unsigned world_ops = 0;
     for (const auto& gm : session.drain_game()) {
+      // downed::Msg::Revive (41) aimed at us: back up.
+      if (gm.data.size() >= 3 && gm.data[0] == 41 && gm.data[2] == session.status().my_id && downed) {
+        downed = false;
+        std::printf("[%s] revived by player #%u%c", a.name.c_str(), gm.from, 10);
+        continue;
+      }
       if (story::is_story_msg(gm.data)) { // print what the host's story sends us
         if (const auto d = story::decode(gm.data)) {
           switch (d->type) {
@@ -424,7 +433,7 @@ int main(int argc, char** argv) {
 
     // Walk the circle at constant speed; heading follows the direction of travel.
     const bool paused = a.pause_every > 0 && ((now - started) / 1000) % static_cast<std::uint32_t>(a.pause_every) < 3;
-    const float speed = (paused || dead_until) ? 0.0f : a.speed; // the dead don't walk
+    const float speed = (paused || dead_until || downed) ? 0.0f : a.speed; // the dead and downed don't walk
     angle += speed / a.radius * dt;
     sync::PlayerState s;
     s.x = cx + std::cos(angle) * a.radius;
@@ -444,6 +453,7 @@ int main(int argc, char** argv) {
       std::printf("[%s] respawned\n", a.name.c_str());
     }
     s.health = static_cast<std::uint16_t>(std::max(health, 0));
+    if (downed) s.flags |= sync::PlayerState::kDowned;
     if (dead_until) {
       s.flags |= sync::PlayerState::kDead;
       s.vx = s.vy = s.vz = 0;

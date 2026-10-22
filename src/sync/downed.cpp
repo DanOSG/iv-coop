@@ -1,0 +1,231 @@
+#include "sync/downed.h"
+
+#include <windows.h>
+
+#include <cmath>
+#include <format>
+
+#include "core/input.h"
+#include "core/log.h"
+#include "game/phone.h"
+#include "net/bytes.h"
+
+namespace ivc::downed {
+namespace {
+namespace n = natives;
+using n::invoke;
+
+constexpr std::uint32_t kDownAt = 115, kDownedHealth = 110, kRevivedHealth = 150;
+constexpr DWORD kReviveMs = 6000, kBleedOutMs = 60000, kMissionPollMs = 1000;
+constexpr float kReviveRange = 1.8f;
+constexpr int kReviveKey = 'E';
+
+constexpr std::uint32_t kRequestAnims = 0x65F874DE, kHaveAnimsLoaded = 0x1D3F681D, kTaskPlayAnim = 0x28EE78D8,
+                        kSetAnimGroup = 0x4CD43E46, kGetMissionFlag = 0x2BC64736;
+constexpr const char* kLimpGroup = "move_injured_lower";
+// The engine medics' CPR clips (names from the exe), else the paramedic mission's.
+struct Clip { const char* dict; const char* anim; };
+constexpr Clip kCprClips[] = {{"medic", "Medic_CPR_LOOP"}, {"Missemergencycall", "Medic_health_inject"}};
+
+bool g_on_mission = false;     // host: our own flag; joiner: the host's
+bool g_sent_flag = false;      // host: last mission flag broadcast
+DWORD g_mission_poll = 0;
+bool g_downed = false;
+DWORD g_downed_since = 0;
+bool g_revived = false;        // a teammate finished reviving us
+bool g_all_down = false;       // host said everyone is down: die
+// Reviving someone.
+std::uint8_t g_reviving = 0xFF;
+DWORD g_revive_since = 0;
+const Clip* g_clip = nullptr;
+std::string g_prompt;          // help text currently shown (avoid re-showing every frame)
+
+void send(net::Session& net, Msg type, std::uint8_t value) {
+  net::Writer w;
+  w.put(type).put(std::uint8_t{0}).put(value);
+  net.send_game(std::move(w.data()), true);
+}
+
+void prompt(const std::string& text) {
+  if (text == g_prompt) return;
+  g_prompt = text;
+  if (text.empty())
+    n::ClearHelp();
+  else
+    phone::notify(text);
+}
+
+bool held(int vk) { return input::game_focused() && (GetAsyncKeyState(vk) & 0x8000); }
+
+void go_down(n::Ped me) {
+  g_downed = true;
+  g_downed_since = GetTickCount();
+  n::SetCharHealth(me, kDownedHealth);
+  n::SetCharInvincible(me, true);
+  invoke(kRequestAnims, kLimpGroup);
+  if (invoke<bool>(kHaveAnimsLoaded, kLimpGroup)) invoke(kSetAnimGroup, me, kLimpGroup);
+  log::info("Downed: waiting for a partner");
+}
+
+void get_up(n::Ped me, std::uint32_t health) {
+  g_downed = false;
+  n::SetCharInvincible(me, false);
+  n::SetCharHealth(me, health);
+  invoke(kSetAnimGroup, me, "move_player");
+  prompt("");
+}
+
+void die(n::Ped me) {
+  g_downed = false;
+  n::SetCharInvincible(me, false);
+  n::SetCharHealth(me, 0);
+  prompt("");
+}
+
+const Clip* cpr_clip() {
+  for (const Clip& c : kCprClips) {
+    invoke(kRequestAnims, c.dict);
+    if (invoke<bool>(kHaveAnimsLoaded, c.dict)) return &c;
+  }
+  return nullptr;
+}
+
+void stop_reviving(n::Ped me) {
+  if (g_reviving != 0xFF) n::ClearCharTasks(me);
+  g_reviving = 0xFF;
+}
+
+} // namespace
+
+bool is_msg(std::span<const std::uint8_t> d) {
+  return !d.empty() && d[0] >= static_cast<std::uint8_t>(Msg::MissionFlag) &&
+         d[0] <= static_cast<std::uint8_t>(Msg::AllDown);
+}
+
+void on_message(const net::GameMessage& m, std::uint8_t my_id) {
+  net::Reader r(m.data);
+  Msg type;
+  std::uint8_t sender, value = 0;
+  if (!r.get(type) || !r.get(sender) || !r.get(value)) return;
+  switch (type) {
+    case Msg::MissionFlag:
+      if (m.from == net::kHostId) g_on_mission = value != 0;
+      break;
+    case Msg::Revive:
+      if (value == my_id && g_downed) g_revived = true;
+      break;
+    case Msg::AllDown:
+      if (m.from == net::kHostId) g_all_down = true;
+      break;
+  }
+}
+
+void tick(const Frame& f, net::Session& net) {
+  const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
+  if (!me || !n::DoesCharExist(me)) return;
+  const DWORD now = GetTickCount();
+  if (!f.in_session) {
+    if (g_downed) get_up(me, kRevivedHealth);
+    clear();
+    return;
+  }
+  if (f.hosting && now - g_mission_poll > kMissionPollMs) { // the host decides what "on a mission" is
+    g_mission_poll = now;
+    g_on_mission = invoke<bool>(kGetMissionFlag);
+    if (g_on_mission != g_sent_flag) {
+      g_sent_flag = g_on_mission;
+      send(net, Msg::MissionFlag, g_on_mission);
+      log::info("Downed: mission {}", g_on_mission ? "started (downed/revive on)" : "over");
+    }
+  }
+
+  if (g_all_down) {
+    g_all_down = false;
+    stop_reviving(me);
+    if (g_downed) die(me);
+    return;
+  }
+
+  // --- our own state
+  if (g_downed) {
+    if (g_revived) {
+      g_revived = false;
+      get_up(me, kRevivedHealth);
+      log::info("Downed: revived");
+    } else if (!g_on_mission) {
+      get_up(me, kRevivedHealth); // the mission ended while we were down
+    } else if (!f.hosting && now - g_downed_since > kBleedOutMs) {
+      log::info("Downed: bled out");
+      die(me);
+    } else {
+      n::SetCharHealth(me, kDownedHealth);
+      const DWORD left = f.hosting ? 0 : (kBleedOutMs - (now - g_downed_since)) / 1000;
+      prompt(f.hosting ? "You're down! A partner can revive you." : std::format("You're down! A partner can revive you ({} s).", left / 10 * 10 + 10));
+    }
+  } else if (g_on_mission && !n::IsCharDead(me) && n::GetCharHealth(me) <= kDownAt) {
+    go_down(me);
+  }
+
+  // --- host: everyone down at once -> everyone dies (the mission fails as normal)
+  if (f.hosting && g_on_mission && g_downed && !f.teammates.empty()) {
+    bool all = true;
+    for (const Teammate& t : f.teammates) all = all && t.downed;
+    if (all) {
+      log::info("Downed: everyone is down");
+      send(net, Msg::AllDown, 0);
+      die(me);
+      return;
+    }
+  }
+
+  // --- reviving a teammate
+  if (g_downed || n::IsCharDead(me)) {
+    stop_reviving(me);
+    return;
+  }
+  const Teammate* target = nullptr;
+  const n::Vector3 at = n::GetCharCoordinates(me);
+  for (const Teammate& t : f.teammates) {
+    if (!t.downed || !t.ped || !n::DoesCharExist(t.ped)) continue;
+    const n::Vector3 p = n::GetCharCoordinates(t.ped);
+    if (std::hypot(p.x - at.x, p.y - at.y) < kReviveRange && std::fabs(p.z - at.z) < 2.0f) target = &t;
+  }
+  if (!target) {
+    stop_reviving(me);
+    if (g_prompt.rfind("Hold E", 0) == 0 || g_prompt.rfind("Reviving", 0) == 0) prompt("");
+    return;
+  }
+  if (!held(kReviveKey)) {
+    stop_reviving(me);
+    prompt("Hold E to revive " + target->name + ".");
+    return;
+  }
+  if (g_reviving != target->id) {
+    g_reviving = target->id;
+    g_revive_since = now;
+    g_clip = cpr_clip();
+    if (g_clip) invoke(kTaskPlayAnim, me, g_clip->anim, g_clip->dict, 8.0f, 1, 0, 0, 0, -1);
+    prompt("Reviving " + target->name + "...");
+  }
+  if (now - g_revive_since >= kReviveMs) {
+    send(net, Msg::Revive, target->id);
+    log::info("Downed: revived {} (#{})", target->name, target->id);
+    stop_reviving(me);
+    prompt(target->name + " is back up.");
+  }
+}
+
+bool local_downed() { return g_downed; }
+
+std::uint32_t floor_health(std::uint32_t health) {
+  return g_on_mission && health < kDownedHealth ? kDownedHealth : health;
+}
+
+void clear() {
+  g_on_mission = g_sent_flag = false;
+  g_revived = g_all_down = false;
+  g_reviving = 0xFF;
+  if (!g_downed && !g_prompt.empty()) prompt("");
+}
+
+} // namespace ivc::downed
