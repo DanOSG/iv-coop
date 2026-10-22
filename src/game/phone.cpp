@@ -25,6 +25,11 @@ namespace n = natives;
 constexpr std::uintptr_t kGlobalsPtr = 0x018B9B3C;
 constexpr std::uintptr_t kGlobalsCount = 0x018B9B38;
 constexpr std::uintptr_t kTextGet = 0x008C5BE0; // wchar_t* __thiscall CText::Get(const char* key)
+// Get hashes the key and calls GetByHash; drawing code (e.g. the phone's menu) can call
+// GetByHash or Exists directly, so all three are hooked for our keys.
+constexpr std::uintptr_t kTextGetByHash = 0x008C5AE0; // wchar_t* __thiscall (u32 hash, ?)
+constexpr std::uintptr_t kTextExists = 0x008C5A40;    // bool __thiscall (const char* key)
+constexpr std::uintptr_t kKeyHash = 0x0040BA60;       // u32 __cdecl (const char* key, u32 seed): the game's own
 constexpr int kPhoneGlobal = 91;
 constexpr int kScreenOffset = 0, kDialledOffset = 128;
 
@@ -71,10 +76,54 @@ std::map<std::string, std::wstring> g_labels;
 
 using TextGetFn = const wchar_t*(__thiscall*)(void*, const char*);
 TextGetFn g_text_get_orig = nullptr;
+using TextGetByHashFn = const wchar_t*(__thiscall*)(void*, std::uint32_t, void*);
+TextGetByHashFn g_get_by_hash_orig = nullptr;
+using TextExistsFn = bool(__thiscall*)(void*, const char*);
+TextExistsFn g_exists_orig = nullptr;
+std::map<std::uint32_t, std::wstring> g_hashed; // our labels by the game's key hash
+
+bool ours(const char* key) {
+  return key && (std::strncmp(key, "IVC_", 4) == 0 || std::strcmp(key, "CP_OPT_NETWORK") == 0);
+}
+
+const wchar_t* __fastcall get_by_hash_detour(void* self, void* /*edx*/, std::uint32_t hash, void* p2) {
+  {
+    std::lock_guard lock(g_mutex);
+    if (auto it = g_hashed.find(hash); it != g_hashed.end()) return it->second.c_str();
+  }
+  return g_get_by_hash_orig(self, hash, p2);
+}
+
+bool __fastcall exists_detour(void* self, void* /*edx*/, const char* key) {
+  if (ours(key)) {
+    std::lock_guard lock(g_mutex);
+    if (g_labels.contains(key)) return true;
+  }
+  return g_exists_orig(self, key);
+}
+
+// Hashes are computed with the game's own function, which is only usable once the game
+// runs (its code is decrypted at startup), so labels are hashed from tick().
+bool g_hash_dirty = true;
+void rehash_labels() {
+  const auto hash = at_static<std::uint32_t(__cdecl*)(const char*, std::uint32_t)>(kKeyHash);
+  std::lock_guard lock(g_mutex);
+  for (const auto& [key, text] : g_labels) g_hashed.try_emplace(hash(key.c_str(), 0), text); // never replaced
+  g_hash_dirty = false;
+}
+
+bool hook(std::uintptr_t va, void* detour, void** orig, const char* what) {
+  void* target = at_static<void*>(va);
+  if (MH_CreateHook(target, detour, orig) != MH_OK || MH_EnableHook(target) != MH_OK) {
+    log::error("Phone: could not hook {}", what);
+    return false;
+  }
+  return true;
+}
 
 const wchar_t* __fastcall text_get_detour(void* self, void* /*edx*/, const char* key) {
   // Only our keys (IVC_*, and the removed CP_OPT_NETWORK): the game calls this constantly.
-  if (key && (std::strncmp(key, "IVC_", 4) == 0 || std::strcmp(key, "CP_OPT_NETWORK") == 0)) {
+  if (ours(key)) {
     std::lock_guard lock(g_mutex);
     if (auto it = g_labels.find(key); it != g_labels.end()) return it->second.c_str();
   }
@@ -173,13 +222,18 @@ void fix_main_menu(std::int32_t* st) {
   }
 }
 
+// Each message gets its own key and labels are never changed or freed afterwards: the
+// help box (drawn on the render thread) may still hold a previous message's string.
 void show_help(const std::string& text, bool forever) {
-  set_label("IVC_MSG", text);
+  static int serial = 0;
+  const std::string key = std::format("IVC_M{}", ++serial);
+  set_label(key, text);
+  rehash_labels(); // shown right now, so it must resolve right now
   n::ClearHelp();
   if (forever)
-    n::PrintHelpForever("IVC_MSG");
+    n::PrintHelpForever(key.c_str());
   else
-    n::PrintHelp("IVC_MSG");
+    n::PrintHelp(key.c_str());
 }
 
 } // namespace
@@ -189,14 +243,14 @@ bool install() {
   set_label("IVC_HOST", "Host Co-op");
   set_label("IVC_JOIN", "Join Co-op");
   set_label("IVC_LEAVE", "Leave Co-op");
-  void* target = at_static<void*>(kTextGet);
-  if (MH_CreateHook(target, reinterpret_cast<void*>(&text_get_detour), reinterpret_cast<void**>(&g_text_get_orig)) !=
-          MH_OK ||
-      MH_EnableHook(target) != MH_OK) {
-    log::error("Phone: could not hook the text lookup");
+  if (!hook(kTextGet, reinterpret_cast<void*>(&text_get_detour), reinterpret_cast<void**>(&g_text_get_orig),
+            "CText::Get") ||
+      !hook(kTextGetByHash, reinterpret_cast<void*>(&get_by_hash_detour),
+            reinterpret_cast<void**>(&g_get_by_hash_orig), "CText::GetByHash") ||
+      !hook(kTextExists, reinterpret_cast<void*>(&exists_detour), reinterpret_cast<void**>(&g_exists_orig),
+            "CText::Exists"))
     return false;
-  }
-  log::info("Phone: text lookup hooked");
+  log::info("Phone: text lookups hooked");
   return true;
 }
 
@@ -213,6 +267,7 @@ std::string dialled() {
 }
 
 void tick() {
+  if (g_hash_dirty) rehash_labels();
   const std::int32_t s = screen();
   static std::int32_t last = -1;
   if (s != last) {
@@ -276,6 +331,7 @@ void notify(const std::string& text) { show_help(text, false); }
 void set_label(const std::string& key, const std::string& text) {
   std::lock_guard lock(g_mutex);
   g_labels[key] = std::wstring(text.begin(), text.end());
+  g_hash_dirty = true;
 }
 
 } // namespace ivc::phone
