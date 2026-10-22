@@ -114,6 +114,7 @@ Config load_config(const std::filesystem::path& ini) {
   c.audit.missions = split_csv(read_str(p, L"Audit", L"Missions", ""));
   c.audit.seconds = static_cast<unsigned>(read_int(p, L"Audit", L"SecondsPerMission", static_cast<int>(c.audit.seconds)));
   c.audit.stack = static_cast<unsigned>(read_int(p, L"Audit", L"StackSize", static_cast<int>(c.audit.stack)));
+  c.audit.skip_cutscenes = read_int(p, L"Audit", L"SkipCutscenes", c.audit.skip_cutscenes) != 0;
 
   auto& np = c.netprobe;
   np.enabled = read_int(p, L"NetProbe", L"Enabled", np.enabled) != 0;

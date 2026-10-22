@@ -20,6 +20,7 @@ struct Settings {
   std::vector<std::string> missions; // empty: discover
   unsigned seconds = 150;            // per mission
   unsigned stack = 8192;             // START_NEW_SCRIPT stack size (main uses 8192 for missions)
+  bool skip_cutscenes = false;       // CLEAR_CUTSCENE; can crash (see mission_audit.cpp)
 };
 
 void configure(const Settings& s);

@@ -336,8 +336,11 @@ void tick() {
       }
       break;
     case Phase::Running:
-      // Skip cutscenes (as the player's skip button would): the script sees them finish.
-      if (g_cutscene_ms && now - g_cutscene_ms > 1500) {
+      // Optional cutscene skip. CLEAR_CUTSCENE from a script frees the cutscene while the
+      // render thread may still be drawing it: it crashed the game in roman5 (execute of
+      // freed memory on the render thread 26 ms later). Off by default until the game's own
+      // skip path (fade, then teardown) is used instead.
+      if (g_cfg.skip_cutscenes && g_cutscene_ms && now - g_cutscene_ms > 1500) {
         g_cutscene_ms = 0;
         if (!invoke<bool>(kHasCutsceneFinished)) {
           invoke(kClearCutscene);
