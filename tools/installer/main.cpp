@@ -46,10 +46,16 @@ constexpr const char* kPackFolder = "Mu4jhQia";            // TJGM's Drag n' Dro
 constexpr const char* kPackKey = "h1uReUUe1JVtdNtjGZoEqw";
 constexpr const char* kPackName = "TJGMsDragnDropArchive";  // part of the zip's file name
 constexpr std::uint32_t kGameVersion[4] = {1, 2, 0, 59};
+// TJGM's other official mirror. It sits behind a browser check, so it's offered to the
+// user (download in the browser, then pick the zip) when Mega fails.
+constexpr wchar_t kPackMediafire[] =
+    L"https://www.mediafire.com/file/n0zgiw6d6sxrb4y/IV.TJGMsDragnDropArchive_v1.0.0.zip/file";
+constexpr wchar_t kPackPage[] = L"https://tjgm.dev/resources/gtaiv/TJGM%27s-Drag-n%27-Drop-Archive/";
 
 // ------------------------------------------------------------------ UI plumbing
 
-HWND g_wnd, g_log, g_progress, g_path_label, g_install, g_uninstall, g_browse;
+HWND g_wnd, g_log, g_progress, g_path_label, g_install, g_uninstall, g_browse, g_use_zip;
+fs::path g_local_zip; // a pack zip the user downloaded themselves
 fs::path g_game; // ...\Grand Theft Auto IV\GTAIV
 bool g_busy = false;
 constexpr UINT WM_LOG = WM_APP + 1, WM_PROGRESS = WM_APP + 2, WM_DONE = WM_APP + 3;
@@ -480,29 +486,18 @@ fs::path tar_exe() {
 
 fs::path backup_dir(const fs::path& game) { return game / "_iv-coop_backup"; }
 
-void install_pack(const fs::path& game) {
-  log(L"Finding TJGM's Drag n' Drop Archive on its Mega mirror...");
-  const MegaFile f = mega_find(kPackFolder, kPackKey, kPackName);
-  log(widen(f.name) + L" (" + std::to_wstring(f.size >> 20) + L" MB)");
-  ULARGE_INTEGER free{};
-  GetDiskFreeSpaceExW(game.c_str(), &free, nullptr, nullptr);
-  if (free.QuadPart < f.size * 2 + (512ull << 20))
-    throw Failure{L"not enough disk space: about " + std::to_wstring((f.size * 2) >> 30) + L" GB needed"};
-  const fs::path dl = game / "_iv-coop_download";
-  fs::create_directories(dl);
-  const fs::path zip = dl / "pack.zip";
-  log(L"Downloading (this takes a while)...");
-  mega_download(kPackFolder, f, zip);
-  progress(0.82);
-
+// Installs the pack from a zip: checks it is TJGM's archive, backs up every existing file
+// it would overwrite (paths after its top folder), then extracts it over the game folder.
+void extract_pack(const fs::path& game, const fs::path& zip) {
   const fs::path tar = tar_exe();
   log(L"Checking the archive...");
   std::vector<std::string> listing;
-  if (run(L"\"" + tar.wstring() + L"\" -tf \"" + zip.wstring() + L"\"", &listing) != 0)
-    throw Failure{L"the downloaded archive is damaged"};
-  // Back up every existing file the pack would overwrite (paths after its top folder).
+  if (run(L"\"" + tar.wstring() + L"\" -tf \"" + zip.wstring() + L"\"", &listing) != 0 || listing.empty())
+    throw Failure{L"that archive is damaged or isn't a zip"};
+  if (listing.front().find(kPackName) == std::string::npos)
+    throw Failure{L"that zip isn't TJGM's Drag n' Drop Archive"};
   const fs::path backup = backup_dir(game);
-  std::ofstream manifest(backup_dir(game) / "manifest.txt", std::ios::app);
+  std::ofstream manifest(backup / "manifest.txt", std::ios::app);
   int backed_up = 0;
   for (const std::string& entry : listing) {
     const auto slash = entry.find('/');
@@ -513,7 +508,7 @@ void install_pack(const fs::path& game) {
     if (!fs::exists(target, ec) || fs::exists(backup / rel, ec)) continue;
     fs::create_directories((backup / rel).parent_path());
     fs::copy_file(target, backup / rel, ec);
-    manifest << "pack-overwrote " << rel.string() << "\n";
+    manifest << "pack-overwrote " << rel.string() << std::endl;
     ++backed_up;
   }
   log(L"Backed up " + std::to_wstring(backed_up) + L" file(s) the pack replaces.");
@@ -521,9 +516,70 @@ void install_pack(const fs::path& game) {
   if (run(L"\"" + tar.wstring() + L"\" -xf \"" + zip.wstring() + L"\" --strip-components=1 -C \"" + game.wstring() +
           L"\"") != 0)
     throw Failure{L"extracting the pack failed"};
+  progress(0.95);
+}
+
+std::optional<fs::path> pick_zip(HWND owner) {
+  wchar_t file[MAX_PATH] = L"";
+  OPENFILENAMEW ofn{sizeof(ofn)};
+  ofn.hwndOwner = owner;
+  ofn.lpstrFilter = L"TJGM's Drag n' Drop Archive (*.zip)\0*.zip\0";
+  ofn.lpstrFile = file;
+  ofn.nMaxFile = MAX_PATH;
+  ofn.lpstrTitle = L"Pick the downloaded IV.TJGMsDragnDropArchive zip";
+  ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+  if (!GetOpenFileNameW(&ofn)) return std::nullopt;
+  return fs::path(file);
+}
+
+// Mega failed: the user downloads from TJGM's Mediafire mirror in their browser.
+fs::path fallback_zip(const std::wstring& why) {
+  const std::wstring text =
+      L"The automatic download from TJGM's Mega mirror failed:\n" + why +
+      L"\n\nYou can download the pack from TJGM's Mediafire mirror in your browser instead, then pick the "
+      L"downloaded zip here.\n\nOpen the Mediafire download page now?";
+  if (MessageBoxW(g_wnd, text.c_str(), kTitle, MB_YESNO | MB_ICONWARNING) != IDYES) throw Failure{why};
+  ShellExecuteW(nullptr, L"open", kPackMediafire, nullptr, nullptr, SW_SHOWNORMAL);
+  MessageBoxW(g_wnd,
+              L"When the download has finished, click OK and pick the zip (IV.TJGMsDragnDropArchive v1.0.0.zip).",
+              kTitle, MB_OK | MB_ICONINFORMATION);
+  if (auto zip = pick_zip(g_wnd)) return *zip;
+  throw Failure{L"no zip picked"};
+}
+
+void install_pack(const fs::path& game) {
+  if (!g_local_zip.empty()) { // the user's own download: install from it, leave it in place
+    log(L"Using " + g_local_zip.wstring());
+    extract_pack(game, g_local_zip);
+    return;
+  }
+  const fs::path dl = game / "_iv-coop_download";
+  const fs::path zip = dl / "pack.zip";
+  try {
+    log(L"Finding TJGM's Drag n' Drop Archive on its Mega mirror...");
+    const MegaFile f = mega_find(kPackFolder, kPackKey, kPackName);
+    log(widen(f.name) + L" (" + std::to_wstring(f.size >> 20) + L" MB)");
+    ULARGE_INTEGER free{};
+    GetDiskFreeSpaceExW(game.c_str(), &free, nullptr, nullptr);
+    if (free.QuadPart < f.size * 2 + (512ull << 20))
+      throw Failure{L"not enough disk space: about " + std::to_wstring((f.size * 2) >> 30) + L" GB needed"};
+    fs::create_directories(dl);
+    log(L"Downloading (this takes a while)...");
+    mega_download(kPackFolder, f, zip);
+  } catch (const Failure& f) {
+    std::error_code ec;
+    fs::remove_all(dl, ec);
+    if (f.why.rfind(L"not enough disk space", 0) == 0) throw;
+    log(L"Mega download failed: " + f.why);
+    const fs::path picked = fallback_zip(f.why);
+    log(L"Using " + picked.wstring());
+    extract_pack(game, picked);
+    return;
+  }
+  progress(0.82);
+  extract_pack(game, zip);
   std::error_code ec;
   fs::remove_all(dl, ec);
-  progress(0.95);
 }
 
 void install_mod(const fs::path& game) {
@@ -551,7 +607,7 @@ void do_install() {
   if (game_running()) throw Failure{L"close GTA IV first"};
   fs::create_directories(backup_dir(game));
   progress(0.05);
-  if (pack_installed(game))
+  if (pack_installed(game) && g_local_zip.empty())
     log(L"TJGM's pack (FusionFix, radio restoration, fixes) is already installed; skipping it.");
   else
     install_pack(game);
@@ -581,6 +637,7 @@ void set_busy(bool busy) {
   EnableWindow(g_install, !busy && !g_game.empty());
   EnableWindow(g_uninstall, !busy && !g_game.empty());
   EnableWindow(g_browse, !busy);
+  EnableWindow(g_use_zip, !busy && !g_game.empty());
 }
 
 void show_game() {
@@ -629,6 +686,11 @@ LRESULT CALLBACK wnd_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
       if (reinterpret_cast<HWND>(lp) == g_install) start(do_install);
       if (reinterpret_cast<HWND>(lp) == g_uninstall) start(do_uninstall);
       if (reinterpret_cast<HWND>(lp) == g_browse) browse();
+      if (reinterpret_cast<HWND>(lp) == g_use_zip)
+        if (auto zip = pick_zip(h)) {
+          g_local_zip = *zip;
+          start(do_install);
+        }
       return 0;
     case WM_LOG: {
       std::unique_ptr<std::wstring> text(reinterpret_cast<std::wstring*>(lp));
@@ -729,6 +791,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmd, int show) {
   g_browse = make(L"BUTTON", L"Change...", BS_PUSHBUTTON, 500, 48, 92, 24);
   g_install = make(L"BUTTON", L"Install", BS_DEFPUSHBUTTON, 12, 80, 120, 30);
   g_uninstall = make(L"BUTTON", L"Uninstall", BS_PUSHBUTTON, 140, 80, 120, 30);
+  g_use_zip = make(L"BUTTON", L"Install from a downloaded zip...", BS_PUSHBUTTON, 392, 80, 200, 30);
   g_progress = make(PROGRESS_CLASSW, L"", 0, 12, 120, 580, 18);
   SendMessageW(g_progress, PBM_SETRANGE32, 0, 1000);
   g_log = make(L"EDIT", L"", WS_BORDER | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 12, 146, 580, 240);

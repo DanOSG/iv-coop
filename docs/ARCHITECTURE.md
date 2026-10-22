@@ -267,7 +267,10 @@ docs/
   3. TJGM's Drag n' Drop Archive (FusionFix, radio restoration, fixes, HD textures; the pack the mod ships
      with): skipped when already installed; otherwise downloaded from its official Mega mirror (Mediafire is
      behind a bot check) and extracted into the game folder with Windows' `tar`, after backing up every file it
-     would overwrite.
+     would overwrite. Official mirrors only (no rehosting: the pack states no redistribution terms). If Mega
+     fails, the installer opens TJGM's Mediafire page in the browser and asks for the downloaded zip; "Install
+     from a downloaded zip..." does the same any time (the zip is checked to be TJGM's archive). The pack is
+     4,194,040,357 bytes, sha256 5ee1baa3d830dd8af1e95f4b21c0df1355264fbbf787ff6391109da6d8d83ce8.
   4. `iv-coop.asi` is embedded in the installer; the ini writes itself on first launch, with the player name
      defaulting to the Steam name.
   5. Uninstall removes the mod and restores the backups (`GTAIV/_iv-coop_backup`).
