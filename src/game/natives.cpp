@@ -1,5 +1,7 @@
 #include "game/natives.h"
 
+#include <cstring>
+
 #include <unordered_map>
 #include <unordered_set>
 
@@ -24,6 +26,15 @@ void* handler(std::uint32_t hash) {
   }
   cache.emplace(hash, fn);
   return fn;
+}
+
+void invoke_raw(std::uint32_t hash, const std::uint32_t* args, int count) {
+  CallContext ctx{};
+  ctx.args = ctx.result = ctx.buf;
+  count = count < 0 ? 0 : count > 16 ? 16 : count;
+  std::memcpy(ctx.buf, args, static_cast<std::size_t>(count) * 4);
+  ctx.arg_count = count;
+  if (auto* fn = reinterpret_cast<void(__cdecl*)(CallContext*)>(handler(hash))) fn(&ctx);
 }
 
 } // namespace ivc::natives

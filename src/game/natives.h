@@ -33,6 +33,10 @@ struct CallContext {
   std::uint8_t buf[16 * 4];
 };
 
+// Calls a native with `count` raw 32-bit argument slots (ints, floats as bits, pointers):
+// for replaying captured calls whose types we only know as slots.
+void invoke_raw(std::uint32_t hash, const std::uint32_t* args, int count);
+
 // Returns the handler for `hash`, cached; nullptr (and an error log, once) if unknown.
 void* handler(std::uint32_t hash);
 // False if the game layer failed to initialise; invocations then become no-ops.

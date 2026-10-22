@@ -63,6 +63,10 @@ struct SessionEvent {
 // Milliseconds on the steady clock; the timebase for all StateUpdate::arrival_ms.
 std::uint32_t steady_ms();
 
+// Recording markers (first byte of a record) for our own states; game messages start with
+// their type (>= kFirstGameMsg) instead.
+inline constexpr std::uint8_t kRecPlayerState = 0xF0, kRecVehicleState = 0xF1;
+
 class Session {
  public:
   Session();

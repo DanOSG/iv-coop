@@ -14,6 +14,7 @@
 #include "story/story_protocol.h"
 #include "story/cutscene.h"
 #include "story/dialogue.h"
+#include "story/hud.h"
 #include "story/world_state.h"
 
 namespace ivc::story {
@@ -220,6 +221,7 @@ void register_hooks() {
   world::register_hooks();
   dialogue::register_hooks();
   cutscene::register_hooks();
+  hud::register_hooks();
   // Text: (key, [key2 | number], time, flag) per native.
   on(0x73B01573, "PRINT_NOW", [](const Call& c) { text(c, TextKind::PrintNow, 0, -1, -1, 1, 2); });
   on(0x0A491CFF, "PRINT", [](const Call& c) { text(c, TextKind::Print, 0, -1, -1, 1, 2); });
@@ -282,6 +284,7 @@ void host_tick(bool hosting, net::Session& net, sync::EntitySync& ents) {
     if (hosting) net.send_game(std::move(msg), true);
   dialogue::host_tick(hosting, net, ents);
   cutscene::host_tick(hosting, net);
+  hud::host_tick(hosting, net);
   if (!hosting) {
     g_ops.clear();
     g_host_blips.clear();
@@ -360,6 +363,9 @@ bool client_on_message(const net::GameMessage& m, sync::EntitySync& ents) {
     case StoryMsg::CutsceneEnd:
       cutscene::client_apply(m.data);
       break;
+    case StoryMsg::Hud:
+      hud::client_apply(m.data);
+      break;
     case StoryMsg::Payout:
       n::AddScore(n::GetPlayerId(), d->payout);
       log::info("Story: mission payout ${} (mirrored from the host)", d->payout);
@@ -408,6 +414,7 @@ bool client_on_message(const net::GameMessage& m, sync::EntitySync& ents) {
 }
 
 void client_tick(sync::EntitySync& ents) {
+  hud::client_tick();
   std::erase_if(g_loading_slots, [](std::uint8_t slot) { return n::HasAdditionalTextLoaded(slot); });
   while (g_loading_slots.empty() && !g_held_texts.empty()) {
     apply_text(g_held_texts.front());
@@ -443,6 +450,7 @@ void clear() {
   world::client_restore();
   dialogue::clear();
   cutscene::clear();
+  hud::clear();
   for (auto& [id, cb] : g_client_blips)
     if (cb.local) n::RemoveBlip(cb.local);
   g_client_blips.clear();

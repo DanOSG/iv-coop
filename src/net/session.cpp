@@ -1,5 +1,7 @@
 #include "net/session.h"
 
+#include <cstring>
+
 #include <enet/enet.h>
 
 #include <chrono>
@@ -477,9 +479,30 @@ void Session::leave() {
   if (mode != Mode::Idle) impl_->event(SessionEvent::Kind::Disconnected, 0, "left the session");
 }
 
+namespace {
+// Recording record: u32 time, u8 reliable, u32 length, bytes. Game messages are recorded
+// as sent; our own player/vehicle states as a marker byte + the raw struct, so a replay
+// can move the host's stand-in along the recorded route.
+void write_record(std::FILE* rec, std::uint32_t t, const std::uint8_t* data, std::uint32_t len, bool reliable) {
+  const std::uint8_t rel = reliable ? 1 : 0;
+  std::fwrite(&t, 4, 1, rec);
+  std::fwrite(&rel, 1, 1, rec);
+  std::fwrite(&len, 4, 1, rec);
+  std::fwrite(data, 1, len, rec);
+}
+
+template <class T> void record_struct(std::FILE* rec, std::uint32_t t, std::uint8_t marker, const T& v) {
+  std::uint8_t buf[1 + sizeof(T)];
+  buf[0] = marker;
+  std::memcpy(buf + 1, &v, sizeof(T));
+  write_record(rec, t, buf, sizeof(buf), false);
+}
+} // namespace
+
 void Session::send_state(const sync::PlayerState& s) {
   std::lock_guard lock(impl_->m);
   if (impl_->st.mode != Mode::Hosting && impl_->st.mode != Mode::Joined) return;
+  if (impl_->rec) record_struct(impl_->rec, steady_ms() - impl_->rec_start_ms, kRecPlayerState, s);
   impl_->out_states.push_back(encode_state(impl_->st.my_id, s));
   while (impl_->out_states.size() > 8) impl_->out_states.pop_front();
 }
@@ -487,6 +510,7 @@ void Session::send_state(const sync::PlayerState& s) {
 void Session::send_vehicle(const sync::VehicleState& v) {
   std::lock_guard lock(impl_->m);
   if (impl_->st.mode != Mode::Hosting && impl_->st.mode != Mode::Joined) return;
+  if (impl_->rec) record_struct(impl_->rec, steady_ms() - impl_->rec_start_ms, kRecVehicleState, v);
   impl_->out_states.push_back(encode_vehicle(impl_->st.my_id, v));
   while (impl_->out_states.size() > 8) impl_->out_states.pop_front();
 }
@@ -497,13 +521,8 @@ void Session::send_game(std::vector<std::uint8_t> packet, bool reliable) {
   if (impl_->st.mode != Mode::Hosting && impl_->st.mode != Mode::Joined) return;
   packet[1] = impl_->st.my_id;
   if (impl_->rec) {
-    const std::uint32_t t = steady_ms() - impl_->rec_start_ms;
-    const std::uint8_t rel = reliable ? 1 : 0;
-    const auto len = static_cast<std::uint32_t>(packet.size());
-    std::fwrite(&t, 4, 1, impl_->rec);
-    std::fwrite(&rel, 1, 1, impl_->rec);
-    std::fwrite(&len, 4, 1, impl_->rec);
-    std::fwrite(packet.data(), 1, len, impl_->rec);
+    write_record(impl_->rec, steady_ms() - impl_->rec_start_ms, packet.data(),
+                 static_cast<std::uint32_t>(packet.size()), reliable);
     ++impl_->rec_count;
   }
   impl_->out_game.push_back({std::move(packet), reliable});

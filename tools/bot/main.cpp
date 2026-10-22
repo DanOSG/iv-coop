@@ -205,6 +205,7 @@ int main(int argc, char** argv) {
   std::vector<Record> replay;
   std::size_t replay_next = 0;
   std::uint32_t replay_start = 0; // set when the first client joins
+  bool replaying_states = false;  // the recording carries the host's own states: don't circle
 
   // Combat (M5): our health, death/respawn, and shooting at the host.
   constexpr std::uint32_t kPistol = 7;
@@ -365,7 +366,22 @@ int main(int argc, char** argv) {
     if (replay_start && static_cast<std::int32_t>(now - replay_start) >= 0 && replay_next < replay.size()) {
       const std::uint32_t replay_t = now - replay_start;
       while (replay_next < replay.size() && replay[replay_next].t_ms <= replay_t) {
-        session.send_game(replay[replay_next].data, replay[replay_next].reliable);
+        const auto& rec = replay[replay_next];
+        // The recorded host's own movement and car: become them (see Session::send_state).
+        if (!rec.data.empty() && rec.data[0] == net::kRecPlayerState &&
+            rec.data.size() == 1 + sizeof(sync::PlayerState)) {
+          sync::PlayerState ps;
+          std::memcpy(&ps, rec.data.data() + 1, sizeof(ps));
+          session.send_state(ps);
+          replaying_states = true;
+        } else if (!rec.data.empty() && rec.data[0] == net::kRecVehicleState &&
+                   rec.data.size() == 1 + sizeof(sync::VehicleState)) {
+          sync::VehicleState vs;
+          std::memcpy(&vs, rec.data.data() + 1, sizeof(vs));
+          session.send_vehicle(vs);
+        } else {
+          session.send_game(rec.data, rec.reliable);
+        }
         ++replay_next;
       }
       if (replay_next == replay.size()) std::printf("[%s] replay finished\n", a.name.c_str());
@@ -491,7 +507,7 @@ int main(int argc, char** argv) {
       car = v;
     }
 
-    if (now - last_send >= 33) {
+    if (now - last_send >= 33 && !replaying_states) { // a replay sends the recorded host's states instead
       last_send = now;
       s.seq = ++seq;
       s.time_ms = now + static_cast<std::uint32_t>(a.skew);
