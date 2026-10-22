@@ -29,7 +29,9 @@ constexpr std::uint32_t kDoesScriptExist = 0x1D1B266B, kRequestScript = 0x6FFE0D
                         kFadeIn = 0x04D72200, kSetPlayerControl = 0x1A6203EA, kDeleteObject = 0x62FE6290,
                         kDoesObjectExist = 0x6DAB78CD, kClearCutscene = 0x79611458, kSetInvincible = 0x7E9E02E1,
                         kClearPrints = 0x1D8C324A, kClearHelp = 0x07244253, kHasCutsceneFinished = 0x4ECE1AD2,
-                        kConversationOngoing = 0x3CA23254;
+                        kConversationOngoing = 0x3CA23254, kGetBlipColour = 0x59B425DA, kExplodeCar = 0x505518A2,
+                        kSetCharHealth = 0x575E2880, kIsCarDead = 0x2AAB340A;
+constexpr std::int32_t kHostileColour = 1; // IV blip colour red: enemies/targets (the default for peds)
 
 constexpr unsigned kNudgeEvery = 5;   // s between teleports to the newest blip
 constexpr unsigned kIdleEnd = 20;     // s without a new call: the mission is waiting on us
@@ -197,12 +199,26 @@ void teleport(const n::Vector3& to) {
   n::SetCharCoordinatesNoOffset(p, to);
 }
 
-// Move the player on to what the mission is waiting for: into a blipped car (driver, or
-// a free passenger seat if someone drives it), next to a blipped ped/object, or onto a
-// coordinate blip.
+// Move the mission on to its next objective, judged by the blip: a hostile (red) ped is
+// killed and a hostile car blown up ("kill/destroy X"); any other car is entered (driver,
+// or a free passenger seat if someone drives it); otherwise the player goes to the blip.
+// Some missions will fail this way (e.g. "follow, don't kill"); their fail path is data too.
 bool nudge(const Report::Blip& b) {
   if (!n::DoesBlipExist(b.blip)) return false;
   const n::Ped p = me();
+  std::int32_t colour = -1;
+  invoke(kGetBlipColour, b.blip, &colour);
+  if (b.kind == 'p' && colour == kHostileColour && n::DoesCharExist(b.entity) && !n::IsCharDead(b.entity)) {
+    invoke(kSetCharHealth, b.entity, 0u);
+    g_rep.notes.push_back(std::format("[audit] killed blipped hostile ped {} (blip colour {})", b.entity, colour));
+    return true;
+  }
+  if (b.kind == 'c' && colour == kHostileColour && n::DoesVehicleExist(b.entity) && !invoke<bool>(kIsCarDead, b.entity)) {
+    invoke(kExplodeCar, b.entity, true, false);
+    g_rep.notes.push_back(std::format("[audit] blew up blipped hostile car {} (blip colour {})", b.entity, colour));
+    return true;
+  }
+  g_rep.notes.push_back(std::format("[audit] nudge to {} blip (colour {})", b.kind, colour));
   if (b.kind == 'c' && n::DoesVehicleExist(b.entity)) {
     if (n::IsCharInCar(p, b.entity)) return false; // already there; the mission is busy
     const n::Ped driver = n::GetDriverOfCar(b.entity);
