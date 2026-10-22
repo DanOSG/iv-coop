@@ -88,10 +88,21 @@ void dump_thread(const char* what, DWORD tid) {
   log_stack(c.Esp, 20);
 }
 
+// The game pauses itself (no ticks, no frames) while its window isn't in front.
+bool game_in_front() {
+  DWORD pid = 0;
+  GetWindowThreadProcessId(GetForegroundWindow(), &pid);
+  return pid == GetCurrentProcessId();
+}
+
 void watchdog() {
   bool reported = false;
   for (;;) {
     std::this_thread::sleep_for(std::chrono::seconds(1));
+    if (!game_in_front()) {
+      g_last_beat = now_ms(); // a background pause isn't a hang; time it from refocus
+      continue;
+    }
     const std::int64_t last = g_last_beat.load();
     if (!last) continue;
     const bool hung = now_ms() - last > std::chrono::duration_cast<std::chrono::milliseconds>(kHangAfter).count();
