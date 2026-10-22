@@ -20,6 +20,7 @@
 #include "sync/local_player.h"
 #include "sync/player_state.h"
 #include "sync/puppet.h"
+#include "story/dialogue.h"
 #include "story/story_sync.h"
 #include "sync/entity_sync.h"
 #include "sync/vehicle_sync.h"
@@ -379,6 +380,10 @@ void handle_phone() {
 
 void configure(const Settings& s) {
   g_cfg = s;
+  story::dialogue::set_host_ped_provider([] {
+    const auto it = g_remotes.find(net::kHostId);
+    return it != g_remotes.end() ? it->second.puppet.ped() : 0;
+  });
   g_vehicles.interp_delay_ms = s.interp_delay_ms;
   g_vehicles.physics_follow = s.physics_follow;
   g_vehicles.force_type = s.vehicle_force_type;

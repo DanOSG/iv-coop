@@ -9,6 +9,7 @@
 #include "game/native_hooks.h"
 #include "game/natives.h"
 #include "story/story_protocol.h"
+#include "story/dialogue.h"
 #include "story/world_state.h"
 
 namespace ivc::story {
@@ -195,6 +196,11 @@ void configure(const Settings& s) { g_cfg = s; }
 
 bool is_story_script(const std::string& name) {
   if (name.empty()) return false;
+  // Always local, whatever the ini says: the phone (every player needs theirs, e.g. for
+  // the co-op menu while joined).
+  static const char* kAlwaysLocal[] = {"spcellphone*"};
+  for (const char* p : kAlwaysLocal)
+    if (wildcard(p, name)) return false;
   for (const auto& p : g_cfg.local_scripts)
     if (wildcard(p, name)) return false;
   return true;
@@ -207,6 +213,7 @@ void register_hooks() {
   on(0x0A1B465C, "CLEAR_ADDITIONAL_TEXT", [](const Call& c) { text_block(c, -1, 0); });
   on(0x537379A8, "ADD_SCORE", payout);
   world::register_hooks();
+  dialogue::register_hooks();
   // Text: (key, [key2 | number], time, flag) per native.
   on(0x73B01573, "PRINT_NOW", [](const Call& c) { text(c, TextKind::PrintNow, 0, -1, -1, 1, 2); });
   on(0x0A491CFF, "PRINT", [](const Call& c) { text(c, TextKind::Print, 0, -1, -1, 1, 2); });
@@ -267,6 +274,7 @@ void host_tick(bool hosting, net::Session& net, sync::EntitySync& ents) {
   world::tick();
   for (auto& msg : world::take_outbox())
     if (hosting) net.send_game(std::move(msg), true);
+  dialogue::host_tick(hosting, net, ents);
   if (!hosting) {
     g_ops.clear();
     g_host_blips.clear();
@@ -337,6 +345,10 @@ bool client_on_message(const net::GameMessage& m, sync::EntitySync& ents) {
     case StoryMsg::World:
       world::client_apply(m.data);
       break;
+    case StoryMsg::Conversation:
+    case StoryMsg::ConversationAbort:
+      dialogue::client_apply(m.data, ents);
+      break;
     case StoryMsg::Payout:
       n::AddScore(n::GetPlayerId(), d->payout);
       log::info("Story: mission payout ${} (mirrored from the host)", d->payout);
@@ -400,6 +412,7 @@ void client_tick(sync::EntitySync& ents) {
 
 void clear() {
   world::client_restore();
+  dialogue::clear();
   for (auto& [id, cb] : g_client_blips)
     if (cb.local) n::RemoveBlip(cb.local);
   g_client_blips.clear();

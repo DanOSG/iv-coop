@@ -24,6 +24,8 @@ enum class StoryMsg : std::uint8_t {
   TextBlock = 25,
   World = 26,  // a world-state ledger op (world_state.cpp owns the payload)
   Payout = 27, // a mission paid the protagonist: int32 amount
+  Conversation = 28,      // dialogue.cpp owns the payload
+  ConversationAbort = 29,
 };
 
 using Key = std::array<char, 32>;
@@ -115,7 +117,7 @@ struct Decoded {
 
 inline bool is_story_msg(std::span<const std::uint8_t> d) {
   return !d.empty() && d[0] >= static_cast<std::uint8_t>(StoryMsg::Text) &&
-         d[0] <= static_cast<std::uint8_t>(StoryMsg::Payout);
+         d[0] <= static_cast<std::uint8_t>(StoryMsg::ConversationAbort);
 }
 
 inline std::optional<Decoded> decode(std::span<const std::uint8_t> d) {
@@ -144,7 +146,9 @@ inline std::optional<Decoded> decode(std::span<const std::uint8_t> d) {
       r.get(m.payout);
       break;
     case StoryMsg::World:
-      break; // payload decoded by world_state
+    case StoryMsg::Conversation:
+    case StoryMsg::ConversationAbort:
+      break; // payloads decoded by world_state / dialogue
     case StoryMsg::BlipProp: {
       auto& p = m.blip_prop;
       r.get(p.id), r.get(p.prop), r.get(p.ivalue), r.get(p.fvalue), r.get(p.name);
