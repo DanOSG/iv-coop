@@ -55,6 +55,9 @@ constexpr int kSlotMenuType = 1, kSlotMemory = 3, kSlotMemoryFlag = 4, kSlotWind
               kRowSlots = 31, kMaxRows = 6;
 constexpr int kG91Rows = 500, kG91Style = 40, kG91Speed = 492; // g_U91 byte offsets used by sub_10177
 constexpr std::int32_t kIdMultiplayer = 2000, kIdHost = 2001, kIdJoin = 2002, kIdLeave = 2003;
+// Keypad state (spcellphonemain statics): l_U1090 digits typed (no more are taken at 10),
+// l_U1088 the cursor (0 = Call). When a number is full the game moves the cursor to Call.
+constexpr int kSlotKeypadCursor = 1088, kSlotDigits = 1090, kKeypadFull = 10;
 constexpr std::size_t kPasswordDigits = 6;
 
 template <class T> T at_static(std::uintptr_t va) {
@@ -261,6 +264,27 @@ std::int32_t screen() {
   return g ? *reinterpret_cast<const std::int32_t*>(g + kScreenOffset) : -1;
 }
 
+// While a co-op password is being typed: behave like a full number at 6 digits (cursor to
+// Call, no more digits), the way the game does at 10. Delete still works: the script
+// deletes by counting l_U1090 down and keeping that many characters, so a count of 9
+// with 6 digits shown means "delete one".
+void limit_password_digits() {
+  std::uint8_t* g = global_ptr(kPhoneGlobal);
+  std::int32_t* st = main_statics();
+  if (!g || !st) return;
+  char* number = reinterpret_cast<char*>(g + kDialledOffset);
+  const std::size_t len = strnlen(number, 16);
+  std::int32_t& digits = st[kSlotDigits];
+  if (digits == kKeypadFull - 1 && len == kPasswordDigits) { // delete pressed while full
+    number[kPasswordDigits - 1] = 0;
+    digits = static_cast<std::int32_t>(kPasswordDigits - 1);
+  } else if (len >= kPasswordDigits && digits != kKeypadFull) { // just became full
+    number[kPasswordDigits] = 0;
+    digits = kKeypadFull;
+    st[kSlotKeypadCursor] = 0;
+  }
+}
+
 std::string dialled() {
   const auto* g = global_ptr(kPhoneGlobal);
   if (!g) return {};
@@ -296,6 +320,9 @@ void tick() {
       g_coop_menu = false;
       g_request = Request{Action::Leave, {}};
       switch_screen(kScreenClose);
+      break;
+    case kScreenKeypad:
+      if (g_awaiting) limit_password_digits();
       break;
     case kScreenCalling:
       if (g_awaiting) {

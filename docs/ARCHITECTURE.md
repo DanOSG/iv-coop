@@ -41,7 +41,8 @@ Free-roam is not a separate mode. It's simply the campaign between missions.
      friends can also join from the Steam overlay, and traffic goes through Valve's relays (no NAT trouble).
      Steam copies only; the others use 1 and 3. Still to verify in game that Steam is up in-process.
   3. Direct IP + manual port forward always remains as a fallback.
-- **Menu: the phone.** The phone's existing **Multiplayer** item opens co-op instead of Rockstar's online modes
+- **Menu: the phone** (working, 2026-10-22: game/phone, net/steam). CE removed the phone's Multiplayer item, so
+  it is put back. The original design: the phone's **Multiplayer** item opens co-op instead of Rockstar's online modes
   (no public/private settings). Its screen (spcellphonenetwork, screen 1047) lists match types through game-text
   keys; the mod overrides those labels (e.g. `CPGO_MATCHT_0` "Host Co-op", `CPGO_MATCHT_1` "Join Co-op", plus
   "Leave Co-op" while in a session) by hooking the engine's text lookup, and intercepts the selection
