@@ -65,6 +65,7 @@ Config load_config(const std::filesystem::path& ini) {
   c.overlay_toggle_key = read_int(p, L"Overlay", L"ToggleKey", c.overlay_toggle_key);
   c.scripts_panel_key = read_int(p, L"Overlay", L"ScriptsPanelKey", c.scripts_panel_key);
   c.debug_log = read_int(p, L"Log", L"Debug", c.debug_log) != 0;
+  c.dev_keys = read_int(p, L"Dev", L"Keys", c.dev_keys) != 0;
   c.isolate_named_objects = read_int(p, L"Instance", L"IsolateNamedObjects", c.isolate_named_objects) != 0;
 
   c.host_scripts = split_csv(read_str(p, L"Scripts", L"TickHost", "main"));

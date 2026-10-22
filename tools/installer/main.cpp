@@ -41,7 +41,10 @@ namespace {
 
 // ------------------------------------------------------------------ configuration
 
-constexpr wchar_t kTitle[] = L"GTA IV Co-op Setup";
+#define IVCOOP_WIDEN_(x) L##x
+#define IVCOOP_WIDEN(x) IVCOOP_WIDEN_(x)
+#define IVCOOP_WVERSION IVCOOP_WIDEN(IVCOOP_VERSION)
+constexpr wchar_t kTitle[] =L"GTA IV Co-op " IVCOOP_WVERSION L" Setup";
 constexpr const char* kPackFolder = "Mu4jhQia";            // TJGM's Drag n' Drop Archive, Mega mirror
 constexpr const char* kPackKey = "h1uReUUe1JVtdNtjGZoEqw";
 constexpr const char* kPackName = "TJGMsDragnDropArchive";  // part of the zip's file name
@@ -592,7 +595,7 @@ void install_mod(const fs::path& game) {
   std::ofstream out(game / "plugins" / "iv-coop.asi", std::ios::binary | std::ios::trunc);
   out.write(bytes, size);
   if (!out) throw Failure{L"couldn't write plugins\\iv-coop.asi"};
-  log(L"Installed plugins\\iv-coop.asi (" + std::to_wstring(size >> 10) + L" KB).");
+  log(L"Installed plugins\\iv-coop.asi, version " IVCOOP_WVERSION L" ("+ std::to_wstring(size >> 10) + L" KB).");
 }
 
 void do_install() {

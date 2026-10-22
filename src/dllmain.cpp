@@ -9,6 +9,7 @@
 
 #include "core/config.h"
 #include "core/crash.h"
+#include "core/input.h"
 #include "core/game_version.h"
 #include "core/instance.h"
 #include "core/log.h"
@@ -85,8 +86,9 @@ void startup(HMODULE self) {
   log::init(dir / ("iv-coop" + instance::suffix() + ".log"));
   const Config cfg = load_config(dir / "iv-coop.ini");
   if (cfg.debug_log) log::set_min_level(log::Level::Debug);
-  log::info("iv-coop M2 loading (built " __DATE__ " " __TIME__ "), instance slot {}, pid {}", slot,
-            GetCurrentProcessId());
+  input::g_dev_keys = cfg.dev_keys;
+  log::info("iv-coop " IVCOOP_VERSION " loading (built " __DATE__ " " __TIME__ "), instance slot {}, pid {}{}", slot,
+            GetCurrentProcessId(), cfg.dev_keys ? ", developer keys on" : "");
   {
     wchar_t* cmd = GetCommandLineW();
     std::string narrow;

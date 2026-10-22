@@ -225,7 +225,7 @@ void process_pending_spawn(n::Ped me) {
 void handle_hotkeys() {
   const net::Mode mode = session().status().mode;
   handle_entity_keys(mode == net::Mode::Hosting);
-  if (input::pressed(g_cfg.host_key, g_host_was_down)) {
+  if (input::dev_pressed(g_cfg.host_key, g_host_was_down)) {
     if (mode == net::Mode::Idle) {
       if (session().host(g_cfg.port, g_cfg.name, g_cfg.bind_address))
         log::info("Hosting on UDP {} as '{}'", g_cfg.port, g_cfg.name);
@@ -236,7 +236,7 @@ void handle_hotkeys() {
       session().leave();
     }
   }
-  if (input::pressed(g_cfg.join_key, g_join_was_down)) {
+  if (input::dev_pressed(g_cfg.join_key, g_join_was_down)) {
     if (mode == net::Mode::Idle) {
       if (session().join(g_cfg.join_address, g_cfg.port, g_cfg.name))
         log::info("Joining {}:{} as '{}'", g_cfg.join_address, g_cfg.port, g_cfg.name);

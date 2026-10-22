@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
-project(iv-coop LANGUAGES C CXX)
+project(iv-coop VERSION 0.5.0 LANGUAGES C CXX)
+add_compile_definitions(IVCOOP_VERSION="${PROJECT_VERSION}")
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
   message(FATAL_ERROR "GTA IV is a 32-bit game: configure with -A Win32 (use the 'x86' preset).")

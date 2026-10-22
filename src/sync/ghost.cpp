@@ -55,7 +55,7 @@ void configure(const Settings& s) {
 }
 
 void tick() {
-  if (input::pressed(g_cfg.toggle_key, g_key_was_down)) {
+  if (input::dev_pressed(g_cfg.toggle_key, g_key_was_down)) {
     g_enabled = !g_enabled;
     log::info("Ghost {}", g_enabled ? "enabled" : "disabled");
     if (!g_enabled) disable();
