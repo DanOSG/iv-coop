@@ -207,6 +207,15 @@ std::string current_script_name() {
   return t ? name_of(t) : std::string();
 }
 
+void* find_thread(const std::string& name) {
+  const game::ThreadArray* arr = game::g_addr.threads;
+  for (std::uint16_t i = 0; arr && arr->data && i < arr->count; ++i) {
+    game::scrThread* t = arr->data[i];
+    if (t && field<std::int32_t>(t, kOffId) != 0 && _stricmp(name_of(t).c_str(), name.c_str()) == 0) return t;
+  }
+  return nullptr;
+}
+
 std::int32_t current_thread_id() {
   const game::scrThread* t = game::g_addr.current_thread ? *game::g_addr.current_thread : nullptr;
   return t ? field<std::int32_t>(t, kOffId) : 0;

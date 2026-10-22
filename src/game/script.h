@@ -48,6 +48,8 @@ std::string current_script_name();
 // Game thread: id of that script's thread (0 outside any script). Ids are never reused,
 // so a script restarting (e.g. "main" on a save load) shows up as a new id.
 std::int32_t current_thread_id();
+// Game thread: the live thread running script `name` (case-insensitive), or nullptr.
+void* find_thread(const std::string& name);
 // Name of the current host script, or empty if none is running yet.
 std::string host_script();
 

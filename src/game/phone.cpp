@@ -4,12 +4,16 @@
 
 #include <MinHook.h>
 
+#include <cstring>
+#include <format>
 #include <map>
 #include <mutex>
 #include <set>
 
 #include "core/log.h"
 #include "game/native_hooks.h"
+#include "game/natives.h"
+#include "game/script.h"
 
 namespace ivc::phone {
 namespace {
@@ -39,6 +43,7 @@ std::map<std::string, std::wstring> g_labels;
 std::set<std::string> g_seen; // probe: keys looked up while the phone shows a network screen
 std::int32_t g_last_screen = -1;
 std::string g_last_dialled;
+DWORD g_dump_at = 0;
 
 using TextGetFn = const wchar_t*(__thiscall*)(void*, const char*);
 TextGetFn g_text_get_orig = nullptr;
@@ -48,7 +53,7 @@ const wchar_t* __fastcall text_get_detour(void* self, void* /*edx*/, const char*
     std::lock_guard lock(g_mutex);
     if (auto it = g_labels.find(key); it != g_labels.end()) return it->second.c_str();
     // Probe: remember the phone's network-menu labels the first time they're looked up.
-    if (g_last_screen >= 1030 && g_last_screen < 1100 && g_seen.insert(key).second)
+    if (g_last_screen >= 1002 && g_last_screen < 1100 && g_last_screen != 1048 && g_seen.insert(key).second)
       log::info("Phone: screen {} shows text key {}", g_last_screen, key);
   }
   return g_text_get_orig(self, key);
@@ -84,8 +89,42 @@ std::string dialled() {
   return std::string(s, strnlen(s, 16));
 }
 
+// Probe: where the main menu keeps its items. Scans spcellphonemain's stack (statics
+// first) for inline "CP_OPT_"/"CP_CHEATS" strings and logs each with the words around it.
+void dump_menu_memory() {
+  auto* t = static_cast<std::uint8_t*>(script::find_thread("spcellphonemain"));
+  if (!t) {
+    log::info("Phone probe: spcellphonemain not running");
+    return;
+  }
+  const auto* stack = *reinterpret_cast<std::int32_t* const*>(t + 0x58);
+  const auto size = *reinterpret_cast<const std::int32_t*>(t + 0x44);
+  log::info("Phone probe: spcellphonemain thread {} stack {} size {}", static_cast<void*>(t),
+            static_cast<const void*>(stack), size);
+  if (!stack || size <= 0 || size > 0x100000) return;
+  for (std::int32_t i = 0; i < size; ++i) {
+    const char* s = reinterpret_cast<const char*>(stack + i);
+    if (std::strncmp(s, "CP_", 3) != 0) continue;
+    std::string ctx;
+    for (int k = -6; k <= 5; ++k)
+      if (i + k >= 0 && i + k < size) ctx += std::format("{}{:08X}", k == 0 ? " [" : " ", static_cast<std::uint32_t>(stack[i + k])) + (k == 0 ? "]" : "");
+    log::info("Phone probe: slot {} '{}' |{}", i, std::string(s, strnlen(s, 16)), ctx);
+  }
+}
+
 void tick() {
+  static bool checked = false;
+  if (!checked) {
+    checked = true;
+    log::info("Phone probe: spcellphonenetwork exists: {}",
+              natives::invoke<bool>(0x1D1B266B, "spcellphonenetwork")); // DOES_SCRIPT_EXIST
+  }
   const std::int32_t s = screen();
+  if (s == 1011 && g_last_screen != 1011) g_dump_at = GetTickCount() + 500; // after the list is built
+  if (g_dump_at && GetTickCount() >= g_dump_at) {
+    g_dump_at = 0;
+    dump_menu_memory();
+  }
   const std::string d = dialled();
   if (s != g_last_screen) {
     log::info("Phone: screen {} -> {}", g_last_screen, s);
