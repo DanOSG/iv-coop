@@ -14,6 +14,7 @@
 #include "core/input.h"
 #include "game/phone.h"
 #include "net/steam.h"
+#include "net/steam_relay.h"
 #include "core/log.h"
 #include "game/script.h"
 #include "sync/local_player.h"
@@ -274,6 +275,7 @@ void handle_phone() {
   const net::Mode mode = net.status().mode;
   phone::set_in_session(mode != net::Mode::Idle);
   steam::tick();
+  steam_relay::tick();
 
   if (auto req = phone::poll()) {
     switch (req->action) {
@@ -287,6 +289,7 @@ void handle_phone() {
         log::info("Hosting on UDP {} as '{}' (phone, password {})", g_cfg.port, g_cfg.name, g_password);
         if (steam::available()) {
           steam::host_lobby(g_password, std::format("{}:{}", local_ipv4(), g_cfg.port));
+          steam_relay::start_host(g_cfg.port);
           phone::notify("Starting co-op...");
         } else {
           phone::notify("Hosting co-op (Steam unavailable: friends join by address).");
@@ -307,6 +310,7 @@ void handle_phone() {
           log::info("Leaving session ({}, phone)", net::to_string(mode));
           net.leave();
         }
+        steam_relay::stop();
         steam::leave_lobby();
         phone::notify("Left co-op.");
         break;
@@ -329,23 +333,29 @@ void handle_phone() {
       case steam::LobbyResult::CreateFailed:
         phone::notify("Co-op is hosting, but Steam couldn't list it.");
         break;
-      case steam::LobbyResult::Found: {
+      case steam::LobbyResult::Found:
         if (net.status().mode == net::Mode::Hosting) {
           log::info("Steam self-check: our lobby is findable by its password");
           break;
         }
-        const auto colon = r->address.rfind(':');
-        const std::string ip = r->address.substr(0, colon);
-        const auto port = colon == std::string::npos ? g_cfg.port
-                                                     : static_cast<std::uint16_t>(std::stoi(r->address.substr(colon + 1)));
-        if (net.join(ip, port, g_cfg.name)) {
-          log::info("Joining {}:{} as '{}' (found by password)", ip, port, g_cfg.name);
-          phone::notify("Joining " + r->host_name + "'s game...");
+        // Enter the host's lobby: it then accepts our P2P traffic (see steam_relay).
+        steam::join_lobby(r->lobby);
+        phone::notify("Found " + r->host_name + "'s game. Connecting...");
+        break;
+      case steam::LobbyResult::Joined: {
+        const auto port = steam_relay::start_join(r->owner);
+        if (port && net.join("127.0.0.1", *port, g_cfg.name)) {
+          log::info("Joining host {} through the Steam relay (local port {})", r->owner, *port);
         } else {
-          phone::notify("Couldn't join: " + net.status().last_error);
+          phone::notify("Couldn't connect: " + net.status().last_error);
+          steam_relay::stop();
+          steam::leave_lobby();
         }
         break;
       }
+      case steam::LobbyResult::JoinFailed:
+        phone::notify("Couldn't enter that game's lobby.");
+        break;
       case steam::LobbyResult::NotFound:
         if (net.status().mode == net::Mode::Hosting)
           log::warn("Steam self-check: our own lobby wasn't found by its password");
@@ -397,6 +407,7 @@ void tick() {
         g_vehicles.clear();
         g_entities.clear(g_was_host);
         story::clear();
+        steam_relay::stop();
         steam::leave_lobby();
         if (g_want_client_mode || g_client_mode) {
           script::set_suppress_predicate(nullptr); // our story scripts resume where they were

@@ -48,8 +48,11 @@ constexpr const char* kKeyAddress = "ivc_addr";
 constexpr const char* kKeyName = "ivc_name";
 constexpr const char* kVersion = "1";
 
+constexpr int kLobbyEnterId = 504; // LobbyEnter_t: uint64 lobby, u32 perms, bool locked, u32 response
+constexpr int kP2PUnreliable = 0, kP2PChannel = 0;
+
 struct Pending {
-  enum { Create, Search } what;
+  enum { Create, Search, Join } what;
   ApiCall call;
   std::string password, address;
 };
@@ -140,6 +143,57 @@ void find_lobby(const std::string& password) {
   log::info("Steam: searching for a lobby with password {}", password);
 }
 
+void join_lobby(std::uint64_t lobby) {
+  if (!g_ok) return;
+  const auto join = fn<ApiCall(__cdecl*)(void*, std::uint64_t)>("SteamAPI_ISteamMatchmaking_JoinLobby");
+  Pending p{Pending::Join, join(g_matchmaking, lobby), {}, {}};
+  g_pending.push_back(p);
+  log::info("Steam: joining lobby {}", lobby);
+}
+
+std::vector<std::uint64_t> lobby_members() {
+  std::vector<std::uint64_t> out;
+  if (!g_ok || !g_lobby) return out;
+  const auto count = fn<int(__cdecl*)(void*, std::uint64_t)>("SteamAPI_ISteamMatchmaking_GetNumLobbyMembers");
+  const auto member = fn<std::uint64_t(__cdecl*)(void*, std::uint64_t, int)>(
+      "SteamAPI_ISteamMatchmaking_GetLobbyMemberByIndex");
+  const std::uint64_t me = my_id();
+  const int n = count(g_matchmaking, g_lobby);
+  for (int i = 0; i < n; ++i)
+    if (const std::uint64_t id = member(g_matchmaking, g_lobby, i); id && id != me) out.push_back(id);
+  return out;
+}
+
+bool p2p_send(std::uint64_t to, const void* data, std::uint32_t size) {
+  static const auto send = fn<bool(__cdecl*)(void*, std::uint64_t, const void*, std::uint32_t, int, int)>(
+      "SteamAPI_ISteamNetworking_SendP2PPacket");
+  return g_ok && send(g_networking, to, data, size, kP2PUnreliable, kP2PChannel);
+}
+
+bool p2p_read(std::vector<std::uint8_t>& out, std::uint64_t& from) {
+  static const auto available = fn<bool(__cdecl*)(void*, std::uint32_t*, int)>(
+      "SteamAPI_ISteamNetworking_IsP2PPacketAvailable");
+  static const auto read = fn<bool(__cdecl*)(void*, void*, std::uint32_t, std::uint32_t*, std::uint64_t*, int)>(
+      "SteamAPI_ISteamNetworking_ReadP2PPacket");
+  std::uint32_t size = 0;
+  if (!g_ok || !available(g_networking, &size, kP2PChannel)) return false;
+  out.resize(size);
+  std::uint32_t got = 0;
+  if (!read(g_networking, out.data(), size, &got, &from, kP2PChannel)) return false;
+  out.resize(got);
+  return true;
+}
+
+void p2p_accept(std::uint64_t from) {
+  static const auto accept = fn<bool(__cdecl*)(void*, std::uint64_t)>("SteamAPI_ISteamNetworking_AcceptP2PSessionWithUser");
+  if (g_ok) accept(g_networking, from);
+}
+
+void p2p_close(std::uint64_t with) {
+  static const auto close = fn<bool(__cdecl*)(void*, std::uint64_t)>("SteamAPI_ISteamNetworking_CloseP2PSessionWithUser");
+  if (g_ok) close(g_networking, with);
+}
+
 void leave_lobby() {
   if (!g_ok || !g_lobby) return;
   fn<void(__cdecl*)(void*, std::uint64_t)>("SteamAPI_ISteamMatchmaking_LeaveLobby")(g_matchmaking, g_lobby);
@@ -170,6 +224,23 @@ void tick() {
         set(g_matchmaking, g_lobby, kKeyName, persona_name().c_str());
         log::info("Steam: lobby {} created (password {}, address {})", g_lobby, it->password, it->address);
         g_results.push_back({LobbyResult::Created, g_lobby});
+      }
+    } else if (it->what == Pending::Join) {
+      struct { std::uint64_t lobby; std::uint32_t permissions; bool locked; std::uint32_t response; } entered{};
+      if (!call_done(it->call, &entered, sizeof(entered), kLobbyEnterId, failed)) {
+        ++it;
+        continue;
+      }
+      if (failed || entered.response != 1 /* k_EChatRoomEnterResponseSuccess */) {
+        log::error("Steam: joining lobby failed (response {})", entered.response);
+        g_results.push_back({LobbyResult::JoinFailed});
+      } else {
+        g_lobby = entered.lobby;
+        const auto owner = fn<std::uint64_t(__cdecl*)(void*, std::uint64_t)>("SteamAPI_ISteamMatchmaking_GetLobbyOwner");
+        LobbyResult r{LobbyResult::Joined, g_lobby};
+        r.owner = owner(g_matchmaking, g_lobby);
+        log::info("Steam: in lobby {} (host {})", g_lobby, r.owner);
+        g_results.push_back(r);
       }
     } else {
       std::uint32_t count = 0;

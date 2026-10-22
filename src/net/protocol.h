@@ -33,6 +33,8 @@ inline constexpr std::size_t kNameLen = 24;
 inline constexpr std::uint8_t kChanState = 0;
 inline constexpr std::uint8_t kChanControl = 1;
 inline constexpr std::uint8_t kNumChannels = 2;
+// ENet MTU: Steam's unreliable P2P packets (the relay path) are limited to 1200 bytes.
+inline constexpr std::uint32_t kMtu = 1200;
 
 // Disconnect reasons (ENet disconnect data).
 enum class Reject : std::uint32_t { None = 0, Full = 1, VersionMismatch = 2, HostLeft = 3, Kicked = 4 };

@@ -409,6 +409,7 @@ bool Session::host(std::uint16_t port, const std::string& name, const std::strin
   // One spare peer slot beyond the 3 joiners: with none, ENet silently ignores a 4th
   // connection attempt and that client just times out instead of hearing "session is full".
   impl_->host = enet_host_create(&addr, kMaxPlayers, kNumChannels, 0, 0);
+  if (impl_->host) impl_->host->mtu = kMtu;
   if (!impl_->host) {
     impl_->st.last_error = std::format("could not open UDP port {} (in use?)", port);
     return false;
@@ -439,6 +440,7 @@ bool Session::join(const std::string& address, std::uint16_t port, const std::st
     return false;
   }
   impl_->host = enet_host_create(nullptr, 1, kNumChannels, 0, 0);
+  if (impl_->host) impl_->host->mtu = kMtu;
   if (!impl_->host) {
     impl_->st.last_error = "could not create client socket";
     return false;

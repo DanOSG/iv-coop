@@ -39,7 +39,12 @@ Free-roam is not a separate mode. It's simply the campaign between missions.
      interfaces may be reachable from the Steam client via `SteamInternal_FindOrCreateUserInterface`. The host
      creates a lobby tagged with the session password; joiners find it by password (worldwide, no IPs),
      friends can also join from the Steam overlay, and traffic goes through Valve's relays (no NAT trouble).
-     Steam copies only; the others use 1 and 3. Still to verify in game that Steam is up in-process.
+     Steam copies only; the others use 1 and 3. Verified in game (2026-10-22): Steam is up in-process
+     (SteamUser021, SteamFriends017, SteamMatchMaking009, SteamNetworking006, SteamUtils010) and a host's lobby
+     is found worldwide by its password. Transport (net/steam_relay): ENet is unchanged and talks to local UDP
+     sockets; a proxy in the game tick moves those datagrams over legacy P2P to SteamIDs (host: one local socket
+     per lobby member, P2P accepted for lobby members only; joiner: ENet connects to a local proxy port; ENet
+     MTU 1200 to fit unreliable P2P). Joiner path untested until a second Steam account is available.
   3. Direct IP + manual port forward always remains as a fallback.
 - **Menu: the phone** (working, 2026-10-22: game/phone, net/steam). CE removed the phone's Multiplayer item, so
   it is put back. The original design: the phone's **Multiplayer** item opens co-op instead of Rockstar's online modes
