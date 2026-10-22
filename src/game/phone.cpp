@@ -34,7 +34,9 @@ constexpr int kPhoneGlobal = 91;
 constexpr int kScreenOffset = 0, kDialledOffset = 128;
 
 // Phone screens (g_U91._fU0).
-constexpr std::int32_t kScreenHome = 1001, kScreenMainMenu = 1011, kScreenCalling = 1005;
+// 1001 is the phone closing (then 1000 idle); 1003 is the keypad (entering it clears the
+// number being dialled); Call there goes to 1005 (calling).
+constexpr std::int32_t kScreenClose = 1001, kScreenKeypad = 1003, kScreenMainMenu = 1011, kScreenCalling = 1005;
 
 // spcellphonemain statics (2019 script layout, verified against CE in memory). The thread
 // stack is at +0x58 (statics first). l_U1 is the list state: _fU4 (slot 2) the item count;
@@ -286,14 +288,14 @@ void tick() {
     case kIdJoin:
       g_coop_menu = false;
       g_awaiting = s == kIdHost ? Action::Host : Action::Join;
-      switch_screen(kScreenHome);
+      switch_screen(kScreenKeypad);
       show_help(std::format("Type a {}-digit co-op password, then press Call.", kPasswordDigits), true);
       log::info("Phone: {} chosen; waiting for the password", s == kIdHost ? "Host" : "Join");
       break;
     case kIdLeave:
       g_coop_menu = false;
       g_request = Request{Action::Leave, {}};
-      switch_screen(kScreenHome);
+      switch_screen(kScreenClose);
       break;
     case kScreenCalling:
       if (g_awaiting) {

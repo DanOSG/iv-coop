@@ -9,8 +9,8 @@
 //   - on 1011 we append "Multiplayer" (id 2000);
 //   - selecting it lands on screen 2000: we send the phone back to 1011 with our own items
 //     (Host Co-op 2001 / Join Co-op 2002, or Leave Co-op 2003 while in a session);
-//   - Host/Join return to the home screen with a hint to type a 6-digit password and
-//     press Call; when the phone starts calling (screen 1005) the digits are the password
+//   - Host/Join open the phone's keypad (screen 1003) with a hint to type a 6-digit
+//     password and press Call; when the phone starts calling (1005) the digits are the password
 //     (the call to an unknown number then hangs up by itself).
 // Labels are game-text keys; CText::Get is hooked to supply ours. Engine addresses and
 // script variable slots are for GTAIV.exe 1.2.0.59 (CE); see phone.cpp.
