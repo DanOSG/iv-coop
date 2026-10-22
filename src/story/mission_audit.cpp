@@ -56,8 +56,14 @@ struct Report {
   std::vector<std::string> notes;         // notable calls, in order
   std::set<std::string> family;           // lowercase script names
   std::vector<std::pair<char, std::int32_t>> entities; // 'p'ed / 'c'ar / 'o'bject handles
-  std::vector<std::int32_t> blips;        // live coord/entity blips, newest last
+  struct Blip {
+    std::int32_t blip;
+    char kind; // 'x' coord/contact, 'p' ped, 'c' car, 'o' object
+    std::int32_t entity;
+  };
+  std::vector<Blip> blips; // live blips, newest last
   bool cutscene = false;
+  unsigned skipped = 0;
 };
 
 Settings g_cfg;
@@ -67,6 +73,8 @@ std::size_t g_index = 0;
 enum class Phase { Next, Loading, Running, Gap } g_phase = Phase::Next;
 std::uint32_t g_phase_ms = 0, g_last_nudge_ms = 0;
 std::uint32_t g_last_call_ms = 0; // last hooked call by the mission's scripts
+std::uint32_t g_cutscene_ms = 0;  // a cutscene started (0: none to skip)
+unsigned g_skipped = 0;
 Report g_rep;
 n::Vector3 g_home{};
 
@@ -96,15 +104,18 @@ void observe(const Call& c) {
     g_rep.entities.push_back({'o', c.out<std::int32_t>(4)});
     note(c, std::format("model 0x{:08X}", c.arg<std::uint32_t>(0)));
   } else if (nm == "ADD_BLIP_FOR_COORD" || nm == "ADD_BLIP_FOR_CONTACT") {
-    g_rep.blips.push_back(c.out<std::int32_t>(3));
+    g_rep.blips.push_back({c.out<std::int32_t>(3), 'x', 0});
     note(c, std::format("{:.0f} {:.0f} {:.0f}", c.arg<float>(0), c.arg<float>(1), c.arg<float>(2)));
   } else if (nm == "ADD_BLIP_FOR_CHAR" || nm == "ADD_BLIP_FOR_CAR" || nm == "ADD_BLIP_FOR_OBJECT") {
-    g_rep.blips.push_back(c.out<std::int32_t>(1));
+    g_rep.blips.push_back({c.out<std::int32_t>(1), nm == "ADD_BLIP_FOR_CHAR" ? 'p' : nm == "ADD_BLIP_FOR_CAR" ? 'c' : 'o',
+                           c.arg<std::int32_t>(0)});
     note(c, "");
   } else if (nm == "REMOVE_BLIP") {
-    std::erase(g_rep.blips, c.arg<std::int32_t>(0));
+    const auto gone = c.arg<std::int32_t>(0);
+    std::erase_if(g_rep.blips, [gone](const Report::Blip& b) { return b.blip == gone; });
   } else if (nm == "START_CUTSCENE_NOW") {
     g_rep.cutscene = true;
+    g_cutscene_ms = GetTickCount();
     note(c, c.str(0));
   } else if (nm == "REQUEST_ADDITIONAL_TEXT" || nm == "PRINT_HELP" || nm == "PRINT_NOW" || nm == "PRINT") {
     note(c, c.str(0));
@@ -185,6 +196,33 @@ void teleport(const n::Vector3& to) {
   n::SetCharCoordinatesNoOffset(p, to);
 }
 
+// Move the player on to what the mission is waiting for: into a blipped car (driver, or
+// a free passenger seat if someone drives it), next to a blipped ped/object, or onto a
+// coordinate blip.
+bool nudge(const Report::Blip& b) {
+  if (!n::DoesBlipExist(b.blip)) return false;
+  const n::Ped p = me();
+  if (b.kind == 'c' && n::DoesVehicleExist(b.entity)) {
+    if (n::IsCharInCar(p, b.entity)) return false; // already there; the mission is busy
+    const n::Ped driver = n::GetDriverOfCar(b.entity);
+    if (!driver) {
+      n::WarpCharIntoCar(p, b.entity);
+      return true;
+    }
+    const std::uint32_t seats = n::GetMaximumNumberOfPassengers(b.entity);
+    for (std::uint32_t seat = 0; seat < seats && seat < 8; ++seat)
+      if (n::IsCarPassengerSeatFree(b.entity, seat)) {
+        n::WarpCharIntoCarAsPassenger(p, b.entity, seat);
+        return true;
+      }
+  }
+  n::Vector3 at{};
+  invoke(kGetBlipCoords, b.blip, &at);
+  if (at.x == 0 && at.y == 0) return false;
+  teleport({at.x + 2.0f, at.y + 2.0f, at.z + 1.0f});
+  return true;
+}
+
 void cleanup() {
   for (const auto& s : g_rep.family) invoke(kTerminateScripts, s.c_str());
   for (auto [kind, h] : g_rep.entities) {
@@ -193,8 +231,8 @@ void cleanup() {
     else if (kind == 'c' && n::DoesVehicleExist(h)) n::DeleteCar(h);
     else if (kind == 'o' && invoke<bool>(kDoesObjectExist, h)) invoke(kDeleteObject, &h);
   }
-  for (n::Blip b : g_rep.blips)
-    if (n::DoesBlipExist(b)) n::RemoveBlip(b);
+  for (const auto& b : g_rep.blips)
+    if (n::DoesBlipExist(b.blip)) n::RemoveBlip(b.blip);
   if (g_rep.cutscene) invoke(kClearCutscene);
   invoke(kClearPrints);
   invoke(kClearHelp);
@@ -213,6 +251,8 @@ bool family_running() {
 void finish(const std::string& outcome, std::uint32_t now) {
   g_rep.outcome = outcome;
   g_rep.seconds = (now - g_phase_ms) / 1000;
+  g_rep.skipped = g_skipped;
+  g_skipped = 0;
   cleanup();
   write_report();
   log::warn("Audit: {} done ({}), {} natives, {} notes", g_rep.name, outcome, g_rep.counts.size(), g_rep.notes.size());
@@ -279,6 +319,16 @@ void tick() {
       }
       break;
     case Phase::Running:
+      // Skip cutscenes (as the player's skip button would): the script sees them finish.
+      if (g_cutscene_ms && now - g_cutscene_ms > 1500) {
+        g_cutscene_ms = 0;
+        if (!invoke<bool>(kHasCutsceneFinished)) {
+          invoke(kClearCutscene);
+          ++g_skipped;
+          g_last_call_ms = now;
+          log::info("Audit: skipped a cutscene in {}", g_rep.name);
+        }
+      }
       // A playing cutscene or conversation is the mission busy, not idle.
       if ((g_rep.cutscene && !invoke<bool>(kHasCutsceneFinished)) || invoke<bool>(kConversationOngoing))
         g_last_call_ms = now;
@@ -290,15 +340,7 @@ void tick() {
         finish(std::format("idle for {} s (stopped by the audit)", kIdleEnd), now);
       } else if (now - g_last_nudge_ms > kNudgeEvery * 1000 && !g_rep.blips.empty()) {
         g_last_nudge_ms = now;
-        const n::Blip b = g_rep.blips.back();
-        if (n::DoesBlipExist(b)) {
-          n::Vector3 at{};
-          invoke(kGetBlipCoords, b, &at);
-          if (at.x != 0 || at.y != 0) {
-            teleport({at.x + 2.0f, at.y + 2.0f, at.z + 1.0f});
-            ++g_rep.nudges;
-          }
-        }
+        if (nudge(g_rep.blips.back())) ++g_rep.nudges;
       }
       break;
     case Phase::Gap:
