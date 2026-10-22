@@ -123,26 +123,30 @@ std::vector<std::uint8_t> encode(const Op& o) {
   return std::move(w.data());
 }
 
-std::map<std::string, Op> g_own;  // our story scripts' world state
+struct Entry {
+  Op op;
+  std::uint32_t frame = 0; // world tick count when recorded
+};
+std::map<std::string, Entry> g_own; // our story scripts' world state
 std::map<std::string, Op> g_host; // the host's, applied here while joined
 bool g_own_undone = false;
 std::vector<std::vector<std::uint8_t>> g_outbox;
-std::int32_t g_main_thread = 0;
 std::size_t g_last_script_count = 0;
+std::uint32_t g_frame = 0;
 
+// A save load restarts every script and "main" re-applies the world *in the same frame*,
+// before our tick (which runs after all scripts) can notice; so a reset keeps what was
+// recorded this frame and drops only older entries.
 void reset_own(const char* why) {
-  if (!g_own.empty()) log::info("World ledger: reset ({}), dropping {} entries", why, g_own.size());
-  g_own.clear();
+  const std::size_t before = g_own.size();
+  std::erase_if(g_own, [](const auto& kv) { return kv.second.frame < g_frame; });
+  if (before) log::info("World ledger: reset ({}): dropped {}, kept {} from this frame", why, before - g_own.size(), g_own.size());
 }
 
+// (main's thread id is reused across loads, so it can't signal a reload; see tick.)
 void record(const Call& c, const Op& o) {
   if (!is_story_script(c.script)) return;
-  if (c.script == "main") {
-    const std::int32_t id = script::current_thread_id();
-    if (g_main_thread && id != g_main_thread) reset_own("main restarted");
-    g_main_thread = id;
-  }
-  g_own[key_of(o)] = o;
+  g_own[key_of(o)] = Entry{o, g_frame};
   g_outbox.push_back(encode(o));
 }
 
@@ -230,18 +234,18 @@ void register_hooks() {
 }
 
 void tick() {
-  // A save load kills every script at once (seen as ~34 -> ~23 threads in one go), then
-  // "main" re-applies the world. Catches the case where main's thread id is reused.
+  // A save load kills every script at once (seen as ~30 -> ~20 threads in one go).
   const std::size_t n = script::threads().size();
   if (g_last_script_count >= n + 8) reset_own("scripts restarted");
   g_last_script_count = n;
+  ++g_frame;
 }
 
 std::vector<std::vector<std::uint8_t>> take_outbox() { return std::exchange(g_outbox, {}); }
 
 std::vector<std::vector<std::uint8_t>> encode_ledger() {
   std::vector<std::vector<std::uint8_t>> out;
-  for (const auto& [k, o] : g_own) out.push_back(encode(o));
+  for (const auto& [k, e] : g_own) out.push_back(encode(e.op));
   return out;
 }
 
@@ -252,7 +256,7 @@ void client_apply(std::span<const std::uint8_t> msg) {
   Op o;
   if (!r.get(type) || !r.get(sender) || !r.get(o)) return;
   if (!g_own_undone) {
-    for (auto it = g_own.rbegin(); it != g_own.rend(); ++it) undo(it->second);
+    for (auto it = g_own.rbegin(); it != g_own.rend(); ++it) undo(it->second.op);
     g_own_undone = true;
     log::info("World: undid our own {} world-state entries; applying the host's", g_own.size());
   }
@@ -263,7 +267,7 @@ void client_apply(std::span<const std::uint8_t> msg) {
 void client_restore() {
   if (!g_own_undone && g_host.empty()) return;
   for (auto it = g_host.rbegin(); it != g_host.rend(); ++it) undo(it->second);
-  for (const auto& [k, o] : g_own) apply(o);
+  for (const auto& [k, e] : g_own) apply(e.op);
   log::info("World: undid {} host entries, restored our own {}", g_host.size(), g_own.size());
   g_host.clear();
   g_own_undone = false;

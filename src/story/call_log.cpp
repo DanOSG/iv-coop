@@ -136,6 +136,37 @@ void register_call_logging() {
                             {0x4E637988u, "SWITCH_AMBIENT_PLANES"}, {0x060669FEu, "SWITCH_GARBAGE_TRUCKS"},
                             {0x3A8531E8u, "SET_GANG_CAR"}})
     on(hash, name, [](const Call& c) { report(c, std::to_string(c.arg<int>(0))); });
+
+  // --- phone calls and conversation setup (dialogue research) ---
+  on(0x720E7EA6, "NEW_MOBILE_PHONE_CALL", [](const Call& c) { report(c, ""); });
+  on(0x0BED1DDE, "ADD_LINE_TO_MOBILE_PHONE_CALL",
+     [](const Call& c) { report(c, std::format("{}, {}, {}", c.arg<int>(0), str(c, 1), str(c, 2))); });
+  on(0x7939764F, "START_MOBILE_PHONE_CALL", [](const Call& c) {
+    report(c, std::format("from ped {} voice {}, to ped {} voice {}, {}, {}", c.arg<int>(0), str(c, 1),
+                          c.arg<int>(2), str(c, 3), c.arg<int>(4), c.arg<int>(5)));
+  });
+  on(0x67114B98, "START_MOBILE_PHONE_CALLING", [](const Call& c) { report(c, ""); });
+  on(0x542D499E, "ADD_NEW_CONVERSATION_SPEAKER",
+     [](const Call& c) { report(c, std::format("{}, ped {}, voice {}", c.arg<int>(0), c.arg<int>(1), str(c, 2))); });
+  on(0x13D44996, "ADD_NEW_FRONTEND_CONVERSATION_SPEAKER",
+     [](const Call& c) { report(c, std::format("{}, {}", c.arg<int>(0), str(c, 1))); });
+  on(0x001B1E5A, "PLAY_SCRIPTED_CONVERSATION_FRONTEND",
+     [](const Call& c) { report(c, std::to_string(c.arg<int>(0))); });
+  on(0x416413F6, "ADD_LINE_TO_SCRIPTED_CONVERSATION",
+     [](const Call& c) { report(c, std::format("{}, {}, {}", c.arg<int>(0), c.arg<int>(1), c.arg<int>(2))); });
+  for (auto [hash, name] : {std::pair{0xFC2EE353u, "START_SETTING_UP_CONVERSATION"},
+                            {0xBADE4D05u, "FINISH_SETTING_UP_CONVERSATION"},
+                            {0x4D1C3395u, "FINISH_SETTING_UP_CONVERSATION_NO_SUBTITLES"},
+                            {0x07E4CB1Eu, "START_SCRIPTED_CONVERSATION"}})
+    on(hash, name, [](const Call& c) { report(c, std::format("{}, {}", c.arg<int>(0), c.arg<int>(1))); });
+  on(0x57DB70CE, "ABORT_SCRIPTED_CONVERSATION", [](const Call& c) { report(c, std::to_string(c.arg<int>(0))); });
+  on(0x5CF149C8, "SAY_AMBIENT_SPEECH", [](const Call& c) {
+    report(c, std::format("ped {}, {}, {}, {}, {}", c.arg<int>(0), str(c, 1), c.arg<int>(2), c.arg<int>(3),
+                          c.arg<int>(4)));
+  });
+  on(0x2FA55669, "SAY_AMBIENT_SPEECH_WITH_VOICE", [](const Call& c) {
+    report(c, std::format("ped {}, {}, voice {}, {}", c.arg<int>(0), str(c, 1), str(c, 2), c.arg<int>(5)));
+  });
 }
 
 } // namespace ivc::story
