@@ -124,3 +124,15 @@ if(IVCOOP_DEPLOY)
     COMMAND ${CMAKE_COMMAND} ${deploy_dst} -DSRC=$<TARGET_PDB_FILE:iv-coop> ${deploy_script}
     COMMENT "Deploying iv-coop.asi to ${IVCOOP_GAME_DIR}/plugins (live on next launch if the game is running)")
 endif()
+
+# --- the installer: one exe with the mod embedded (see tools/installer/main.cpp) ---
+add_executable(iv-coop-setup WIN32 tools/installer/main.cpp tools/installer/installer.rc)
+target_compile_options(iv-coop-setup PRIVATE /W4 /permissive- /utf-8)
+target_link_libraries(iv-coop-setup PRIVATE winhttp bcrypt version comctl32 shell32 ole32)
+target_link_options(iv-coop-setup PRIVATE
+  "/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'")
+add_dependencies(iv-coop-setup iv-coop)
+set_source_files_properties(tools/installer/installer.rc PROPERTIES
+  COMPILE_DEFINITIONS "IVCOOP_ASI_PATH=\"$<TARGET_FILE:iv-coop>\""
+  OBJECT_DEPENDS "$<TARGET_FILE:iv-coop>")
+target_compile_definitions(iv-coop-setup PRIVATE UNICODE _UNICODE NOMINMAX)

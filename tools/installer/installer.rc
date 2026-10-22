@@ -1,0 +1,5 @@
+#include "resource.h"
+
+// The mod, embedded so the installer is one file. IVCOOP_ASI_PATH is set by CMake to the
+// iv-coop target's output for the configuration being built.
+IDR_IVCOOP_ASI RCDATA IVCOOP_ASI_PATH

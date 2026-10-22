@@ -261,3 +261,13 @@ docs/
   FusionFix, the radio downgrade and iv-coop (plus a default ini). It also offers to uninstall and restore.
   Third-party pieces are fetched from their official release sources at install time rather than bundled, so we
   never redistribute other people's files or Rockstar's audio. Their versions are pinned and verified by hash.
+  Concretely (`tools/installer`, `iv-coop-setup.exe`, one file to send):
+  1. Find GTA IV: Steam's install path (registry), every library in `libraryfolders.vdf`; folder picker fallback.
+  2. Check `GTAIV.exe` is 1.2.0.59 and the game isn't running.
+  3. TJGM's Drag n' Drop Archive (FusionFix, radio restoration, fixes, HD textures; the pack the mod ships
+     with): skipped when already installed; otherwise downloaded from its official Mega mirror (Mediafire is
+     behind a bot check) and extracted into the game folder with Windows' `tar`, after backing up every file it
+     would overwrite.
+  4. `iv-coop.asi` is embedded in the installer; the ini writes itself on first launch, with the player name
+     defaulting to the Steam name.
+  5. Uninstall removes the mod and restores the backups (`GTAIV/_iv-coop_backup`).

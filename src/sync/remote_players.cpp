@@ -271,6 +271,15 @@ std::string g_password; // of the session we host / are joining
 std::vector<std::uint32_t> g_self_checks;
 
 void handle_phone() {
+  // No name set in the ini: use the Steam name (once Steam is up).
+  static bool named = false;
+  if (!named && steam::available()) {
+    named = true;
+    if (g_cfg.name == "Player" || g_cfg.name.empty()) {
+      const std::string persona = steam::persona_name();
+      if (!persona.empty()) g_cfg.name = persona.substr(0, 31);
+    }
+  }
   net::Session& net = session();
   const net::Mode mode = net.status().mode;
   phone::set_in_session(mode != net::Mode::Idle);
