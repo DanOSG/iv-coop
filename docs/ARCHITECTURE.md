@@ -237,9 +237,13 @@ docs/
     replication, blips with routes, PRINT/help text including the mission text blocks (REQUEST_ADDITIONAL_TEXT);
     client mode (joiner model, frozen story scripts, own story blips hidden and restored); the host shown as
     the protagonist through extra player peds (game/player_slots); followed mission cars use physics-follow.
-  - Left: progression sync on join (incl. text blocks/blips already active), dialogue/conversations, the
-    mission-vehicle duplicate for partners, task forwarding for mission entities, objects, blips on
-    non-networked entities.
+  - Done since (2026-10-22, built, joiner side untested without a second player): late-join snapshot of text
+    blocks/blips; world-state ledger (progression) and mirrored payouts; positional dialogue and phone calls
+    (story/dialogue); cutscenes for joiners (story/cutscene, M7 basics); duplicate mission car for partners;
+    downed/revive (sync/downed); Go to Host (phone); script-drawn mission HUD (story/hud).
+  - Left: task forwarding for mission entities, objects, blips on non-networked entities, the free-cutscene
+    option, scripted-camera scenes, wallets persisted per campaign, matching the host's outfit in cutscenes,
+    the one-frame lethal-hit gap in downed.
 - **M7:** cutscenes and scripted cameras, mission teleport/"join host".
 - **M8:** mission audit: play IV start to finish with 4 players and fill in `docs/missions.md`, applying
   concessions as needed.
