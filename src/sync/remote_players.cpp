@@ -265,6 +265,9 @@ std::string local_ipv4() {
 
 // The phone's Multiplayer menu (game/phone) and Steam lobbies (net/steam).
 std::string g_password; // of the session we host / are joining
+// Host self-check: search for our own lobby by password a few seconds after creating it
+// (lobby data takes a moment to be published; an immediate search found nothing).
+std::vector<std::uint32_t> g_self_checks;
 
 void handle_phone() {
   net::Session& net = session();
@@ -310,12 +313,19 @@ void handle_phone() {
     }
   }
 
+  if (!g_self_checks.empty() && GetTickCount() >= g_self_checks.front()) {
+    g_self_checks.erase(g_self_checks.begin());
+    if (net.status().mode == net::Mode::Hosting) steam::find_lobby(g_password);
+  }
+
   while (auto r = steam::poll()) {
     switch (r->kind) {
-      case steam::LobbyResult::Created:
+      case steam::LobbyResult::Created: {
         phone::notify("Co-op ready. Friends join with password " + g_password + ".");
-        steam::find_lobby(g_password); // self-check: the lobby can be found by its password
+        const std::uint32_t now = GetTickCount();
+        g_self_checks = {now + 5000, now + 15000};
         break;
+      }
       case steam::LobbyResult::CreateFailed:
         phone::notify("Co-op is hosting, but Steam couldn't list it.");
         break;
