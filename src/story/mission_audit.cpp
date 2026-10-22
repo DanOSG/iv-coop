@@ -30,7 +30,8 @@ constexpr std::uint32_t kDoesScriptExist = 0x1D1B266B, kRequestScript = 0x6FFE0D
                         kDoesObjectExist = 0x6DAB78CD, kClearCutscene = 0x79611458, kSetInvincible = 0x7E9E02E1,
                         kClearPrints = 0x1D8C324A, kClearHelp = 0x07244253, kHasCutsceneFinished = 0x4ECE1AD2,
                         kConversationOngoing = 0x3CA23254, kGetBlipColour = 0x59B425DA, kExplodeCar = 0x505518A2,
-                        kSetCharHealth = 0x575E2880, kIsCarDead = 0x2AAB340A;
+                        kSetCharHealth = 0x575E2880, kIsCarDead = 0x2AAB340A, kStopCutscene = 0x50FF1428,
+                        kGetCutsceneTime = 0x7DF26C8C;
 constexpr std::int32_t kHostileColour = 1; // IV blip colour red: enemies/targets (the default for peds)
 
 constexpr unsigned kNudgeEvery = 5;   // s between teleports to the newest blip
@@ -250,7 +251,7 @@ void cleanup() {
   }
   for (const auto& b : g_rep.blips)
     if (n::DoesBlipExist(b.blip)) n::RemoveBlip(b.blip);
-  if (g_rep.cutscene) invoke(kClearCutscene);
+  if (g_rep.cutscene && !invoke<bool>(kHasCutsceneFinished)) invoke(kStopCutscene);
   invoke(kClearPrints);
   invoke(kClearHelp);
   invoke(kClearWanted, n::GetPlayerId());
@@ -336,17 +337,18 @@ void tick() {
       }
       break;
     case Phase::Running:
-      // Optional cutscene skip. CLEAR_CUTSCENE from a script frees the cutscene while the
-      // render thread may still be drawing it: it crashed the game in roman5 (execute of
-      // freed memory on the render thread 26 ms later). Off by default until the game's own
-      // skip path (fade, then teardown) is used instead.
-      if (g_cfg.skip_cutscenes && g_cutscene_ms && now - g_cutscene_ms > 1500) {
+      // Skip cutscenes a couple of seconds in, once they are actually playing. STOP_CUTSCENE
+      // ends playback the way a skip does; the mission then sees HAS_CUTSCENE_FINISHED and
+      // frees it itself (CLEAR_NAMED_CUTSCENE on its own thread, as normal). Calling
+      // CLEAR_CUTSCENE ourselves freed it under the render thread and crashed (roman5).
+      if (g_cfg.skip_cutscenes && g_cutscene_ms && now - g_cutscene_ms > 2000 &&
+          invoke<std::int32_t>(kGetCutsceneTime) > 500) {
         g_cutscene_ms = 0;
         if (!invoke<bool>(kHasCutsceneFinished)) {
-          invoke(kClearCutscene);
+          invoke(kStopCutscene);
           ++g_skipped;
           g_last_call_ms = now;
-          log::info("Audit: skipped a cutscene in {}", g_rep.name);
+          log::info("Audit: stopped a cutscene in {}", g_rep.name);
         }
       }
       // A playing cutscene or conversation is the mission busy, not idle.
