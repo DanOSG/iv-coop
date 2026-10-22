@@ -229,7 +229,10 @@ int main(int argc, char** argv) {
 
     for (const auto& e : session.drain_events()) {
       using K = net::SessionEvent::Kind;
-      if (e.kind == K::Connected) std::printf("[%s] connected as player #%u\n", a.name.c_str(), e.id);
+      if (e.kind == K::Connected) {
+        std::printf("[%s] connected as player #%u\n", a.name.c_str(), e.id);
+        if (a.downed) downed = true, health = a.health; // each new session starts us down again
+      }
       if (e.kind == K::Joined) {
         std::printf("[%s] player #%u '%s' is here\n", a.name.c_str(), e.id, e.text.c_str());
         if (!a.replay.empty() && !replay_start) {
@@ -280,7 +283,7 @@ int main(int argc, char** argv) {
     for (const auto& gm : session.drain_game()) {
       // downed::Msg::Revive (41) aimed at us: back up.
       if (gm.data.size() >= 3 && gm.data[0] == 41 && gm.data[2] == session.status().my_id && downed) {
-        downed = false;
+        downed = false, health = 150; // half health, like a revived player
         std::printf("[%s] revived by player #%u%c", a.name.c_str(), gm.from, 10);
         continue;
       }
@@ -349,7 +352,10 @@ int main(int argc, char** argv) {
           damage_taken += d.amount;
           std::printf("[%s] hit by #%u for %u (weapon %u), health %d\n", a.name.c_str(), gm.from, d.amount, d.weapon,
                       std::max(health, 0));
-          if (health <= 0) {
+          if (a.downed && health <= 115) { // --downed: knocked down again instead of dying (as on a mission)
+            if (!downed) std::printf("[%s] downed\n", a.name.c_str());
+            downed = true, health = 110;
+          } else if (health <= 0) {
             dead_until = now + 5000;
             std::printf("[%s] died; respawning in 5 s\n", a.name.c_str());
           }
