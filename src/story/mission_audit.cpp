@@ -10,6 +10,7 @@
 #include <map>
 #include <set>
 
+#include "core/focus.h"
 #include "core/input.h"
 #include "core/log.h"
 #include "game/native_hooks.h"
@@ -27,9 +28,11 @@ constexpr std::uint32_t kDoesScriptExist = 0x1D1B266B, kRequestScript = 0x6FFE0D
                         kTerminateScripts = 0x72452672, kGetBlipCoords = 0x4C1E75DB, kClearWanted = 0x205622AC,
                         kFadeIn = 0x04D72200, kSetPlayerControl = 0x1A6203EA, kDeleteObject = 0x62FE6290,
                         kDoesObjectExist = 0x6DAB78CD, kClearCutscene = 0x79611458, kSetInvincible = 0x7E9E02E1,
-                        kClearPrints = 0x1D8C324A, kClearHelp = 0x07244253;
+                        kClearPrints = 0x1D8C324A, kClearHelp = 0x07244253, kHasCutsceneFinished = 0x4ECE1AD2,
+                        kConversationOngoing = 0x3CA23254;
 
-constexpr unsigned kNudgeEvery = 12;  // s between teleports to the newest blip
+constexpr unsigned kNudgeEvery = 5;   // s between teleports to the newest blip
+constexpr unsigned kIdleEnd = 20;     // s without a new call: the mission is waiting on us
 constexpr unsigned kGapSeconds = 5;   // between missions
 constexpr unsigned kLoadTimeout = 15; // s
 
@@ -63,6 +66,7 @@ std::vector<std::string> g_list;
 std::size_t g_index = 0;
 enum class Phase { Next, Loading, Running, Gap } g_phase = Phase::Next;
 std::uint32_t g_phase_ms = 0, g_last_nudge_ms = 0;
+std::uint32_t g_last_call_ms = 0; // last hooked call by the mission's scripts
 Report g_rep;
 n::Vector3 g_home{};
 
@@ -74,6 +78,7 @@ void note(const Call& c, std::string detail) {
 void observe(const Call& c) {
   if (!g_active || g_phase != Phase::Running || !g_rep.family.contains(lower(c.script))) return;
   ++g_rep.counts[c.name];
+  g_last_call_ms = GetTickCount();
   const std::string nm = c.name;
   if (nm == "START_NEW_SCRIPT") {
     g_rep.family.insert(lower(c.str(0)));
@@ -218,6 +223,7 @@ void finish(const std::string& outcome, std::uint32_t now) {
 void stop(const char* why) {
   if (g_phase == Phase::Running || g_phase == Phase::Loading) cleanup();
   invoke(kSetInvincible, n::GetPlayerId(), false);
+  focus::keep_running(false);
   g_active = false;
   log::warn("Audit: stopped ({}); {} of {} done this run", why, g_index, g_list.size());
 }
@@ -239,6 +245,7 @@ void tick() {
     if (g_list.empty()) return;
     g_active = true, g_index = 0, g_phase = Phase::Next;
     g_home = n::GetCharCoordinates(me());
+    focus::keep_running(true); // runs unattended in the background (windowed mode)
     invoke(kSetInvincible, n::GetPlayerId(), true); // a mission death would end the run
   }
   if (!g_active) return;
@@ -263,7 +270,7 @@ void tick() {
         const auto id = invoke<std::uint32_t>(kStartNewScript, g_rep.name.c_str(), g_cfg.stack);
         invoke(kMarkScriptNoLongerNeeded, g_rep.name.c_str());
         log::info("Audit: started {} (thread {})", g_rep.name, id);
-        g_phase = Phase::Running, g_phase_ms = now, g_last_nudge_ms = now;
+        g_phase = Phase::Running, g_phase_ms = now, g_last_nudge_ms = now, g_last_call_ms = now;
       } else if (now - g_phase_ms > kLoadTimeout * 1000) {
         g_rep.outcome = "script did not load";
         write_report();
@@ -272,10 +279,15 @@ void tick() {
       }
       break;
     case Phase::Running:
+      // A playing cutscene or conversation is the mission busy, not idle.
+      if ((g_rep.cutscene && !invoke<bool>(kHasCutsceneFinished)) || invoke<bool>(kConversationOngoing))
+        g_last_call_ms = now;
       if (now - g_phase_ms > 2000 && !family_running()) {
         finish("the mission's scripts ended by themselves", now);
       } else if (now - g_phase_ms > g_cfg.seconds * 1000) {
         finish("timed out (stopped by the audit)", now);
+      } else if (now - g_last_call_ms > kIdleEnd * 1000) {
+        finish(std::format("idle for {} s (stopped by the audit)", kIdleEnd), now);
       } else if (now - g_last_nudge_ms > kNudgeEvery * 1000 && !g_rep.blips.empty()) {
         g_last_nudge_ms = now;
         const n::Blip b = g_rep.blips.back();

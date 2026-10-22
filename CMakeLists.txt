@@ -83,6 +83,7 @@ add_library(iv-coop SHARED
   src/core/iat.cpp
   src/core/instance.cpp
   src/core/crash.cpp
+  src/core/focus.cpp
   src/game/pattern.cpp
   src/game/addresses.cpp
   src/game/natives.cpp
