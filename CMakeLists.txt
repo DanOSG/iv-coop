@@ -93,6 +93,7 @@ add_library(iv-coop SHARED
   src/story/call_log.cpp
   src/story/story_sync.cpp
   src/story/world_state.cpp
+  src/story/mission_audit.cpp
   src/sync/ghost.cpp
   src/sync/local_player.cpp
   src/sync/puppet.cpp

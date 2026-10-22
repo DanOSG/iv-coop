@@ -16,6 +16,7 @@
 #include "game/native_hooks.h"
 #include "game/netprobe.h"
 #include "story/call_log.h"
+#include "story/mission_audit.h"
 #include "story/story_sync.h"
 #include "game/script.h"
 #include "render/d3d9_hook.h"
@@ -51,6 +52,8 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
   if (cfg.story_log_calls) story::register_call_logging();
   story::configure(cfg.story);
   story::register_hooks();
+  story::audit::configure(cfg.audit);
+  story::audit::register_hooks();
   native_hooks::set_trace(cfg.story_trace_calls);
   // Natives are registered by the time any script runs. Hook them before the scripts'
   // first update, not in our first tick (which runs after them): a game that loads a
@@ -63,6 +66,7 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
     ghost::tick();
     coop::tick();
     netprobe::tick();
+    story::audit::tick();
   });
 }
 

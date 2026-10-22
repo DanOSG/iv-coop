@@ -111,6 +111,10 @@ Config load_config(const std::filesystem::path& ini) {
     c.story.local_scripts = split_csv(read_str(p, L"Story", L"LocalScripts", def));
   }
 
+  c.audit.missions = split_csv(read_str(p, L"Audit", L"Missions", ""));
+  c.audit.seconds = static_cast<unsigned>(read_int(p, L"Audit", L"SecondsPerMission", static_cast<int>(c.audit.seconds)));
+  c.audit.stack = static_cast<unsigned>(read_int(p, L"Audit", L"StackSize", static_cast<int>(c.audit.stack)));
+
   auto& np = c.netprobe;
   np.enabled = read_int(p, L"NetProbe", L"Enabled", np.enabled) != 0;
   const auto args = split_csv(read_str(p, L"NetProbe", L"HostArgs", "16,0,4,0,0,0"));

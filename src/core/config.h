@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "game/netprobe.h"
+#include "story/mission_audit.h"
 #include "story/story_sync.h"
 #include "sync/ghost.h"
 #include "sync/remote_players.h"
@@ -24,6 +25,7 @@ struct Config {
   bool story_log_calls = true;   // M6a diagnostics: log story natives scripts call
   bool story_trace_calls = false; // also log each hooked call before it runs (needs [Log] Debug=1)
   story::Settings story;
+  story::audit::Settings audit;
 };
 
 // Reads iv-coop.ini next to the plugin, writing defaults for any missing keys.
