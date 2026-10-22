@@ -34,10 +34,21 @@ Free-roam is not a separate mode. It's simply the campaign between missions.
 - **Peer-hosted only: no dedicated servers, ever.** A session always lives inside the host player's game. To get
   through home routers without manual setup:
   1. **UPnP/NAT-PMP** port mapping when hosting: automatic and serverless, and it works on most home routers.
-  2. **Steam join:** invites and "join game" through Steam friends, using Steam's networking with its free relay
-     as the fallback for strict NATs. No server of ours is involved. It still needs checking which Steamworks
-     networking interfaces the game's `steam_api.dll` exposes under app 12210.
+  2. **Steam (app 12210):** the game itself runs Steam as GTA IV in our process. Its `steam_api.dll` exports
+     `ISteamMatchmaking` (lobbies) and the legacy relayed P2P `ISteamNetworking` (`SendP2PPacket`); newer
+     interfaces may be reachable from the Steam client via `SteamInternal_FindOrCreateUserInterface`. The host
+     creates a lobby tagged with the session password; joiners find it by password (worldwide, no IPs),
+     friends can also join from the Steam overlay, and traffic goes through Valve's relays (no NAT trouble).
+     Steam copies only; the others use 1 and 3. Still to verify in game that Steam is up in-process.
   3. Direct IP + manual port forward always remains as a fallback.
+- **Menu: the phone.** The phone's existing **Multiplayer** item opens co-op instead of Rockstar's online modes
+  (no public/private settings). Its screen (spcellphonenetwork, screen 1047) lists match types through game-text
+  keys; the mod overrides those labels (e.g. `CPGO_MATCHT_0` "Host Co-op", `CPGO_MATCHT_1` "Join Co-op", plus
+  "Leave Co-op" while in a session) by hooking the engine's text lookup, and intercepts the selection
+  (`SET_CELLPHONE_RANKED` / the next-screen switch) so Rockstar's network flow never starts. Choosing Host or Join
+  then opens the phone's own **dial pad**, and the 6 digits typed are the **session password** (the same digits on
+  both sides find the Steam lobby). The phone scripts compare dialled numbers with `COMPARE_STRING`, which our
+  native hooks already see.
 - **Remote players** are real player peds in spare player slots (the engine still has the original MP slot code).
   They're driven by the remote player's replicated pad state plus position/velocity correction, so animation,
   aiming, cover and vehicle entry come from the game itself. Fallback: an AI ped with events blocked.
