@@ -175,7 +175,8 @@ void write_report() {
   const Report& r = g_rep;
   std::ofstream out(audit_dir() / (r.name + ".md"));
   out << "# " << r.name << "\n\n";
-  out << std::format("- Outcome: {}\n- Watched: {} s, {} teleports to blips\n", r.outcome, r.seconds, r.nudges);
+  out << std::format("- Outcome: {}\n- Watched: {} s, {} nudges to blips, {} cutscenes skipped\n", r.outcome,
+                     r.seconds, r.nudges, r.skipped);
   std::string fam;
   for (const auto& f : r.family) fam += (fam.empty() ? "" : ", ") + f;
   out << "- Scripts: " << fam << "\n\n## Calls\n\n| Native | Calls |\n|---|---|\n";
