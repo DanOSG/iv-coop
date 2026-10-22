@@ -408,9 +408,15 @@ int main(int argc, char** argv) {
 
     const net::SessionStatus st = session.status();
     const bool active = st.mode == net::Mode::Joined || st.mode == net::Mode::Hosting;
-    if (active && !was_joined) joined_at = now;
+    // --leave-after counts from the host's first state, not the connect: a host whose game
+    // is paused (window in the background) accepts the connection but processes nothing.
+    if (active && !was_joined) joined_at = 0;
+    if (active && !joined_at && received[net::kHostId] > 0) {
+      joined_at = now;
+      if (a.leave_after > 0) std::printf("[%s] host is live; leaving in %d s\n", a.name.c_str(), a.leave_after);
+    }
     if (active) was_joined = true;
-    if (active && a.leave_after > 0 && now - joined_at >= static_cast<std::uint32_t>(a.leave_after) * 1000) {
+    if (active && joined_at && a.leave_after > 0 && now - joined_at >= static_cast<std::uint32_t>(a.leave_after) * 1000) {
       std::printf("[%s] leaving after %d s, as asked\n", a.name.c_str(), a.leave_after);
       break;
     }
