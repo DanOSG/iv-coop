@@ -20,6 +20,7 @@
 #include "sync/local_player.h"
 #include "sync/player_state.h"
 #include "sync/puppet.h"
+#include "story/cutscene.h"
 #include "story/dialogue.h"
 #include "story/story_sync.h"
 #include "sync/entity_sync.h"
@@ -376,10 +377,46 @@ void handle_phone() {
   }
 }
 
+// Joiner during a replicated cutscene: IV casts the local player as the protagonist, so
+// switch to the protagonist's model for it, and put the player back where they were.
+n::Vector3 g_cutscene_return{};
+bool cutscene_begin() {
+  const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
+  if (!me) return true;
+  static bool saved = false;
+  if (!saved) g_cutscene_return = n::GetCharCoordinates(me), saved = true;
+  if (!swap_player_model(0x6F0783F5)) return false; // "player": streaming, try next frame
+  saved = false;
+  return true;
+}
+bool cutscene_end() {
+  const std::uint32_t model = g_client_mode && !g_restore_pending ? n::GetHashKey(g_cfg.joiner_model.c_str())
+                                                                    : g_original_model;
+  if (model && !swap_player_model(model)) return false;
+  if (const n::Ped me = n::GetPlayerChar(n::GetPlayerId()); me && (g_cutscene_return.x || g_cutscene_return.y))
+    n::SetCharCoordinatesNoOffset(me, g_cutscene_return);
+  return true;
+}
+
+// Other players' puppets stay out of shot while a cutscene plays here.
+bool g_puppets_hidden = false;
+void hide_puppets_in_cutscenes() {
+  const bool hide = story::cutscene::playing();
+  if (hide == g_puppets_hidden) return;
+  g_puppets_hidden = hide;
+  for (auto& [id, r] : g_remotes)
+    if (const n::Ped p = r.puppet.ped(); p && n::DoesCharExist(p)) n::SetCharVisible(p, !hide);
+}
+
+void configure_cutscenes() {
+  story::cutscene::set_callbacks({cutscene_begin, cutscene_end});
+}
+
 } // namespace
 
 void configure(const Settings& s) {
   g_cfg = s;
+  configure_cutscenes();
   story::dialogue::set_host_ped_provider([] {
     const auto it = g_remotes.find(net::kHostId);
     return it != g_remotes.end() ? it->second.puppet.ped() : 0;
@@ -392,6 +429,8 @@ void configure(const Settings& s) {
 void tick() {
   handle_hotkeys();
   handle_phone();
+  story::cutscene::client_tick(); // also after leaving, to finish a restore
+  hide_puppets_in_cutscenes();
   net::Session& net = session();
 
   for (const auto& e : net.drain_events()) {
