@@ -52,10 +52,14 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
   story::configure(cfg.story);
   story::register_hooks();
   native_hooks::set_trace(cfg.story_trace_calls);
-  script::on_tick([] {
-    // Natives are registered by the time any script runs, so hook them on the first tick.
+  // Natives are registered by the time any script runs. Hook them before the scripts'
+  // first update, not in our first tick (which runs after them): a game that loads a
+  // save straight away has "main" re-apply the world in that very first update.
+  script::on_frame_start([] {
     static bool hooked = false;
     if (!hooked) hooked = native_hooks::install();
+  });
+  script::on_tick([] {
     ghost::tick();
     coop::tick();
     netprobe::tick();

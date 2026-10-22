@@ -154,11 +154,8 @@ void register_call_logging() {
      [](const Call& c) { report(c, std::to_string(c.arg<int>(0))); });
   on(0x416413F6, "ADD_LINE_TO_SCRIPTED_CONVERSATION",
      [](const Call& c) { report(c, std::format("{}, {}, {}", c.arg<int>(0), c.arg<int>(1), c.arg<int>(2))); });
-  for (auto [hash, name] : {std::pair{0xFC2EE353u, "START_SETTING_UP_CONVERSATION"},
-                            {0xBADE4D05u, "FINISH_SETTING_UP_CONVERSATION"},
-                            {0x4D1C3395u, "FINISH_SETTING_UP_CONVERSATION_NO_SUBTITLES"},
-                            {0x07E4CB1Eu, "START_SCRIPTED_CONVERSATION"}})
-    on(hash, name, [](const Call& c) { report(c, std::format("{}, {}", c.arg<int>(0), c.arg<int>(1))); });
+  // (START/FINISH_SETTING_UP_CONVERSATION and START_SCRIPTED_CONVERSATION have no handler
+  // in the PC build.)
   on(0x57DB70CE, "ABORT_SCRIPTED_CONVERSATION", [](const Call& c) { report(c, std::to_string(c.arg<int>(0))); });
   on(0x5CF149C8, "SAY_AMBIENT_SPEECH", [](const Call& c) {
     report(c, std::format("ped {}, {}, {}, {}, {}", c.arg<int>(0), str(c, 1), c.arg<int>(2), c.arg<int>(3),

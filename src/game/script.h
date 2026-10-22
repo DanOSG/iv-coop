@@ -20,6 +20,10 @@ bool install();
 // natives (including entity creation) are safe. Only one callback is supported.
 void on_tick(std::function<void()> fn);
 
+// Called once per frame on the game thread *before* any script runs (not in a script
+// context: don't call natives). For setup that must precede the scripts, e.g. hooking.
+void on_frame_start(std::function<void()> fn);
+
 // Scripts whose context our tick may borrow, best first (default: "main"). The best one
 // running is used; if none is, any running script is borrowed until a preferred one runs.
 void set_host_scripts(std::vector<std::string> preferred);

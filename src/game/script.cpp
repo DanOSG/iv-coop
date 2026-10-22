@@ -121,7 +121,10 @@ void run_tick(game::scrThread* host) {
 }
 
 // Once per frame on the game thread, after every script has had its turn.
+std::function<void()> g_frame_start;
+
 bool __cdecl hk_UpdateAll(std::int32_t budget) {
+  if (g_frame_start) g_frame_start();
   const bool result = o_UpdateAll(budget);
   crash::beat_tick();
   ++g_frames;
@@ -196,6 +199,8 @@ std::vector<ThreadInfo> threads() {
 }
 
 bool in_own_tick() { return g_in_own_tick; }
+
+void on_frame_start(std::function<void()> fn) { g_frame_start = std::move(fn); }
 
 std::string current_script_name() {
   const game::scrThread* t = game::g_addr.current_thread ? *game::g_addr.current_thread : nullptr;
