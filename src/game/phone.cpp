@@ -9,6 +9,7 @@
 #include <cstring>
 #include <format>
 #include <map>
+#include <span>
 #include <mutex>
 
 #include "core/log.h"
@@ -54,7 +55,7 @@ constexpr int kSlotMenuType = 1, kSlotMemory = 3, kSlotMemoryFlag = 4, kSlotWind
               kSlotVisible = 13, kSlotScrolls = 14, kSlotScrollSize = 15, kSlotSelected = 16, kSlotRows = 39,
               kRowSlots = 31, kMaxRows = 6;
 constexpr int kG91Rows = 500, kG91Style = 40, kG91Speed = 492; // g_U91 byte offsets used by sub_10177
-constexpr std::int32_t kIdMultiplayer = 2000, kIdHost = 2001, kIdJoin = 2002, kIdLeave = 2003;
+constexpr std::int32_t kIdMultiplayer = 2000, kIdHost = 2001, kIdJoin = 2002, kIdLeave = 2003, kIdGoToHost = 2004;
 // Keypad state (spcellphonemain statics): l_U1090 digits typed (no more are taken at 10),
 // l_U1088 the cursor (0 = Call). When a number is full the game moves the cursor to Call.
 constexpr int kSlotKeypadCursor = 1088, kSlotDigits = 1090, kKeypadFull = 10;
@@ -135,7 +136,7 @@ const wchar_t* __fastcall text_get_detour(void* self, void* /*edx*/, const char*
   return g_text_get_orig(self, key);
 }
 
-bool g_in_session = false;
+Role g_role = Role::None;
 bool g_coop_menu = false;                 // the main menu currently shows our items
 std::optional<Action> g_awaiting;         // Host/Join chosen; waiting for the password
 std::optional<Request> g_request;         // ready for poll()
@@ -207,16 +208,16 @@ void fix_main_menu(std::int32_t* st) {
   const std::int32_t count = st[kSlotCount], cap = st[kSlotArray];
   if (count <= 0 || cap <= 0 || cap > 64) return;
   if (g_coop_menu) {
-    const std::int32_t first = g_in_session ? kIdLeave : kIdHost;
-    if (st[kSlotArray + 1] == first && count == (g_in_session ? 1 : 2)) return;
-    if (g_in_session) {
-      write_item(st, 0, kIdLeave, "IVC_LEAVE");
-      st[kSlotCount] = 1;
-    } else {
-      write_item(st, 0, kIdHost, "IVC_HOST");
-      write_item(st, 1, kIdJoin, "IVC_JOIN");
-      st[kSlotCount] = 2;
-    }
+    struct Item { std::int32_t id; const char* key; };
+    static const Item kIdle[] = {{kIdHost, "IVC_HOST"}, {kIdJoin, "IVC_JOIN"}};
+    static const Item kHosting[] = {{kIdLeave, "IVC_LEAVE"}};
+    static const Item kJoined[] = {{kIdGoToHost, "IVC_GOTOHOST"}, {kIdLeave, "IVC_LEAVE"}};
+    const std::span<const Item> items = g_role == Role::Joiner ? std::span<const Item>(kJoined)
+                                        : g_role == Role::Host ? std::span<const Item>(kHosting)
+                                                               : std::span<const Item>(kIdle);
+    if (count == static_cast<std::int32_t>(items.size()) && st[kSlotArray + 1] == items[0].id) return;
+    for (std::size_t i = 0; i < items.size(); ++i) write_item(st, static_cast<std::int32_t>(i), items[i].id, items[i].key);
+    st[kSlotCount] = static_cast<std::int32_t>(items.size());
     rebuild_display(st);
     return;
   }
@@ -248,6 +249,7 @@ bool install() {
   set_label("IVC_HOST", "Host Co-op");
   set_label("IVC_JOIN", "Join Co-op");
   set_label("IVC_LEAVE", "Leave Co-op");
+  set_label("IVC_GOTOHOST", "Go to Host");
   if (!hook(kTextGet, reinterpret_cast<void*>(&text_get_detour), reinterpret_cast<void**>(&g_text_get_orig),
             "CText::Get") ||
       !hook(kTextGetByHash, reinterpret_cast<void*>(&get_by_hash_detour),
@@ -317,8 +319,9 @@ void tick() {
       log::info("Phone: {} chosen; waiting for the password", s == kIdHost ? "Host" : "Join");
       break;
     case kIdLeave:
+    case kIdGoToHost:
       g_coop_menu = false;
-      g_request = Request{Action::Leave, {}};
+      g_request = Request{s == kIdLeave ? Action::Leave : Action::GoToHost, {}};
       switch_screen(kScreenClose);
       break;
     case kScreenKeypad:
@@ -353,7 +356,7 @@ void tick() {
 
 std::optional<Request> poll() { return std::exchange(g_request, std::nullopt); }
 
-void set_in_session(bool in) { g_in_session = in; }
+void set_role(Role role) { g_role = role; }
 
 void notify(const std::string& text) { show_help(text, false); }
 

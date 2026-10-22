@@ -275,6 +275,31 @@ std::string g_password; // of the session we host / are joining
 // (lobby data takes a moment to be published; an immediate search found nothing).
 std::vector<std::uint32_t> g_self_checks;
 
+// Joiners aren't pulled along by the host's mission teleports; this brings them over:
+// into a free passenger seat if the host is in a vehicle, else next to them.
+void go_to_host() {
+  const auto it = g_remotes.find(net::kHostId);
+  const n::Ped host = it != g_remotes.end() ? it->second.puppet.ped() : 0;
+  const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
+  if (!host || !me || !n::DoesCharExist(host)) {
+    phone::notify("Can't find the host yet.");
+    return;
+  }
+  if (n::IsCharInAnyCar(me)) n::WarpCharFromCarToCoord(me, n::GetCharCoordinates(me));
+  if (n::IsCharInAnyCar(host)) {
+    const n::Vehicle car = n::StoreCarCharIsInNoSave(host);
+    const std::uint32_t seats = car ? n::GetMaximumNumberOfPassengers(car) : 0;
+    for (std::uint32_t seat = 0; seat < seats && seat < 8; ++seat)
+      if (n::IsCarPassengerSeatFree(car, seat)) {
+        n::WarpCharIntoCarAsPassenger(me, car, seat);
+        log::info("Go to host: passenger seat {}", seat);
+        return;
+      }
+  }
+  n::SetCharCoordinatesNoOffset(me, n::GetOffsetFromCharInWorldCoords(host, {1.5f, -1.5f, 0.0f}));
+  log::info("Go to host: next to them");
+}
+
 void handle_phone() {
   // No name set in the ini: use the Steam name (once Steam is up).
   static bool named = false;
@@ -287,7 +312,9 @@ void handle_phone() {
   }
   net::Session& net = session();
   const net::Mode mode = net.status().mode;
-  phone::set_in_session(mode != net::Mode::Idle);
+  phone::set_role(mode == net::Mode::Hosting  ? phone::Role::Host
+                  : mode == net::Mode::Idle   ? phone::Role::None
+                                              : phone::Role::Joiner);
   steam::tick();
   steam_relay::tick();
 
@@ -327,6 +354,9 @@ void handle_phone() {
         steam_relay::stop();
         steam::leave_lobby();
         phone::notify("Left co-op.");
+        break;
+      case phone::Action::GoToHost:
+        go_to_host();
         break;
     }
   }
