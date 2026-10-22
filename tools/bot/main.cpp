@@ -262,7 +262,7 @@ int main(int argc, char** argv) {
       if (g.last_arrival) g.max_arrival_gap = std::max(g.max_arrival_gap, u.arrival_ms - g.last_arrival);
       if (g.last_stamp) g.max_stamp_gap = std::max(g.max_stamp_gap, u.state.time_ms - g.last_stamp);
       g.last_arrival = u.arrival_ms, g.last_stamp = u.state.time_ms;
-      if (u.id == net::kHostId && (a.follow || !have_center)) {
+      if (u.id == net::kHostId && ((a.follow && !downed) || !have_center)) {
         cx = u.state.x, cy = u.state.y, cz = u.state.z;
         if (!have_center) std::printf("[%s] host is at %.1f %.1f %.1f, circling\n", a.name.c_str(), cx, cy, cz);
         have_center = true;

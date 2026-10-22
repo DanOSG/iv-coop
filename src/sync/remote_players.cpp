@@ -42,6 +42,7 @@ struct Remote {
   std::uint8_t wanted = 0;
   std::uint32_t vehicle_id = 0; // networked vehicle they're in (sync::kNoVehicle on foot)
   bool downed = false;
+  downed::InjuredPose pose; // their puppet lying hurt while they're down
 };
 
 Settings g_cfg;
@@ -671,19 +672,26 @@ void tick() {
       r.puppet.set_model(smp->model); // their real model (host: Niko); 0 -> configured fallback
       if (r.puppet.ensure(at)) {
         r.puppet.apply_outfit(*smp);
+        const bool down = (smp->flags & sync::PlayerState::kDowned) != 0;
         const n::Vehicle veh = g_vehicles.handle_for(smp->vehicle_id);
         if (veh) {
+          r.pose.up(r.puppet.ped());
           r.puppet.sit_in(veh, smp->seat);
         } else {
           // On foot, or their car hasn't arrived here yet: follow their position on foot.
           if (r.puppet.in_vehicle()) r.puppet.leave_vehicle(at);
-          r.puppet.drive(*smp, now);
+          if (down) {
+            r.pose.update(r.puppet.ped(), now); // fall, then lie hurt where they are
+          } else {
+            r.pose.up(r.puppet.ped());
+            r.puppet.drive(*smp, now);
+          }
         }
-        r.puppet.apply_combat(*smp, now);
+        if (!down || veh) r.puppet.apply_combat(*smp, now);
         r.health = smp->health, r.weapon = smp->weapon, r.dead = (smp->flags & sync::PlayerState::kDead) != 0;
         r.wanted = smp->wanted;
         r.vehicle_id = smp->vehicle_id;
-        r.downed = (smp->flags & sync::PlayerState::kDowned) != 0;
+        r.downed = down;
         r.puppet.set_downed_marker(r.downed);
       }
       if (local) dist = std::hypot(smp->x - local->x, smp->y - local->y, smp->z - local->z);

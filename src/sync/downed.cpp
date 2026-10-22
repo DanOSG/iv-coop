@@ -21,11 +21,15 @@ constexpr float kReviveRange = 1.8f;
 constexpr int kReviveKey = 'E';
 
 constexpr std::uint32_t kRequestAnims = 0x65F874DE, kHaveAnimsLoaded = 0x1D3F681D, kTaskPlayAnim = 0x28EE78D8,
-                        kSetAnimGroup = 0x4CD43E46, kGetMissionFlag = 0x2BC64736;
-constexpr const char* kLimpGroup = "move_injured_lower";
+                        kGetMissionFlag = 0x2BC64736;
 // The engine medics' CPR clips (names from the exe), else the paramedic mission's.
 struct Clip { const char* dict; const char* anim; };
 constexpr Clip kCprClips[] = {{"medic", "Medic_CPR_LOOP"}, {"Missemergencycall", "Medic_health_inject"}};
+
+constexpr std::uint32_t kRagdoll = 0x1A0F56C5, kIsRagdoll = 0x3E251ADE, kPlayAnimNonInterruptable = 0x52202E76,
+                        kSetPlayerControl = 0x1A6203EA;
+constexpr const char* kInjuredDict = "missbrian_3";
+constexpr const char* kInjuredAnim = "Injured_Idle";
 
 bool g_on_mission = false;     // host: our own flag; joiner: the host's
 bool g_sent_flag = false;      // host: last mission flag broadcast
@@ -57,26 +61,30 @@ void prompt(const std::string& text) {
 
 bool held(int vk) { return input::game_focused() && (GetAsyncKeyState(vk) & 0x8000); }
 
+InjuredPose g_pose; // our own player while downed
+
 void go_down(n::Ped me) {
   g_downed = true;
   g_downed_since = GetTickCount();
   n::SetCharHealth(me, kDownedHealth);
   n::SetCharInvincible(me, true);
-  invoke(kRequestAnims, kLimpGroup);
-  if (invoke<bool>(kHaveAnimsLoaded, kLimpGroup)) invoke(kSetAnimGroup, me, kLimpGroup);
+  invoke(kSetPlayerControl, n::GetPlayerId(), false); // lying: no moving or shooting
   log::info("Downed: waiting for a partner");
 }
 
 void get_up(n::Ped me, std::uint32_t health) {
   g_downed = false;
+  g_pose.up(me);
   n::SetCharInvincible(me, false);
   n::SetCharHealth(me, health);
-  invoke(kSetAnimGroup, me, "move_player");
+  invoke(kSetPlayerControl, n::GetPlayerId(), true);
   prompt("");
 }
 
 void die(n::Ped me) {
   g_downed = false;
+  g_pose.up(me);
+  invoke(kSetPlayerControl, n::GetPlayerId(), true);
   n::SetCharInvincible(me, false);
   n::SetCharHealth(me, 0);
   prompt("");
@@ -96,6 +104,39 @@ void stop_reviving(n::Ped me) {
 }
 
 } // namespace
+
+void InjuredPose::update(n::Ped ped, std::uint32_t now) {
+  if (!ped || !n::DoesCharExist(ped)) return;
+  switch (state_) {
+    case State::Standing:
+      n::ClearCharTasks(ped);
+      invoke(kRagdoll, ped, 0, 2500, 1, 1, 1, 0); // fall where they stand
+      invoke(kRequestAnims, kInjuredDict);
+      state_ = State::Falling, since_ = now;
+      break;
+    case State::Falling:
+      invoke(kRequestAnims, kInjuredDict);
+      if (now - since_ < 1500 || (invoke<bool>(kIsRagdoll, ped) && now - since_ < 6000)) break;
+      if (!invoke<bool>(kHaveAnimsLoaded, kInjuredDict)) break;
+      invoke(kPlayAnimNonInterruptable, ped, kInjuredAnim, kInjuredDict, 8.0f, 1, 0, 0, 0, -2);
+      state_ = State::Lying, since_ = now;
+      break;
+    case State::Lying:
+      // Re-assert now and then (an impact can knock the ped out of the loop).
+      if (now - since_ > 4000) {
+        since_ = now;
+        if (!invoke<bool>(kIsRagdoll, ped))
+          invoke(kPlayAnimNonInterruptable, ped, kInjuredAnim, kInjuredDict, 8.0f, 1, 0, 0, 0, -2);
+      }
+      break;
+  }
+}
+
+void InjuredPose::up(n::Ped ped) {
+  if (state_ == State::Standing) return;
+  state_ = State::Standing;
+  if (ped && n::DoesCharExist(ped)) n::ClearCharTasks(ped);
+}
 
 bool is_msg(std::span<const std::uint8_t> d) {
   return !d.empty() && d[0] >= static_cast<std::uint8_t>(Msg::MissionFlag) &&
@@ -159,6 +200,7 @@ void tick(const Frame& f, net::Session& net) {
       die(me);
     } else {
       n::SetCharHealth(me, kDownedHealth);
+      g_pose.update(me, now);
       const DWORD left = f.hosting ? 0 : (kBleedOutMs - (now - g_downed_since)) / 1000;
       prompt(f.hosting ? "You're down! A partner can revive you." : std::format("You're down! A partner can revive you ({} s).", left / 10 * 10 + 10));
     }
