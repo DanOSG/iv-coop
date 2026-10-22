@@ -5,7 +5,15 @@
 #include <memory>
 #include <mutex>
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
+#include <format>
+#include <string>
+
 #include "core/input.h"
+#include "game/phone.h"
+#include "net/steam.h"
 #include "core/log.h"
 #include "game/script.h"
 #include "sync/local_player.h"
@@ -234,6 +242,110 @@ void handle_hotkeys() {
   }
 }
 
+// This PC's LAN IPv4 (first non-loopback), for the lobby's address until Steam relay
+// carries the traffic; falls back to the configured bind address.
+std::string local_ipv4() {
+  char host[256] = {};
+  if (gethostname(host, sizeof(host)) != 0) return g_cfg.bind_address;
+  addrinfo hints{}, *res = nullptr;
+  hints.ai_family = AF_INET;
+  if (getaddrinfo(host, nullptr, &hints, &res) != 0) return g_cfg.bind_address;
+  std::string out = g_cfg.bind_address;
+  for (addrinfo* a = res; a; a = a->ai_next) {
+    char buf[INET_ADDRSTRLEN] = {};
+    inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in*>(a->ai_addr)->sin_addr, buf, sizeof(buf));
+    if (std::string(buf).rfind("127.", 0) != 0) {
+      out = buf;
+      break;
+    }
+  }
+  freeaddrinfo(res);
+  return out;
+}
+
+// The phone's Multiplayer menu (game/phone) and Steam lobbies (net/steam).
+std::string g_password; // of the session we host / are joining
+
+void handle_phone() {
+  net::Session& net = session();
+  const net::Mode mode = net.status().mode;
+  phone::set_in_session(mode != net::Mode::Idle);
+  steam::tick();
+
+  if (auto req = phone::poll()) {
+    switch (req->action) {
+      case phone::Action::Host:
+        if (mode != net::Mode::Idle) break;
+        if (!net.host(g_cfg.port, g_cfg.name, g_cfg.bind_address)) {
+          phone::notify("Couldn't host: " + net.status().last_error);
+          break;
+        }
+        g_password = req->password;
+        log::info("Hosting on UDP {} as '{}' (phone, password {})", g_cfg.port, g_cfg.name, g_password);
+        if (steam::available()) {
+          steam::host_lobby(g_password, std::format("{}:{}", local_ipv4(), g_cfg.port));
+          phone::notify("Starting co-op...");
+        } else {
+          phone::notify("Hosting co-op (Steam unavailable: friends join by address).");
+        }
+        break;
+      case phone::Action::Join:
+        if (mode != net::Mode::Idle) break;
+        if (!steam::available()) {
+          phone::notify("Joining by password needs Steam.");
+          break;
+        }
+        g_password = req->password;
+        steam::find_lobby(g_password);
+        phone::notify("Looking for a co-op game with password " + g_password + "...");
+        break;
+      case phone::Action::Leave:
+        if (mode != net::Mode::Idle) {
+          log::info("Leaving session ({}, phone)", net::to_string(mode));
+          net.leave();
+        }
+        steam::leave_lobby();
+        phone::notify("Left co-op.");
+        break;
+    }
+  }
+
+  while (auto r = steam::poll()) {
+    switch (r->kind) {
+      case steam::LobbyResult::Created:
+        phone::notify("Co-op ready. Friends join with password " + g_password + ".");
+        steam::find_lobby(g_password); // self-check: the lobby can be found by its password
+        break;
+      case steam::LobbyResult::CreateFailed:
+        phone::notify("Co-op is hosting, but Steam couldn't list it.");
+        break;
+      case steam::LobbyResult::Found: {
+        if (net.status().mode == net::Mode::Hosting) {
+          log::info("Steam self-check: our lobby is findable by its password");
+          break;
+        }
+        const auto colon = r->address.rfind(':');
+        const std::string ip = r->address.substr(0, colon);
+        const auto port = colon == std::string::npos ? g_cfg.port
+                                                     : static_cast<std::uint16_t>(std::stoi(r->address.substr(colon + 1)));
+        if (net.join(ip, port, g_cfg.name)) {
+          log::info("Joining {}:{} as '{}' (found by password)", ip, port, g_cfg.name);
+          phone::notify("Joining " + r->host_name + "'s game...");
+        } else {
+          phone::notify("Couldn't join: " + net.status().last_error);
+        }
+        break;
+      }
+      case steam::LobbyResult::NotFound:
+        if (net.status().mode == net::Mode::Hosting)
+          log::warn("Steam self-check: our own lobby wasn't found by its password");
+        else
+          phone::notify("No co-op game found with password " + g_password + ".");
+        break;
+    }
+  }
+}
+
 } // namespace
 
 void configure(const Settings& s) {
@@ -245,6 +357,7 @@ void configure(const Settings& s) {
 
 void tick() {
   handle_hotkeys();
+  handle_phone();
   net::Session& net = session();
 
   for (const auto& e : net.drain_events()) {
@@ -274,6 +387,7 @@ void tick() {
         g_vehicles.clear();
         g_entities.clear(g_was_host);
         story::clear();
+        steam::leave_lobby();
         if (g_want_client_mode || g_client_mode) {
           script::set_suppress_predicate(nullptr); // our story scripts resume where they were
           g_want_client_mode = false;

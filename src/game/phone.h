@@ -1,29 +1,48 @@
 #pragma once
 // The in-game phone as the co-op menu.
 //
-// The phone scripts (spcellphone*) keep their state in script global 91: field 0 is the
-// current screen (1001 home, 1047 the Multiplayer menu, 1052 Online/LAN, ...), set by
-// the scripts' screen-switch helper; the number being dialled is a string at byte 128.
-// Menu labels are game-text keys, looked up through the engine's CText::Get, which we
-// hook to rename items (e.g. the Multiplayer menu's match types become Host/Join Co-op).
-// Engine addresses are static VAs for GTAIV.exe 1.2.0.59.
+// CE removed the phone's Multiplayer item; we put one back. The phone scripts keep their
+// state in script global 91 (field 0 the current screen, set by each script's screen-
+// switch helper; the number being dialled is a string at byte 128). The main menu
+// (screen 1011, script spcellphonemain) is a list in that script's statics; selecting an
+// item switches the phone to the screen whose id is the item's id. So:
+//   - on 1011 we append "Multiplayer" (id 2000);
+//   - selecting it lands on screen 2000: we send the phone back to 1011 with our own items
+//     (Host Co-op 2001 / Join Co-op 2002, or Leave Co-op 2003 while in a session);
+//   - Host/Join return to the home screen with a hint to type a 6-digit password and
+//     press Call; when the phone starts calling (screen 1005) the digits are the password
+//     (the call to an unknown number then hangs up by itself).
+// Labels are game-text keys; CText::Get is hooked to supply ours. Engine addresses and
+// script variable slots are for GTAIV.exe 1.2.0.59 (CE); see phone.cpp.
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace ivc::phone {
 
+enum class Action { Host, Join, Leave };
+struct Request {
+  Action action;
+  std::string password; // 6 digits (Host/Join)
+};
+
 // Hooks the text lookup. Once, at startup.
 bool install();
-// Game thread, every frame: probe logging of screen and dialled-number changes.
+// Game thread, script context, every frame.
 void tick();
+// The player's latest menu choice, once complete (password typed for Host/Join).
+std::optional<Request> poll();
+// Whether a session is running: the menu shows Leave instead of Host/Join.
+void set_in_session(bool in);
+// A short message in the help box (e.g. "Hosting co-op, password 123456").
+void notify(const std::string& text);
 
-// Script global 91 (the phone state); empty/negative when globals aren't available.
+// Script global 91 (the phone state); -1/empty when globals aren't available.
 std::int32_t screen();
 std::string dialled();
 
-// Text override: returned instead of the game's string for `key` (UTF-8, ASCII in practice).
+// Text override: returned instead of the game's string for `key` (ASCII).
 void set_label(const std::string& key, const std::string& text);
-void clear_label(const std::string& key);
 
 } // namespace ivc::phone

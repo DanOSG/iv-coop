@@ -5,6 +5,7 @@
 // through Valve's relays.
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace ivc::steam {
@@ -16,5 +17,23 @@ bool available();
 
 std::string persona_name();
 std::uint64_t my_id();
+
+// --- Lobbies: a session is found by its password. All game thread; results via poll().
+// Host: create a public lobby (it is only findable by its password) carrying the password,
+// the host's address and name.
+void host_lobby(const std::string& password, const std::string& address);
+// Join: search worldwide for a lobby with this password.
+void find_lobby(const std::string& password);
+void leave_lobby();
+
+struct LobbyResult {
+  enum Kind { Created, CreateFailed, Found, NotFound } kind;
+  std::uint64_t lobby = 0;
+  std::string address;   // host's address (Found)
+  std::string host_name; // host's Steam name (Found)
+};
+// Every frame: advances pending Steam calls.
+void tick();
+std::optional<LobbyResult> poll();
 
 } // namespace ivc::steam
