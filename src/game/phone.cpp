@@ -4,6 +4,7 @@
 
 #include <MinHook.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstring>
 #include <format>
@@ -36,6 +37,16 @@ constexpr std::int32_t kScreenHome = 1001, kScreenMainMenu = 1011, kScreenCallin
 // text key, +68 enabled). l_U958 is the "screen changed" flag the script's own switch
 // helper (sub_3706) sets alongside g_U91._fU0.
 constexpr int kSlotCount = 2, kSlotArray = 226, kItemSlots = 18, kSlotScreenChanged = 958;
+// l_U1 display state (sub_10177 fills it from the items when the screen is built):
+// _fU0 menu type (slot 1), _fU8 remembered index (3), _fU12 its flag (4), _fU16[] visible
+// window (size at 5, rows 6..), _fU44 cursor row (12), _fU48 visible count (13), _fU52
+// scrolls (14), _fU56 scrollbar size (15, float), _fU60 selected id (16). l_U39 is the row
+// array: size at slot 39, row i at 40 + 31*i (+0 valid, +4 id, +8 32-byte key, +40/44/48
+// item +36/40/44, +52 16-byte key2, +68/72 item +64/68).
+constexpr int kSlotMenuType = 1, kSlotMemory = 3, kSlotMemoryFlag = 4, kSlotWindow = 6, kSlotCursor = 12,
+              kSlotVisible = 13, kSlotScrolls = 14, kSlotScrollSize = 15, kSlotSelected = 16, kSlotRows = 39,
+              kRowSlots = 31, kMaxRows = 6;
+constexpr int kG91Rows = 500, kG91Style = 40, kG91Speed = 492; // g_U91 byte offsets used by sub_10177
 constexpr std::int32_t kIdMultiplayer = 2000, kIdHost = 2001, kIdJoin = 2002, kIdLeave = 2003;
 constexpr std::size_t kPasswordDigits = 6;
 
@@ -97,6 +108,46 @@ bool has_item(const std::int32_t* st, std::int32_t id) {
   return false;
 }
 
+// Redo sub_10177's bookkeeping for the current items (cursor on the first item), after we
+// changed the list behind the script's back. Without it the window/rows describe the old
+// list and scrolling walks off the end (the phone script crashed and restarted).
+void rebuild_display(std::int32_t* st) {
+  std::uint8_t* g = global_ptr(kPhoneGlobal);
+  if (!g) return;
+  const std::int32_t count = st[kSlotCount];
+  if (count <= 0) return;
+  auto g_int = [g](int off) -> std::int32_t& { return *reinterpret_cast<std::int32_t*>(g + off); };
+  g_int(kG91Speed) = std::clamp<std::int32_t>(1000 / count, 100, 500);
+  std::int32_t rows = g_int(kG91Rows) ? 6 : 4;
+  if (st[kSlotMenuType] == 2) rows /= 2;
+  st[kSlotMemory] = 0;
+  st[kSlotMemoryFlag] = 0;
+  for (std::int32_t i = 0; i < rows; ++i) st[kSlotWindow + i] = i;
+  st[kSlotCursor] = 0;
+  if (count < rows) {
+    st[kSlotVisible] = count;
+    st[kSlotScrolls] = 0;
+    rows = count;
+  } else {
+    st[kSlotVisible] = rows;
+    st[kSlotScrolls] = 1;
+    const float size = (g_int(kG91Style) == 2 ? 0.72f : 0.75f) / static_cast<float>(count);
+    std::memcpy(&st[kSlotScrollSize], &size, 4);
+  }
+  for (int r = 0; r < kMaxRows; ++r) st[kSlotRows + 1 + r * kRowSlots] = 0; // sub_10952: row invalid
+  for (int r = 0; r < rows; ++r) {
+    const std::int32_t* item = st + kSlotArray + 1 + st[kSlotWindow + r] * kItemSlots;
+    std::int32_t* row = st + kSlotRows + 1 + r * kRowSlots; // sub_11027
+    row[1] = item[0];
+    std::memcpy(row + 2, item + 1, 32);
+    row[10] = item[9], row[11] = item[10], row[12] = item[11];
+    std::memcpy(row + 13, item + 12, 16);
+    row[17] = item[16], row[18] = item[17];
+    row[0] = 1;
+  }
+  st[kSlotSelected] = st[kSlotRows + 1 + st[kSlotCursor] * kRowSlots + 1];
+}
+
 // Main menu (1011): the normal list plus "Multiplayer", or our co-op items.
 void fix_main_menu(std::int32_t* st) {
   const std::int32_t count = st[kSlotCount], cap = st[kSlotArray];
@@ -112,11 +163,13 @@ void fix_main_menu(std::int32_t* st) {
       write_item(st, 1, kIdJoin, "IVC_JOIN");
       st[kSlotCount] = 2;
     }
+    rebuild_display(st);
     return;
   }
   if (count < cap && !has_item(st, kIdMultiplayer)) {
     write_item(st, count, kIdMultiplayer, "CP_OPT_NETWORK");
     st[kSlotCount] = count + 1;
+    rebuild_display(st);
   }
 }
 
@@ -161,6 +214,11 @@ std::string dialled() {
 
 void tick() {
   const std::int32_t s = screen();
+  static std::int32_t last = -1;
+  if (s != last) {
+    log::debug("Phone: screen {} -> {}", last, s);
+    last = s;
+  }
   switch (s) {
     case kScreenMainMenu:
       if (std::int32_t* st = main_statics()) fix_main_menu(st);
