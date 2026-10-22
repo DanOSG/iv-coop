@@ -90,6 +90,8 @@ add_library(iv-coop SHARED
   src/game/script.cpp
   src/game/netprobe.cpp
   src/game/player_slots.cpp
+  src/game/phone.cpp
+  src/net/steam.cpp
   src/game/native_hooks.cpp
   src/story/call_log.cpp
   src/story/story_sync.cpp

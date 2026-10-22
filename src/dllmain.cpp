@@ -15,6 +15,8 @@
 #include "game/addresses.h"
 #include "game/native_hooks.h"
 #include "game/netprobe.h"
+#include "game/phone.h"
+#include "net/steam.h"
 #include "story/call_log.h"
 #include "story/mission_audit.h"
 #include "story/story_sync.h"
@@ -52,6 +54,7 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
   if (cfg.story_log_calls) story::register_call_logging();
   story::configure(cfg.story);
   story::register_hooks();
+  phone::install();
   story::audit::configure(cfg.audit);
   story::audit::register_hooks();
   native_hooks::set_trace(cfg.story_trace_calls);
@@ -63,6 +66,9 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
     if (!hooked) hooked = native_hooks::install();
   });
   script::on_tick([] {
+    static bool steam_tried = false;
+    if (!steam_tried) steam_tried = true, steam::init();
+    phone::tick();
     ghost::tick();
     coop::tick();
     netprobe::tick();
