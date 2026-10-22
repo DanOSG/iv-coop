@@ -62,6 +62,7 @@ const wchar_t* __fastcall text_get_detour(void* self, void* /*edx*/, const char*
 } // namespace
 
 bool install() {
+  set_label("CP_OPT_NETWORK", "Multiplayer");
   void* target = at_static<void*>(kTextGet);
   if (MH_CreateHook(target, reinterpret_cast<void*>(&text_get_detour), reinterpret_cast<void**>(&g_text_get_orig)) !=
           MH_OK ||
@@ -112,7 +113,47 @@ void dump_menu_memory() {
   }
 }
 
+// --- main menu injection (spcellphonemain statics; layout of the 2019 scripts, verified
+// against CE in memory): l_U1 is the list state (its _fU4, slot 2, is the item count;
+// _fU60, slot 16, the id of the item being acted on), l_U226 the item array (slot 226 holds
+// its capacity, element i at slot 227 + 18*i: +0 id, +4 32-byte text key, +68 enabled).
+constexpr int kSlotCount = 2, kSlotArray = 226, kItemSlots = 18;
+constexpr std::int32_t kMultiplayerId = 2000; // our own id: CE's menu handler ignores it
+std::int32_t g_probe_slots[40] = {};
+
+std::int32_t* statics() {
+  auto* t = static_cast<std::uint8_t*>(script::find_thread("spcellphonemain"));
+  return t ? *reinterpret_cast<std::int32_t**>(t + 0x58) : nullptr;
+}
+
+void inject_multiplayer(std::int32_t* st) {
+  const std::int32_t count = st[kSlotCount], cap = st[kSlotArray];
+  if (count <= 0 || count >= cap || cap > 64) return;
+  for (std::int32_t i = 0; i < count; ++i)
+    if (st[kSlotArray + 1 + i * kItemSlots] == kMultiplayerId) return; // already there
+  std::int32_t* item = st + kSlotArray + 1 + count * kItemSlots;
+  std::memset(item, 0, kItemSlots * 4);
+  item[0] = kMultiplayerId;
+  std::strncpy(reinterpret_cast<char*>(item + 1), "CP_OPT_NETWORK", 31);
+  item[17] = 1; // _fU68: enabled
+  st[kSlotCount] = count + 1;
+  log::info("Phone: added Multiplayer to the main menu (item {})", count);
+}
+
+void probe_list_state(std::int32_t* st) {
+  for (int i = 1; i < 40; ++i)
+    if (st[i] != g_probe_slots[i]) {
+      log::info("Phone probe: l_U slot {} {} -> {}", i, g_probe_slots[i], st[i]);
+      g_probe_slots[i] = st[i];
+    }
+}
+
 void tick() {
+  if (screen() == 1011)
+    if (std::int32_t* st = statics()) {
+      inject_multiplayer(st);
+      probe_list_state(st);
+    }
   static bool checked = false;
   if (!checked) {
     checked = true;
