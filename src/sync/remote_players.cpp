@@ -39,6 +39,7 @@ struct Remote {
   std::uint32_t weapon = 0;
   bool dead = false;
   std::uint8_t wanted = 0;
+  std::uint32_t vehicle_id = 0; // networked vehicle they're in (sync::kNoVehicle on foot)
 };
 
 Settings g_cfg;
@@ -408,6 +409,95 @@ void hide_puppets_in_cutscenes() {
     if (const n::Ped p = r.puppet.ped(); p && n::DoesCharExist(p)) n::SetCharVisible(p, !hide);
 }
 
+// Mission-provided vehicles (ARCHITECTURE): when the host's mission hands the protagonist
+// a car, partners never touch it; the lowest-id joiner spawns a duplicate (same model and
+// colours) on the nearest road node and drives, the other joiners warp into its passenger
+// seats. The duplicate goes when the mission lets go of its car (left as a normal car if
+// someone is in it).
+struct MissionCar {
+  n::Vehicle duplicate = 0; // ours, if we're the one who spawned it
+  bool boarded = false;     // passengers: we're in the lead joiner's duplicate
+  DWORD since = GetTickCount();
+};
+std::map<std::uint32_t, MissionCar> g_mission_cars; // by the mission car's entity id
+
+n::Vehicle spawn_duplicate(n::Vehicle source) {
+  const std::uint32_t model = n::GetCarModel(source);
+  n::RequestModel(model);
+  if (!n::HasModelLoaded(model)) return 0; // streaming: next frame
+  const n::Vector3 src = n::GetCarCoordinates(source);
+  const float src_heading = n::GetCarHeading(source);
+  n::Vector3 at{};
+  float heading = src_heading;
+  constexpr float kMinGap = 7.0f;
+  if (!n::GetClosestCarNodeWithHeading({src.x + 10.0f, src.y + 10.0f, src.z}, at, heading) ||
+      std::hypot(at.x - src.x, at.y - src.y) < kMinGap) {
+    const float rad = src_heading * 3.14159265f / 180.0f; // behind the mission car
+    at = {src.x + std::sin(rad) * 8.0f, src.y - std::cos(rad) * 8.0f, src.z};
+    heading = src_heading;
+  }
+  const n::Vehicle car = n::CreateCar(model, at);
+  n::MarkModelAsNoLongerNeeded(model);
+  if (!car) return 0;
+  n::invoke(0x75E40528, car, heading); // SET_CAR_HEADING
+  std::int32_t c1 = 0, c2 = 0, c3 = 0, c4 = 0;
+  n::GetCarColours(source, c1, c2);
+  n::GetExtraCarColours(source, c3, c4);
+  n::ChangeCarColour(car, c1, c2);
+  n::SetExtraCarColours(car, c3, c4);
+  return car;
+}
+
+void handle_mission_cars(std::uint8_t my_id) {
+  const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
+  if (!me) return;
+  for (std::uint32_t id : story::mission_cars(g_entities)) g_mission_cars.try_emplace(id);
+  // The lead joiner (lowest id other than the host) drives the duplicate.
+  std::uint8_t lead = my_id;
+  for (const auto& [id, r] : g_remotes)
+    if (id != net::kHostId && id < lead) lead = id;
+  for (auto it = g_mission_cars.begin(); it != g_mission_cars.end();) {
+    MissionCar& mc = it->second;
+    const n::Vehicle source = g_entities.handle_for_id(it->first);
+    if (!source || !n::DoesVehicleExist(source)) { // the mission let go of its car
+      if (mc.duplicate && n::DoesVehicleExist(mc.duplicate)) {
+        if (n::IsCharInCar(me, mc.duplicate) || n::GetDriverOfCar(mc.duplicate))
+          n::invoke(0x20C76FD1, &mc.duplicate); // MARK_CAR_AS_NO_LONGER_NEEDED: a normal car now
+        else
+          n::DeleteCar(mc.duplicate);
+      }
+      it = g_mission_cars.erase(it);
+      continue;
+    }
+    if (lead == my_id) {
+      if (!mc.duplicate) {
+        mc.duplicate = spawn_duplicate(source);
+        if (mc.duplicate) {
+          if (n::IsCharInAnyCar(me)) n::WarpCharFromCarToCoord(me, n::GetCharCoordinates(me));
+          n::WarpCharIntoCar(me, mc.duplicate);
+          log::info("Mission car: spawned a duplicate of entity {} for the partners", it->first);
+        }
+      }
+    } else if (!mc.boarded && GetTickCount() - mc.since < 30000) {
+      // Ride in the lead joiner's duplicate once it shows up as their vehicle.
+      const auto lead_it = g_remotes.find(lead);
+      const n::Vehicle dup = lead_it != g_remotes.end() ? g_vehicles.handle_for(lead_it->second.vehicle_id) : 0;
+      if (dup && n::DoesVehicleExist(dup)) {
+        const std::uint32_t seats = n::GetMaximumNumberOfPassengers(dup);
+        for (std::uint32_t seat = 0; seat < seats && seat < 8; ++seat)
+          if (n::IsCarPassengerSeatFree(dup, seat)) {
+            if (n::IsCharInAnyCar(me)) n::WarpCharFromCarToCoord(me, n::GetCharCoordinates(me));
+            n::WarpCharIntoCarAsPassenger(me, dup, seat);
+            mc.boarded = true;
+            log::info("Mission car: riding in the lead joiner's duplicate (seat {})", seat);
+            break;
+          }
+      }
+    }
+    ++it;
+  }
+}
+
 void configure_cutscenes() {
   story::cutscene::set_callbacks({cutscene_begin, cutscene_end});
 }
@@ -460,6 +550,7 @@ void tick() {
         g_vehicles.clear();
         g_entities.clear(g_was_host);
         story::clear();
+        g_mission_cars.clear();
         steam_relay::stop();
         steam::leave_lobby();
         if (g_want_client_mode || g_client_mode) {
@@ -548,6 +639,7 @@ void tick() {
         r.puppet.apply_combat(*smp, now);
         r.health = smp->health, r.weapon = smp->weapon, r.dead = (smp->flags & sync::PlayerState::kDead) != 0;
         r.wanted = smp->wanted;
+        r.vehicle_id = smp->vehicle_id;
       }
       if (local) dist = std::hypot(smp->x - local->x, smp->y - local->y, smp->z - local->z);
     }
@@ -606,7 +698,10 @@ void tick() {
     // Story (M6): the host sends what its story scripts did this frame; clients retry
     // blips whose entity copy wasn't there yet.
     story::host_tick(g_was_host, net, g_entities);
-    if (!g_was_host) story::client_tick(g_entities);
+    if (!g_was_host) {
+      story::client_tick(g_entities);
+      handle_mission_cars(ss.my_id);
+    }
     g_entities.tick(now, ss.my_id, g_was_host, positions, net);
     for (const auto& hit : g_entities.collect_hits(me)) {
       net.send_game(sync::encode_damage({hit.kind, hit.target, hit.amount, local ? local->weapon : 0}), true);

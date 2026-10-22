@@ -39,6 +39,9 @@ void host_on_player_joined(std::uint8_t player, net::Session& net);
 bool client_on_message(const net::GameMessage& m, sync::EntitySync& ents);
 // Client: retry blips waiting for their entity's local copy to spawn.
 void client_tick(sync::EntitySync& ents);
+// Client: networked vehicles the host's mission hands the protagonist right now (blipped
+// in a non-hostile colour, nobody driving): partners get a duplicate of these.
+std::vector<std::uint32_t> mission_cars(sync::EntitySync& ents);
 // Session ended: remove everything we created for the host's story.
 void clear();
 

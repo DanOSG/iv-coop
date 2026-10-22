@@ -1,6 +1,9 @@
 #include "story/story_sync.h"
 
+#include <windows.h>
+
 #include <deque>
+#include <optional>
 #include <map>
 #include <set>
 #include <variant>
@@ -135,6 +138,7 @@ struct ClientBlip {
   n::Blip local = 0;
   BlipAdd add;
   std::vector<BlipProp> props; // applied on creation, and live afterwards
+  DWORD since = GetTickCount();
 };
 std::map<std::uint32_t, ClientBlip> g_client_blips;
 
@@ -415,6 +419,24 @@ void client_tick(sync::EntitySync& ents) {
     if (cb.local) ++live;
   }
   g_status.blips_live = live;
+}
+
+std::vector<std::uint32_t> mission_cars(sync::EntitySync& ents) {
+  // A car the host's mission hands the protagonist: blipped, non-hostile, empty. Colour is
+  // the latest Colour prop (1 = red: enemies/targets); without one it isn't decided yet.
+  std::vector<std::uint32_t> out;
+  const DWORD now = GetTickCount();
+  for (const auto& [id, cb] : g_client_blips) {
+    if (cb.add.kind != BlipKind::Entity || now - cb.since < 1000) continue;
+    std::optional<std::int32_t> colour;
+    for (const auto& p : cb.props)
+      if (p.prop == BlipPropKind::Colour) colour = p.ivalue;
+    if (!colour || *colour == 1) continue;
+    const n::Handle h = ents.handle_for_id(cb.add.entity);
+    if (!h || !n::DoesVehicleExist(h) || n::GetDriverOfCar(h)) continue;
+    out.push_back(cb.add.entity);
+  }
+  return out;
 }
 
 void clear() {
