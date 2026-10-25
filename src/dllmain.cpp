@@ -16,6 +16,7 @@
 #include "game/addresses.h"
 #include "game/native_hooks.h"
 #include "game/netprobe.h"
+#include "game/radio_probe.h"
 #include "game/phone.h"
 #include "net/steam.h"
 #include "story/call_log.h"
@@ -52,6 +53,7 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
   ghost::configure(cfg.ghost);
   coop::configure(cfg.net);
   netprobe::configure(cfg.netprobe);
+  radio_probe::configure(cfg.dev_keys);
   if (cfg.story_log_calls) story::register_call_logging();
   story::configure(cfg.story);
   story::register_hooks();
@@ -73,6 +75,7 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
     ghost::tick();
     coop::tick();
     netprobe::tick();
+    radio_probe::tick();
     story::audit::tick();
   });
 }
