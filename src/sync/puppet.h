@@ -29,6 +29,11 @@ class Puppet {
   void despawn();
   // Downed partner: red, flashing blip; otherwise the normal partner blip.
   void set_downed_marker(bool downed);
+  // Ragdoll and fire follow the owner: a copy is ragdoll-locked (hits don't knock it over here) and
+  // falls / burns only while its owner does. Call every frame while it's on foot and not downed.
+  void mirror_body(bool ragdoll, bool on_fire, std::uint32_t now_ms);
+  // Lets the engine ragdoll it (downed pose, death).
+  void unlock_ragdoll();
   // Session settings: can our player lock on to this partner; is their map blip shown.
   void apply_settings(bool targetable, bool blip_visible);
 
@@ -94,6 +99,8 @@ class Puppet {
   // Appearance state.
   std::uint32_t model_override_ = 0;
   std::uint32_t rejected_model_ = 0;
+  bool ragdoll_locked_ = false, mirroring_ragdoll_ = false;
+  std::uint32_t ragdoll_since_ = 0;
   std::uint32_t shown_health_ = 2000; // the copy's health as last set (take_hits_from refills to it)
   bool targetable_ = true, blip_visible_ = true; // apply_settings, as last applied to this ped/blip
   bool downed_marker_ = false; // last model set_model refused (logged once)

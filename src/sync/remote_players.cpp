@@ -707,9 +707,12 @@ void tick() {
           // On foot, or their car hasn't arrived here yet: follow their position on foot.
           if (r.puppet.in_vehicle()) r.puppet.leave_vehicle(at);
           if (down) {
+            r.puppet.unlock_ragdoll();
             r.pose.update(r.puppet.ped(), now); // fall, then lie hurt where they are
           } else {
             r.pose.up(r.puppet.ped());
+            r.puppet.mirror_body((smp->flags & sync::PlayerState::kRagdoll) != 0,
+                                 (smp->flags & sync::PlayerState::kOnFire) != 0, now);
             r.puppet.drive(*smp, now);
           }
         }

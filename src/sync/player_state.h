@@ -29,12 +29,14 @@ struct PlayerState {
   std::uint32_t weapon = 0;  // weapon type in hand (0 = unarmed)
   std::uint16_t shots = 0;   // cumulative shots fired (wraps); receivers fire the difference
   float ax = 0, ay = 0, az = 0; // aim point (world)
-  std::uint8_t flags = 0;    // kAiming | kDead | kDowned
+  std::uint8_t flags = 0;    // kAiming | kDead | kDowned | kRagdoll | kOnFire
   std::uint8_t wanted = 0;   // wanted level 0-6
 
   static constexpr std::uint8_t kAiming = 1;
   static constexpr std::uint8_t kDead = 2;
   static constexpr std::uint8_t kDowned = 4; // down, waiting for a revive (sync/downed)
+  static constexpr std::uint8_t kRagdoll = 8; // knocked over (vehicle, explosion, fall...): copies ragdoll too
+  static constexpr std::uint8_t kOnFire = 16;
 
   // Outfit (M6d): drawable + texture variation for each of the 11 ped components.
   std::uint8_t drawable[11] = {};

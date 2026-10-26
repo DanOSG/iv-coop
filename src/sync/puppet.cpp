@@ -9,6 +9,8 @@
 namespace ivc::sync {
 namespace n = natives;
 namespace {
+constexpr std::uint32_t kUnlockRagdoll = 0x2F2F51E9, kIsPedRagdoll = 0x3E251ADE, kSwitchPedToRagdoll = 0x1A0F56C5,
+                        kIsCharOnFire = 0x358E21C5, kStartCharFire = 0x5FB31295, kExtinguishCharFire = 0x5D786EEE;
 
 // Tuning for animated mode.
 constexpr float kSnapDist = 5.0f;       // m of horizontal error before we teleport
@@ -76,6 +78,9 @@ bool Puppet::ensure(const n::Vector3& at) {
     n::SetPedDontDoEvasiveDives(ped_, true);
     n::SetDontActivateRagdollFromPlayerImpact(ped_, true);
     n::SetCharWillMoveWhenInjured(ped_, true);
+    // Hits don't knock a partner over here; they ragdoll when their owner does (mirror_body).
+    n::invoke(kUnlockRagdoll, ped_, false);
+    ragdoll_locked_ = true, mirroring_ragdoll_ = false;
   } else {
     n::SetCharCollision(ped_, false);
     n::FreezeCharPosition(ped_, true);
@@ -100,8 +105,39 @@ void Puppet::snap_to(const PlayerState& t) {
   ++snaps_;
 }
 
+void Puppet::mirror_body(bool ragdoll, bool on_fire, std::uint32_t now_ms) {
+  if (!ped_ || dead_ || !n::DoesCharExist(ped_)) return;
+  const bool is_ragdoll = n::invoke<bool>(kIsPedRagdoll, ped_);
+  if (ragdoll) {
+    // Keep it down for as long as the owner is; re-trigger when the engine stands it up.
+    if (!mirroring_ragdoll_ || (!is_ragdoll && now_ms - ragdoll_since_ > 300)) {
+      n::invoke(kUnlockRagdoll, ped_, true);
+      n::invoke(kSwitchPedToRagdoll, ped_, 0, 1500, 1, 1, 1, 0);
+      mirroring_ragdoll_ = true, ragdoll_locked_ = false, ragdoll_since_ = now_ms;
+    }
+  } else if (mirroring_ragdoll_ || !ragdoll_locked_) {
+    if (!is_ragdoll) {
+      n::invoke(kUnlockRagdoll, ped_, false);
+      mirroring_ragdoll_ = false, ragdoll_locked_ = true;
+    }
+  }
+  const bool burning = n::invoke<bool>(kIsCharOnFire, ped_);
+  if (on_fire && !burning) n::invoke(kStartCharFire, ped_);
+  else if (!on_fire && burning) n::invoke(kExtinguishCharFire, ped_);
+}
+
+void Puppet::unlock_ragdoll() {
+  if (!ped_ || !ragdoll_locked_) return;
+  n::invoke(kUnlockRagdoll, ped_, true);
+  ragdoll_locked_ = false;
+}
+
 void Puppet::drive(const PlayerState& t, std::uint32_t now_ms) {
   if (!ped_) return;
+  if (mirroring_ragdoll_ || (!ragdoll_locked_ && n::invoke<bool>(kIsPedRagdoll, ped_))) {
+    phase_ = "ragdoll";
+    return; // tasks would fight the ragdoll; it gets up when the owner does
+  }
   if (!animated_) {
     n::SetCharCoordinatesNoOffset(ped_, {t.x, t.y, t.z});
     n::SetCharHeading(ped_, t.heading);
@@ -266,6 +302,7 @@ void Puppet::apply_combat(const PlayerState& s, std::uint32_t now_ms) {
   // again (respawned at a hospital) the dead puppet is replaced by a fresh one.
   if (s.flags & PlayerState::kDead) {
     if (!dead_) {
+      unlock_ragdoll(); // a death falls like one
       n::SetCharHealth(ped_, 0);
       dead_ = true;
       phase_ = "dead";
