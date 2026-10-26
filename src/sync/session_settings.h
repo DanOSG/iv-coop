@@ -21,7 +21,7 @@ enum class FriendlyFire : std::uint8_t {
 };
 
 struct Settings {
-  FriendlyFire friendly_fire = FriendlyFire::Off;
+  FriendlyFire friendly_fire = FriendlyFire::DamageOnly; // the default: damage, no lock-on
   bool downed = true;         // downed/revive on missions (off: deaths are normal)
   bool shared_payouts = true; // joiners get the host's mission payouts
   bool radio_sync = true;

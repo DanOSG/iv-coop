@@ -261,7 +261,8 @@ docs/
 - **M10:** TLAD and TBoGT.
 - **Co-op settings** (phone: Multiplayer > Co-op Settings; done 2026-10-26, sync/session_settings): the host's
   settings are the session's, saved in `iv-coop.ini [Session]` and sent to joiners. Friendly fire: **Off** (no
-  lock-on, no damage; default), **On** (lock-on and damage), **Damage only** (no lock-on, damage); downed and
+  lock-on, no damage), **On** (lock-on and damage; melee between players lives here, to be marked experimental
+  if it can't be made to feel right), **No aim** (no lock-on, damage; the default); downed and
   revive; shared mission pay; radio sync; clock and weather sync; partner blips. Later: invasions allowed (M11),
   free cutscenes, max players.
 - **M11: invasions** (Dark Souls style, added 2026-10-26). A group (1-4 players) can invade another group's

@@ -95,7 +95,7 @@ void load(const std::filesystem::path& ini) {
   };
   const Settings d;
   const int ff = get(L"FriendlyFire", static_cast<int>(d.friendly_fire));
-  g_own.friendly_fire = static_cast<FriendlyFire>(ff >= 0 && ff <= 2 ? ff : 0);
+  g_own.friendly_fire = ff >= 0 && ff <= 2 ? static_cast<FriendlyFire>(ff) : d.friendly_fire;
   g_own.downed = get(L"Downed", d.downed) != 0;
   g_own.shared_payouts = get(L"SharedPayouts", d.shared_payouts) != 0;
   g_own.radio_sync = get(L"RadioSync", d.radio_sync) != 0;
