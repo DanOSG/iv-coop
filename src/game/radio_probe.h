@@ -12,6 +12,7 @@
 //   Ctrl+Shift+1  the next item of the playing list (entry + 8), from its start
 //   Ctrl+Shift+2  the playing item again, 30 s further on (start_item with an offset)
 //   Ctrl+Shift+3  the playing item again, from the start
+//   Ctrl+Shift+4  every station not playing aloud: its next item, lined up 60 s in (heard on tuning to it)
 
 namespace ivc::radio_probe {
 

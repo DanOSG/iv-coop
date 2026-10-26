@@ -101,7 +101,7 @@ DWORD g_last = 0;
 std::array<Playing, 32> g_seen{};
 std::unordered_map<std::uint32_t, std::string> g_list_names; // entry+0x40 pointer -> list name
 bool g_names_built = false;
-bool g_k1 = true, g_k2 = true, g_k3 = true;
+bool g_k1 = true, g_k2 = true, g_k3 = true, g_k4 = true;
 
 // Play-position hunt: dwords in the tuned station's playing slot that rise every second by about a second's
 // worth (ms, or samples at 22.05/32/44.1/48 kHz). Hits are counted per offset and logged once they repeat.
@@ -181,6 +181,45 @@ std::string list_name(std::uint32_t p) {
   return std::format("ADVERTS{:+#x}", static_cast<std::int64_t>(p) - anchor);
 }
 
+// Lining up a station that isn't streaming (state 1, idle: every untuned station). Its position is just a
+// counter, and tuning in starts the stream at it (state 2 passes +0x990 to 0xB769A0) - unlike a playing
+// stream, which ignores a new start offset (probe run 5). Load the item (0xB76660) without starting it, then
+// set the position.
+constexpr std::uint32_t kSlotState = 0xBC8;
+constexpr std::uint8_t kSlotIdle = 1;
+
+int line_up_idle(int station, std::uint32_t offset_ms) {
+  __try {
+    auto* st = (*at_static<std::uint8_t***>(kStationArray))[station];
+    if (!st || st[kOffCurSlot] > 1) return -1;
+    std::uint8_t* slot = st + st[kOffCurSlot] * kSlotSize;
+    if (slot[kSlotState] != kSlotIdle) return slot[kSlotState];
+    const std::uint32_t list = *reinterpret_cast<std::uint32_t*>(slot + kSlotList);
+    const std::uint32_t track = *reinterpret_cast<std::uint32_t*>(slot + kSlotTrack);
+    if (!list) return -2;
+    at_static<void(__thiscall*)(void*, int, int, std::uint32_t, int)>(0xB76660)(slot, slot[kSlotCategory],
+                                                                                 static_cast<int>(track + 1), list + 8, 0);
+    *reinterpret_cast<std::uint32_t*>(slot + kSlotPosition) = offset_ms;
+    *reinterpret_cast<std::uint32_t*>(st + 0x1908) = *reinterpret_cast<std::uint32_t*>(st + kOffCurTrack);
+    *reinterpret_cast<std::uint32_t*>(st + kOffCurTrack) = track + 1;
+    return 0;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return -3;
+  }
+}
+
+// Ctrl+Shift+4: every station not playing aloud gets its next item, 60 s in.
+void line_up_all() {
+  const int tuned = invoke<int>(kGetStationIndex);
+  std::string out;
+  for (int i = 0; i < station_count() && i < 32; ++i) {
+    if (i == tuned) continue;
+    const int r = line_up_idle(i, 60000);
+    out += std::format(" [{}]{}", i, r == 0 ? "ok" : std::format("state {}", r));
+  }
+  log::info("Radio probe: key 4 (tuned [{}]): next item at 60 s on idle stations:{}", tuned, out);
+}
+
 // Seeking: a slot whose sound stops (by any route - state 4, stopping the sound) makes the station treat the
 // item as finished and move on. What works is key 1's path: stop, load and start in one go (start_item), so
 // the station never sees a gap. 0xB769A0's second argument is the start position (the slot's own starting
@@ -250,6 +289,7 @@ void tick() {
   if (input::pressed_ctrl_shift('1', g_k1)) force(1);
   if (input::pressed_ctrl_shift('2', g_k2)) force(2);
   if (input::pressed_ctrl_shift('3', g_k3)) force(3);
+  if (input::pressed_ctrl_shift('4', g_k4)) line_up_all();
 
   const DWORD now = GetTickCount();
   if (now - g_last < 1000) return;
