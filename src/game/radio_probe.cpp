@@ -181,64 +181,15 @@ std::string list_name(std::uint32_t p) {
   return std::format("ADVERTS{:+#x}", static_cast<std::int64_t>(p) - anchor);
 }
 
-// Seeking. A stream slot is a state machine (+0xBC8, updated by 0xB76C90): 1 idle (position advances with
-// time; untuned stations; ends the item once the position passes the length +0x994), 2 starting (calls
-// 0xB769A0(slot, meta, +0x990, ...) - the stream starts AT +0x990 - once the slot's sound ref +0x964 is
-// clear), 3 playing, 4 stopping (the station then treats the item as finished and moves on). Retuning
-// doesn't help (RETUNE_RADIO_TO_STATION_INDEX uses other numbering). So a seek stays inside the slot:
-// stop just the sound (0x891850(sound, 0), what state 4 does), wait for the ref to clear, then write the
-// position and go straight to 2.
-constexpr std::uint32_t kSlotState = 0xBC8, kSlotSound = 0x964;
-enum SlotPhase : std::uint8_t { kIdle = 1, kStarting = 2, kPlaying = 3, kStopping = 4 };
-
-struct Seek {
-  int station = -1, phase = 0;
-  std::uint32_t target_ms = 0;
-  DWORD started = 0;
-} g_seek;
-
-std::uint8_t* current_slot(int station) {
-  auto* st = (*at_static<std::uint8_t***>(kStationArray))[station];
-  return st && st[kOffCurSlot] <= 1 ? st + st[kOffCurSlot] * kSlotSize : nullptr;
-}
-
-// One step of a pending seek; true when finished (or given up).
-bool step_seek(DWORD now) {
-  __try {
-    std::uint8_t* slot = current_slot(g_seek.station);
-    if (!slot || now - g_seek.started > 3000) {
-      log::info("Radio probe: seek gave up (phase {})", g_seek.phase);
-      return true;
-    }
-    void*& sound = *reinterpret_cast<void**>(slot + kSlotSound);
-    if (g_seek.phase == 0) {
-      if (slot[kSlotState] != kPlaying || !sound) return false;
-      at_static<void(__thiscall*)(void*, int)>(0x891850)(sound, 0);
-      g_seek.phase = 1;
-      return false;
-    }
-    if (sound) return false; // still releasing
-    *reinterpret_cast<std::uint32_t*>(slot + kSlotPosition) = g_seek.target_ms + (now - g_seek.started);
-    *reinterpret_cast<std::int32_t*>(slot + kSlotSeek) = 0;
-    slot[kSlotState] = kStarting;
-    log::info("Radio probe: seek restarted the stream at {} ms after {} ms", g_seek.target_ms + (now - g_seek.started),
-              now - g_seek.started);
-    return true;
-  } __except (EXCEPTION_EXECUTE_HANDLER) {
-    return true;
-  }
-}
-
-bool seek(int station, std::uint32_t target_ms) {
-  g_seek = {station, 0, target_ms, GetTickCount()};
-  return true;
-}
-
+// Seeking: a slot whose sound stops (by any route - state 4, stopping the sound) makes the station treat the
+// item as finished and move on. What works is key 1's path: stop, load and start in one go (start_item), so
+// the station never sees a gap. 0xB769A0's second argument is the start position (the slot's own starting
+// state passes +0x990 there), so a seek is start_item on the same item with the target offset.
 // Starts item `item` (a track entry pointer: entries of one list are 8 bytes apart, so track n is
-// list + 8n) on the station's current slot, as ForceTrack 0x945120 does but without its name lookup and
+// list + 8n) on the station's current slot at `offset_ms`, as ForceTrack 0x945120 does but without its name lookup and
 // frozen check: stop the slot (0xB76C10) if busy, load (0xB76660), start (0xB769A0, 0xB76920), then record
 // it as the station's current track.
-bool start_item(int station, std::uint32_t item, std::uint8_t category, std::uint32_t track) {
+bool start_item(int station, std::uint32_t item, std::uint8_t category, std::uint32_t track, std::uint32_t offset_ms) {
   __try {
     auto* st = (*at_static<std::uint8_t***>(kStationArray))[station];
     if (!st || !item) return false;
@@ -249,7 +200,9 @@ bool start_item(int station, std::uint32_t item, std::uint8_t category, std::uin
     at_static<void(__thiscall*)(void*, int, int, std::uint32_t, int)>(0xB76660)(slot, category, static_cast<int>(track),
                                                                                  item, 0);
     const std::uint32_t meta = *reinterpret_cast<std::uint32_t*>(st + 0x17A0 + 4 * cur);
-    at_static<void(__thiscall*)(void*, std::uint32_t, int, int, int)>(0xB769A0)(slot, meta, 0, st[0x191A], st[0x191B]);
+    *reinterpret_cast<std::uint32_t*>(slot + kSlotPosition) = offset_ms;
+    at_static<void(__thiscall*)(void*, std::uint32_t, std::uint32_t, int, int)>(0xB769A0)(slot, meta, offset_ms, st[0x191A],
+                                                                                         st[0x191B]);
     at_static<void(__thiscall*)(void*)>(0xB76920)(slot);
     *reinterpret_cast<std::uint32_t*>(st + 0x1908) = *reinterpret_cast<std::uint32_t*>(st + kOffCurTrack);
     *reinterpret_cast<std::uint32_t*>(st + kOffCurTrack) = *reinterpret_cast<std::uint32_t*>(slot + kSlotTrack);
@@ -278,10 +231,9 @@ void force(int key) {
     return;
   }
   const std::uint32_t pos = position(idx, p.slot);
-  if (g_seek.station >= 0) return; // one at a time
-  bool ok = true;
-  if (key == 1) ok = start_item(idx, p.list + 8, p.category, p.track + 1);
-  ok = ok && seek(idx, key == 2 ? pos + 30000 : 0);
+  const bool ok = key == 1   ? start_item(idx, p.list + 8, p.category, p.track + 1, 0)
+                  : key == 2 ? start_item(idx, p.list, p.category, p.track, pos + 30000)
+                             : start_item(idx, p.list, p.category, p.track, 0);
   log::info("Radio probe: key {}: [{}] {} cat {} #{} at {} of {} ms -> {}: {}", key, idx, list_name(p.list), p.category,
             p.track, pos, position(idx, p.slot, 0x994), key == 1 ? "next item from 0" : key == 2 ? "+30 s" : "from 0", ok ? "ok" : "FAILED");
 }
@@ -295,10 +247,6 @@ void configure(bool enabled) {
 
 void tick() {
   if (!g_enabled) return;
-  if (g_seek.station >= 0 && step_seek(GetTickCount())) {
-    log::info("Radio probe: seek on [{}] to {} ms done", g_seek.station, g_seek.target_ms);
-    g_seek.station = -1;
-  }
   if (input::pressed_ctrl_shift('1', g_k1)) force(1);
   if (input::pressed_ctrl_shift('2', g_k2)) force(2);
   if (input::pressed_ctrl_shift('3', g_k3)) force(3);
