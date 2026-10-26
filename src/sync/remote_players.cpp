@@ -23,6 +23,7 @@
 #include "story/cutscene.h"
 #include "sync/downed.h"
 #include "sync/radio_sync.h"
+#include "sync/session_settings.h"
 #include "story/dialogue.h"
 #include "story/story_sync.h"
 #include "sync/entity_sync.h"
@@ -564,10 +565,15 @@ void tick() {
     for (const auto& [id, r] : g_remotes)
       for (const auto& p : st.players)
         if (p.id == id && id != st.my_id) f.teammates.push_back({id, r.name, r.puppet.ped(), r.downed});
+    session_settings::tick(f.in_session, f.hosting, session());
+    const session_settings::Settings& settings = session_settings::current();
+    const bool session_live = f.in_session;
+    f.in_session = f.in_session && settings.downed; // off: deaths are normal
     downed::tick(f, session());
+    f.in_session = session_live;
 
     radio_sync::Frame rf;
-    rf.in_session = f.in_session, rf.hosting = f.hosting, rf.my_id = f.my_id;
+    rf.in_session = f.in_session && settings.radio_sync, rf.hosting = f.hosting, rf.my_id = f.my_id;
     const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
     if (me && n::DoesCharExist(me) && n::IsCharInAnyCar(me)) {
       const n::Ped driver = n::GetDriverOfCar(n::StoreCarCharIsInNoSave(me));
@@ -704,12 +710,14 @@ void tick() {
         r.vehicle_id = smp->vehicle_id;
         r.downed = down;
         r.puppet.set_downed_marker(r.downed);
+        r.puppet.apply_settings(session_settings::targeting_allowed(), session_settings::current().partner_blips);
       }
       if (local) dist = std::hypot(smp->x - local->x, smp->y - local->y, smp->z - local->z);
     }
     // Our hits on their puppet go to them; they apply the damage to themselves.
     if (active && me) {
-      if (const std::uint16_t dmg = r.puppet.take_hits_from(me)) {
+      const std::uint16_t dmg = r.puppet.take_hits_from(me);
+      if (dmg && session_settings::damage_allowed()) {
         net.send_game(sync::encode_damage({sync::DamageTarget::Player, id, dmg, local ? local->weapon : 0}), true);
         log::info("Hit player #{} '{}' for {}", id, r.name, dmg);
       }
@@ -743,6 +751,10 @@ void tick() {
     process_pending_spawn(me);
     for (const auto& m : net.drain_game()) {
       if (!in_session(m.from)) continue;
+      if (session_settings::is_msg(m.data)) {
+        session_settings::on_message(m);
+        continue;
+      }
       if (radio_sync::is_msg(m.data)) {
         radio_sync::on_message(m);
         continue;
@@ -754,7 +766,8 @@ void tick() {
       const auto msg = sync::decode_entity_msg(m.data);
       if (msg && msg->type == sync::GameMsg::Damage) {
         const auto& d = msg->damage;
-        if (d.kind == sync::DamageTarget::Player && d.target == ss.my_id && me && !n::IsCharDead(me)) {
+        if (d.kind == sync::DamageTarget::Player && d.target == ss.my_id && me && !n::IsCharDead(me) &&
+            session_settings::damage_allowed()) {
           const std::uint32_t h = n::GetCharHealth(me);
           n::SetCharHealth(me, downed::floor_health(h > d.amount ? h - d.amount : 0));
           log::info("Took {} damage from player #{} (weapon {}), health {} -> {}", d.amount, m.from, d.weapon, h,

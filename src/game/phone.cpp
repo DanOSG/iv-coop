@@ -10,11 +10,13 @@
 #include <format>
 #include <map>
 #include <span>
+#include <vector>
 #include <mutex>
 
 #include "core/log.h"
 #include "game/natives.h"
 #include "game/script.h"
+#include "sync/session_settings.h"
 
 namespace ivc::phone {
 namespace {
@@ -56,6 +58,8 @@ constexpr int kSlotMenuType = 1, kSlotMemory = 3, kSlotMemoryFlag = 4, kSlotWind
               kRowSlots = 31, kMaxRows = 6;
 constexpr int kG91Rows = 500, kG91Style = 40, kG91Speed = 492; // g_U91 byte offsets used by sub_10177
 constexpr std::int32_t kIdMultiplayer = 2000, kIdHost = 2001, kIdJoin = 2002, kIdLeave = 2003, kIdGoToHost = 2004;
+// Co-op Settings (session_settings): the submenu, one item per setting (2011 + index), Back.
+constexpr std::int32_t kIdSettings = 2010, kIdFirstSetting = 2011, kIdBack = 2029;
 // Keypad state (spcellphonemain statics): l_U1090 digits typed (no more are taken at 10),
 // l_U1088 the cursor (0 = Call). When a number is full the game moves the cursor to Call.
 constexpr int kSlotKeypadCursor = 1088, kSlotDigits = 1090, kKeypadFull = 10;
@@ -137,7 +141,10 @@ const wchar_t* __fastcall text_get_detour(void* self, void* /*edx*/, const char*
 }
 
 Role g_role = Role::None;
-bool g_coop_menu = false;                 // the main menu currently shows our items
+// What the main menu list currently shows: the phone's own items (+ Multiplayer), ours, or settings.
+enum class Menu { Phone, Coop, Settings } g_menu = Menu::Phone;
+bool g_menu_dirty = false; // a setting changed: rewrite the labels
+std::int32_t g_menu_cursor = 0;
 std::optional<Action> g_awaiting;         // Host/Join chosen; waiting for the password
 std::optional<Request> g_request;         // ready for poll()
 
@@ -166,7 +173,7 @@ bool has_item(const std::int32_t* st, std::int32_t id) {
 // Redo sub_10177's bookkeeping for the current items (cursor on the first item), after we
 // changed the list behind the script's back. Without it the window/rows describe the old
 // list and scrolling walks off the end (the phone script crashed and restarted).
-void rebuild_display(std::int32_t* st) {
+void rebuild_display(std::int32_t* st, std::int32_t cursor = 0) {
   std::uint8_t* g = global_ptr(kPhoneGlobal);
   if (!g) return;
   const std::int32_t count = st[kSlotCount];
@@ -178,7 +185,6 @@ void rebuild_display(std::int32_t* st) {
   st[kSlotMemory] = 0;
   st[kSlotMemoryFlag] = 0;
   for (std::int32_t i = 0; i < rows; ++i) st[kSlotWindow + i] = i;
-  st[kSlotCursor] = 0;
   if (count < rows) {
     st[kSlotVisible] = count;
     st[kSlotScrolls] = 0;
@@ -189,6 +195,7 @@ void rebuild_display(std::int32_t* st) {
     const float size = (g_int(kG91Style) == 2 ? 0.72f : 0.75f) / static_cast<float>(count);
     std::memcpy(&st[kSlotScrollSize], &size, 4);
   }
+  st[kSlotCursor] = std::clamp<std::int32_t>(cursor, 0, rows - 1); // the window starts at item 0
   for (int r = 0; r < kMaxRows; ++r) st[kSlotRows + 1 + r * kRowSlots] = 0; // sub_10952: row invalid
   for (int r = 0; r < rows; ++r) {
     const std::int32_t* item = st + kSlotArray + 1 + st[kSlotWindow + r] * kItemSlots;
@@ -207,10 +214,23 @@ void rebuild_display(std::int32_t* st) {
 void fix_main_menu(std::int32_t* st) {
   const std::int32_t count = st[kSlotCount], cap = st[kSlotArray];
   if (count <= 0 || cap <= 0 || cap > 64) return;
-  if (g_coop_menu) {
+  if (g_menu == Menu::Settings) {
+    const std::int32_t n = session_settings::count() + 1;
+    if (n > cap) return;
+    if (!g_menu_dirty && count == n && st[kSlotArray + 1] == kIdFirstSetting) return;
+    std::vector<std::string> keys;
+    for (int i = 0; i < session_settings::count(); ++i) keys.push_back(session_settings::label_key(i));
+    for (int i = 0; i < session_settings::count(); ++i) write_item(st, i, kIdFirstSetting + i, keys[i].c_str());
+    write_item(st, n - 1, kIdBack, "IVC_BACK");
+    st[kSlotCount] = n;
+    rebuild_display(st, g_menu_dirty ? g_menu_cursor : 0);
+    g_menu_dirty = false;
+    return;
+  }
+  if (g_menu == Menu::Coop) {
     struct Item { std::int32_t id; const char* key; };
-    static const Item kIdle[] = {{kIdHost, "IVC_HOST"}, {kIdJoin, "IVC_JOIN"}};
-    static const Item kHosting[] = {{kIdLeave, "IVC_LEAVE"}};
+    static const Item kIdle[] = {{kIdHost, "IVC_HOST"}, {kIdJoin, "IVC_JOIN"}, {kIdSettings, "IVC_SETTINGS"}};
+    static const Item kHosting[] = {{kIdSettings, "IVC_SETTINGS"}, {kIdLeave, "IVC_LEAVE"}};
     static const Item kJoined[] = {{kIdGoToHost, "IVC_GOTOHOST"}, {kIdLeave, "IVC_LEAVE"}};
     const std::span<const Item> items = g_role == Role::Joiner ? std::span<const Item>(kJoined)
                                         : g_role == Role::Host ? std::span<const Item>(kHosting)
@@ -250,6 +270,9 @@ bool install() {
   set_label("IVC_JOIN", "Join Co-op");
   set_label("IVC_LEAVE", "Leave Co-op");
   set_label("IVC_GOTOHOST", "Go to Host");
+  set_label("IVC_SETTINGS", "Co-op Settings");
+  set_label("IVC_BACK", "Back");
+  session_settings::all_labels(&set_label);
   if (!hook(kTextGet, reinterpret_cast<void*>(&text_get_detour), reinterpret_cast<void**>(&g_text_get_orig),
             "CText::Get") ||
       !hook(kTextGetByHash, reinterpret_cast<void*>(&get_by_hash_detour),
@@ -307,12 +330,17 @@ void tick() {
       if (std::int32_t* st = main_statics()) fix_main_menu(st);
       break;
     case kIdMultiplayer: // "Multiplayer" picked: show our items in the same list
-      g_coop_menu = true;
+    case kIdBack:
+      g_menu = Menu::Coop;
+      switch_screen(kScreenMainMenu);
+      break;
+    case kIdSettings:
+      g_menu = Menu::Settings;
       switch_screen(kScreenMainMenu);
       break;
     case kIdHost:
     case kIdJoin:
-      g_coop_menu = false;
+      g_menu = Menu::Phone;
       g_awaiting = s == kIdHost ? Action::Host : Action::Join;
       switch_screen(kScreenKeypad);
       show_help(std::format("Type a {}-digit co-op password, then press Call.", kPasswordDigits), true);
@@ -320,7 +348,7 @@ void tick() {
       break;
     case kIdLeave:
     case kIdGoToHost:
-      g_coop_menu = false;
+      g_menu = Menu::Phone;
       g_request = Request{s == kIdLeave ? Action::Leave : Action::GoToHost, {}};
       switch_screen(kScreenClose);
       break;
@@ -344,8 +372,14 @@ void tick() {
       }
       break;
     default:
+      if (s >= kIdFirstSetting && s < kIdFirstSetting + session_settings::count()) { // a setting: next value
+        session_settings::cycle(s - kIdFirstSetting);
+        g_menu = Menu::Settings, g_menu_dirty = true, g_menu_cursor = s - kIdFirstSetting;
+        switch_screen(kScreenMainMenu);
+        break;
+      }
       // Left the main menu (back/close): the next visit shows the normal list again.
-      if (s != kScreenMainMenu) g_coop_menu = false;
+      if (s != kScreenMainMenu) g_menu = Menu::Phone;
       // Closed the phone without calling: forget the half-made choice.
       if (s == 1000 && g_awaiting) {
         g_awaiting.reset();

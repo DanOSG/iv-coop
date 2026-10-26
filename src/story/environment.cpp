@@ -8,6 +8,7 @@
 #include "game/natives.h"
 #include "net/bytes.h"
 #include "story/story_protocol.h"
+#include "sync/session_settings.h"
 
 namespace ivc::story::environment {
 namespace {
@@ -64,6 +65,10 @@ void client_apply(std::span<const std::uint8_t> msg) {
 }
 
 void client_tick() {
+  if (!session_settings::current().world_sync) {
+    if (g_forced) clear(); // back to our own weather
+    return;
+  }
   if (!g_pending) return;
   g_pending = false;
   const State local = read_local();

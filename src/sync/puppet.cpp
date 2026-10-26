@@ -39,6 +39,7 @@ bool Puppet::ensure(const n::Vector3& at) {
     player_slots::release(ped_);
     ped_ = 0;
     blip_ = 0; // the game removes blips attached to deleted peds
+    targetable_ = true;
   }
   model_ = model_override_ ? model_override_ : n::GetHashKey(model_name_.c_str());
   n::RequestModel(model_);
@@ -79,6 +80,7 @@ bool Puppet::ensure(const n::Vector3& at) {
     n::FreezeCharPosition(ped_, true);
   }
   blip_ = n::AddBlipForChar(ped_);
+  blip_visible_ = true;
   // Friendly green (IV: 1 red, 2 green, 3 blue, 5 yellow), not the default red that reads
   // as an enemy and not blue/yellow, which missions use for targets and destinations.
   if (blip_) n::ChangeBlipColour(blip_, kPartnerBlipColour);
@@ -319,12 +321,25 @@ void Puppet::set_downed_marker(bool downed) {
   n::invoke(0x4DFE09D6, blip_, downed); // FLASH_BLIP
 }
 
+void Puppet::apply_settings(bool targetable, bool blip_visible) {
+  if (!ped_) return;
+  if (targetable != targetable_) {
+    n::invoke(0x5EA84115, ped_, !targetable); // SET_CHAR_NEVER_TARGETTED
+    targetable_ = targetable;
+  }
+  if (blip_ && blip_visible != blip_visible_) {
+    n::ChangeBlipDisplay(blip_, blip_visible ? 2 : 0);
+    blip_visible_ = blip_visible;
+  }
+}
+
 void Puppet::despawn() {
   if (blip_) n::RemoveBlip(blip_), blip_ = 0;
   if (player_slots::owns(ped_)) player_slots::release(ped_);
   else if (ped_ && n::DoesCharExist(ped_)) n::DeleteChar(ped_);
   ped_ = 0;
   vehicle_ = 0;
+  targetable_ = blip_visible_ = true;
   action_ = Action::None;
   dead_ = false;
   phase_ = "idle";

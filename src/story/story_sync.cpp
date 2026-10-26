@@ -17,6 +17,7 @@
 #include "story/environment.h"
 #include "story/hud.h"
 #include "story/world_state.h"
+#include "sync/session_settings.h"
 
 namespace ivc::story {
 namespace {
@@ -372,6 +373,7 @@ bool client_on_message(const net::GameMessage& m, sync::EntitySync& ents) {
       environment::client_apply(m.data);
       break;
     case StoryMsg::Payout:
+      if (!session_settings::current().shared_payouts) break;
       n::AddScore(n::GetPlayerId(), d->payout);
       log::info("Story: mission payout ${} (mirrored from the host)", d->payout);
       break;

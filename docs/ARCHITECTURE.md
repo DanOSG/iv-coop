@@ -257,6 +257,11 @@ docs/
 - **M9:** MP character creator. It doesn't depend on the other milestones, so it can be pulled earlier as a side
   task.
 - **M10:** TLAD and TBoGT.
+- **Co-op settings** (phone: Multiplayer > Co-op Settings; done 2026-10-26, sync/session_settings): the host's
+  settings are the session's, saved in `iv-coop.ini [Session]` and sent to joiners. Friendly fire: **Off** (no
+  lock-on, no damage; default), **On** (lock-on and damage), **Damage only** (no lock-on, damage); downed and
+  revive; shared mission pay; radio sync; clock and weather sync; partner blips. Later: invasions allowed (M11),
+  free cutscenes, max players.
 - **M11: invasions** (Dark Souls style, added 2026-10-26). A group (1-5 players) can invade another group's
   session while it is **on a mission** or at **3+ wanted stars** (the invaded group's host decides when the
   window is open; it closes when the mission ends or the wanted level drops below 3). Invaders spawn as **FBI

@@ -29,6 +29,8 @@ class Puppet {
   void despawn();
   // Downed partner: red, flashing blip; otherwise the normal partner blip.
   void set_downed_marker(bool downed);
+  // Session settings: can our player lock on to this partner; is their map blip shown.
+  void apply_settings(bool targetable, bool blip_visible);
 
   // Seats the puppet in `vehicle` (seat -1 = driver) if it isn't already there; while
   // seated, don't call drive(). Returns true once seated.
@@ -90,6 +92,7 @@ class Puppet {
   // Appearance state.
   std::uint32_t model_override_ = 0;
   std::uint32_t rejected_model_ = 0;
+  bool targetable_ = true, blip_visible_ = true; // apply_settings, as last applied to this ped/blip
   bool downed_marker_ = false; // last model set_model refused (logged once)
   std::uint8_t worn_drawable_[11] = {};
   std::uint8_t worn_texture_[11] = {};
