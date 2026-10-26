@@ -1,6 +1,7 @@
 #include "sync/team_fire.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <fstream>
 #include <map>
@@ -65,7 +66,7 @@ void load(const std::filesystem::path& game_dir) {
     const std::string block = xml.substr(pos, end - pos);
     pos = end;
     std::string type = attr(block.substr(0, block.find('>')), "type");
-    std::transform(type.begin(), type.end(), type.begin(), ::toupper);
+    for (char& c : type) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     const auto id = kTypeIds.find(type);
     if (id == kTypeIds.end()) continue;
     const auto data = block.find("<data ");
