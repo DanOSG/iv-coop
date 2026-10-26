@@ -5,6 +5,7 @@
 #include <MinHook.h>
 
 #include <cmath>
+#include <intrin.h>
 #include <format>
 
 #include "core/input.h"
@@ -88,23 +89,85 @@ float floor_hit(float value) {
   return static_cast<float>(kDownedHealth);
 }
 
+// Damage tracing (research: where the engine applies melee damage, and where it refuses it between player
+// peds). When a player ped's health drops, the return addresses found on the stack are logged as static VAs:
+// a value counts if it points into the game's code right after a call instruction. Capped per session.
+int g_traces_left = 60;
+
+// Return addresses on the stack (static VAs), up to `max`; no C++ objects here (SEH).
+int scan_return_addresses(const void* stack, std::uintptr_t* out, int max) {
+  const auto module = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+  int found = 0;
+  __try {
+    const auto* sp = static_cast<const std::uintptr_t*>(stack);
+    for (int i = 0; i < 400 && found < max; ++i) {
+      const std::uintptr_t v = sp[i];
+      const std::uintptr_t va = v - module + 0x400000;
+      if (va < 0x401000 || va > 0xE80000) continue;
+      const auto* code = reinterpret_cast<const std::uint8_t*>(v);
+      if (code[-5] == 0xE8 || (code[-2] == 0xFF && (code[-1] & 0x38) == 0x10) ||
+          (code[-3] == 0xFF && (code[-2] & 0x38) == 0x10) || (code[-6] == 0xFF && (code[-5] & 0x38) == 0x10))
+        out[found++] = va;
+    }
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+  }
+  return found;
+}
+
+void trace_damage(void* ped, float before, float after, const char* via, void* stack) {
+  if (g_traces_left <= 0 || after >= before) return;
+  std::uintptr_t ret[14];
+  const int n_ret = scan_return_addresses(stack, ret, 14);
+  std::string chain;
+  for (int i = 0; i < n_ret; ++i) {
+    if (ret[i] == 0xBABCBE) return; // our own SET_CHAR_HEALTH (copies' health display, refills)
+    chain += std::format(" {:#x}", ret[i]);
+  }
+  --g_traces_left;
+  log::info("Damage trace: ped {:#x}{} health {:.1f} -> {:.1f} via {}; return addresses:{}",
+            static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(ped)), ped == g_guard_ped ? " (us)" : "", before,
+            after, via, chain);
+}
+
+float health_of(void* ped) { return *reinterpret_cast<float*>(static_cast<std::uint8_t*>(ped) + kOffHealth); }
+
 using SetHealthFn = void(__thiscall*)(void*, float, int);
 using SetHealth2Fn = void(__thiscall*)(void*, float);
 SetHealthFn g_set_health = nullptr;
 SetHealth2Fn g_set_health2 = nullptr, g_add_health = nullptr;
 
 void __fastcall set_health_detour(void* ped, void*, float value, int flag) {
+  trace_damage(ped, health_of(ped), value, "SetHealth", _AddressOfReturnAddress());
   g_set_health(ped, guarding(ped) ? floor_hit(value) : value, flag);
 }
 void __fastcall set_health2_detour(void* ped, void*, float value) {
+  trace_damage(ped, health_of(ped), value, "SetHealth2", _AddressOfReturnAddress());
   g_set_health2(ped, guarding(ped) ? floor_hit(value) : value);
 }
 void __fastcall add_health_detour(void* ped, void*, float delta) {
+  trace_damage(ped, health_of(ped), health_of(ped) + delta, "AddHealth", _AddressOfReturnAddress());
   if (guarding(ped)) {
     const float now = *reinterpret_cast<float*>(static_cast<std::uint8_t*>(ped) + kOffHealth);
     delta = floor_hit(now + delta) - now;
   }
   g_add_health(ped, delta);
+}
+
+// Ordinary peds' health setter (CPed, health at +0x1F0), hooked for tracing only: punching an NPC shows the
+// engine's melee damage path to compare with a punch on a partner (a player ped).
+constexpr std::uintptr_t kFnPedSetHealth = 0x9F2200;
+SetHealthFn g_ped_set_health = nullptr;
+int g_ped_traces_left = 15;
+void __fastcall ped_set_health_detour(void* ped, void*, float value, int flag) {
+  const float before = *reinterpret_cast<float*>(static_cast<std::uint8_t*>(ped) + 0x1F0);
+  if (g_ped_traces_left > 0 && value < before && before - value < 500.0f) {
+    const int saved = g_traces_left;
+    g_traces_left = 1;
+    trace_damage(ped, before, value, "NPC SetHealth", _AddressOfReturnAddress());
+    if (g_traces_left == 0) --g_ped_traces_left;
+    g_traces_left = saved;
+  }
+  g_ped_set_health(ped, value, flag);
 }
 
 void* ped_object(n::Ped handle) {
@@ -197,7 +260,8 @@ bool install() {
   struct Hook { std::uintptr_t va; void* detour; void** orig; };
   const Hook hooks[] = {{kFnSetHealth, reinterpret_cast<void*>(&set_health_detour), reinterpret_cast<void**>(&g_set_health)},
                         {kFnSetHealth2, reinterpret_cast<void*>(&set_health2_detour), reinterpret_cast<void**>(&g_set_health2)},
-                        {kFnAddHealth, reinterpret_cast<void*>(&add_health_detour), reinterpret_cast<void**>(&g_add_health)}};
+                        {kFnAddHealth, reinterpret_cast<void*>(&add_health_detour), reinterpret_cast<void**>(&g_add_health)},
+                        {kFnPedSetHealth, reinterpret_cast<void*>(&ped_set_health_detour), reinterpret_cast<void**>(&g_ped_set_health)}};
   for (const Hook& h : hooks) {
     void* target = at_static<void*>(h.va);
     if (MH_CreateHook(target, h.detour, h.orig) != MH_OK || MH_EnableHook(target) != MH_OK) {
