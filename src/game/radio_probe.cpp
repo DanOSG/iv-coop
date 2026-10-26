@@ -265,12 +265,30 @@ void trace_step(DWORD now) {
             f[2], f[3], f[4]);
 }
 
+// The station you hear: the one whose current slot is streaming (state 2/3 with a sound). Not
+// GET_PLAYER_RADIO_STATION_INDEX - that index isn't a position in the station array (probe run 8 edited an
+// idle station all along).
+int audible_station() {
+  for (int i = 0; i < station_count() && i < 32; ++i) {
+    __try {
+      auto* st = (*at_static<std::uint8_t***>(kStationArray))[i];
+      if (!st || st[kOffCurSlot] > 1) continue;
+      const std::uint8_t* slot = st + st[kOffCurSlot] * kSlotSize;
+      if ((slot[0xBC8] == 2 || slot[0xBC8] == 3) && *reinterpret_cast<void* const*>(slot + 0x964)) return i;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+  }
+  return -1;
+}
+
 // Ctrl+Shift+1: the next item of the playing category, started 30 s in. Ctrl+Shift+2: the same, from 0
 // (control). Ctrl+Shift+3: the playing item again at its current position + 30 s.
 void force(int key) {
   if (GetTickCount() - g_last_key < 600) return;
   g_last_key = GetTickCount();
-  const int idx = invoke<int>(kGetStationIndex);
+  const int idx = audible_station();
+  log::info("Radio probe: audible station [{}] {}, GET_PLAYER_RADIO_STATION_INDEX {}", idx,
+            idx >= 0 ? station_name(idx) : "-", invoke<int>(kGetStationIndex));
   Playing p;
   if (idx < 0 || idx >= 32 || !read_station(idx, p) || p.slot > 1 || !p.list) {
     log::info("Radio probe: no station playing (index {})", idx);
@@ -316,7 +334,7 @@ void tick() {
   if (!g_names_built) g_names_built = true, build_names(count);
 
   static DWORD prev_hunt = 0;
-  const int tuned = invoke<int>(kGetStationIndex);
+  const int tuned = audible_station();
   if (Playing t; tuned >= 0 && tuned < 32 && read_station(tuned, t)) hunt_position(tuned, t.slot, now - prev_hunt);
   prev_hunt = now;
   for (int i = 0; i < count && i < 32; ++i) {
