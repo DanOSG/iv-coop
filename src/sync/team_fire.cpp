@@ -67,7 +67,11 @@ std::map<n::Ped, Cooldowns> g_cooldowns;
 constexpr float kMeleeReach = 1.9f, kCarHitSpeed = 4.0f; // m, m/s
 constexpr DWORD kExplosiveWindowMs = 8000;
 // Explosion damage by distance (IS_EXPLOSION_IN_SPHERE, tightest first).
-constexpr std::pair<float, std::uint16_t> kExplosionRings[] = {{2.5f, 160}, {4.5f, 90}, {7.0f, 35}};
+struct Ring {
+  float radius;
+  std::uint16_t damage;
+};
+constexpr Ring kExplosionRings[] = {{2.5f, 160}, {4.5f, 90}, {7.0f, 35}};
 
 std::uint16_t melee_damage(std::uint32_t weapon) {
   switch (weapon) {
@@ -131,7 +135,7 @@ void tick() {
   const bool mouse = input::game_focused() && (GetAsyncKeyState(VK_LBUTTON) & 0x8000);
   if (in_melee && ((flag && !g_flag_was) || (mouse && !g_mouse_was))) {
     g_strike = true;
-    log::debug("Team fire: melee strike ({})", flag && !g_flag_was ? "action flag" : "mouse");
+    log::info("Team fire: melee strike ({})", flag && !g_flag_was ? "action flag" : "mouse");
   }
   g_flag_was = flag, g_mouse_was = mouse;
 
@@ -179,10 +183,10 @@ Hit hits_on(n::Ped target) {
   }
   // Our explosive (fired or thrown in the last few seconds) going off near them.
   if (now - g_last_explosive < kExplosiveWindowMs && now - cd.explosion > 1500) {
-    for (const auto& [radius, damage] : kExplosionRings)
-      if (invoke<bool>(kIsExplosionInSphere, -1, b.x, b.y, b.z, radius)) {
+    for (const Ring& ring : kExplosionRings)
+      if (invoke<bool>(kIsExplosionInSphere, -1, b.x, b.y, b.z, ring.radius)) {
         cd.explosion = now;
-        hit.amount += damage;
+        hit.amount += ring.damage;
         hit.weapon = kWeaponExplosion, hit.knockdown = true;
         break;
       }
