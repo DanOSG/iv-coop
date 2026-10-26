@@ -91,6 +91,7 @@ add_library(iv-coop SHARED
   src/game/script.cpp
   src/game/netprobe.cpp
   src/game/radio_probe.cpp
+  src/game/radio.cpp
   src/game/player_slots.cpp
   src/game/phone.cpp
   src/net/steam.cpp
@@ -110,6 +111,7 @@ add_library(iv-coop SHARED
   src/sync/remote_players.cpp
   src/sync/vehicle_sync.cpp
   src/sync/downed.cpp
+  src/sync/radio_sync.cpp
   src/sync/car_follower.cpp
   src/sync/entity_sync.cpp
   src/render/d3d9_hook.cpp

@@ -241,7 +241,8 @@ docs/
     blocks/blips; world-state ledger (progression) and mirrored payouts; positional dialogue and phone calls
     (story/dialogue); cutscenes for joiners (story/cutscene, M7 basics); duplicate mission car for partners;
     downed/revive (sync/downed); Go to Host (phone); script-drawn mission HUD (story/hud); clock and weather
-    (story/environment, 2026-10-26).
+    (story/environment, 2026-10-26); radio sync - every station's item and position follow the host, the
+    passenger follows the driver's station (sync/radio_sync, game/radio; docs/research-radio.md sections 8-10).
   - Left: task forwarding for mission entities, objects, blips on non-networked entities, the free-cutscene
     option, scripted-camera scenes, wallets persisted per campaign, matching the host's outfit in cutscenes,
     the one-frame lethal-hit gap in downed.

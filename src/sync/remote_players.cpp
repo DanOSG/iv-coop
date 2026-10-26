@@ -22,6 +22,7 @@
 #include "sync/puppet.h"
 #include "story/cutscene.h"
 #include "sync/downed.h"
+#include "sync/radio_sync.h"
 #include "story/dialogue.h"
 #include "story/story_sync.h"
 #include "sync/entity_sync.h"
@@ -564,6 +565,16 @@ void tick() {
       for (const auto& p : st.players)
         if (p.id == id && id != st.my_id) f.teammates.push_back({id, r.name, r.puppet.ped(), r.downed});
     downed::tick(f, session());
+
+    radio_sync::Frame rf;
+    rf.in_session = f.in_session, rf.hosting = f.hosting, rf.my_id = f.my_id;
+    const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
+    if (me && n::DoesCharExist(me) && n::IsCharInAnyCar(me)) {
+      const n::Ped driver = n::GetDriverOfCar(n::StoreCarCharIsInNoSave(me));
+      for (const auto& [id, r] : g_remotes)
+        if (driver && driver != me && r.puppet.ped() == driver) rf.driver_id = id;
+    }
+    radio_sync::tick(rf, session());
   }
   net::Session& net = session();
 
@@ -732,6 +743,10 @@ void tick() {
     process_pending_spawn(me);
     for (const auto& m : net.drain_game()) {
       if (!in_session(m.from)) continue;
+      if (radio_sync::is_msg(m.data)) {
+        radio_sync::on_message(m);
+        continue;
+      }
       if (downed::is_msg(m.data)) {
         downed::on_message(m, ss.my_id);
         continue;

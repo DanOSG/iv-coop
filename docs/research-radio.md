@@ -326,3 +326,17 @@ possible.
     is skipped; we replicate the consumer ourselves instead (same calls as forcing an item).
   - `0x9A3BB0` snapshots every station as 8-byte records (position, current cat/track, next cat/track).
 - Item identity for the wire is therefore (station, category, track), resolved with `0x945230` - no pointers.
+
+## 10. Probe run 9 (2026-10-26): starting partway in works
+
+Runs 2-8 acted on the wrong station: `GET_PLAYER_RADIO_STATION_INDEX` is **not** an index into the station
+array (seen: player index 15 = array 18, 7 = 9). The station you hear is the one whose current slot is
+streaming (state 2/3 with a sound at `+0x964`). Re-run on that station, the slot trace shows the sound's own
+play time (`sound + 0xB8`) starting exactly at the requested offset (30000, 63575, 71319 ms) and running on,
+for a new item and for the same item reloaded. So:
+
+- **Start/seek** = `0xB76C10` stop (if active), `0xB76660(slot, cat, track, item, 0)`,
+  `0xB769A0(slot, meta, start_ms, st+0x191A, st+0x191B)`, `0xB76920`. Items by
+  `0x945230(station, cat, 0, track)`.
+- The earlier "doesn't work" conclusions (playing streams can't seek, idle line-up doesn't stick) came from
+  the wrong station and are void.
