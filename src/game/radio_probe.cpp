@@ -222,8 +222,51 @@ std::uint32_t position(int station, int slot, std::uint32_t field = kSlotPositio
   }
 }
 
-// Ctrl+Shift+1: the next track of the playing list, from its start. 2: the playing item, 30 s further on.
-// 3: the playing item from its start.
+// Item lookup the engine's own network radio consumer uses: 0x945230(station, category, 0, index) walks the
+// category's list chain (nodes linked at +0x3B, count +0x3F, entries +0x40 stride 8); null past the end.
+std::uint32_t resolve_item(int station, std::uint8_t category, std::uint32_t index) {
+  __try {
+    auto* st = (*at_static<std::uint8_t***>(kStationArray))[station];
+    if (!st) return 0;
+    using Fn = std::uint32_t(__thiscall*)(void*, int, int, int);
+    return at_static<Fn>(0x945230)(st, category, 0, static_cast<int>(index));
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return 0;
+  }
+}
+
+// After a key: the started slot traced every 100 ms for 4 s - state, position, length, the sound and its
+// own play time (+0xB8, what the slot copies into its position while playing).
+struct Trace {
+  int station = -1, slot = -1, left = 0;
+  DWORD next = 0;
+} g_trace;
+
+void trace_step(DWORD now) {
+  if (g_trace.left <= 0 || now < g_trace.next) return;
+  g_trace.next = now + 100, --g_trace.left;
+  std::uint32_t f[6]{};
+  __try {
+    auto* st = (*at_static<std::uint8_t***>(kStationArray))[g_trace.station];
+    const std::uint8_t* slot = st + g_trace.slot * kSlotSize;
+    f[0] = slot[0xBC8];
+    f[1] = *reinterpret_cast<const std::uint32_t*>(slot + kSlotPosition);
+    f[2] = *reinterpret_cast<const std::uint32_t*>(slot + 0x994);
+    const auto* sound = *reinterpret_cast<std::uint8_t* const*>(slot + 0x964);
+    f[3] = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(sound));
+    f[4] = sound ? *reinterpret_cast<const std::uint32_t*>(sound + 0xB8) : 0;
+    f[5] = st[kOffCurSlot];
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    g_trace.left = 0;
+    return;
+  }
+  log::info("Radio probe: trace [{}] slot {}{}: state {} pos {} len {} sound {:#x} sound time {}", g_trace.station,
+            g_trace.slot, f[5] == static_cast<std::uint32_t>(g_trace.slot) ? "*" : " (station moved on)", f[0], f[1],
+            f[2], f[3], f[4]);
+}
+
+// Ctrl+Shift+1: the next item of the playing category, started 30 s in. Ctrl+Shift+2: the same, from 0
+// (control). Ctrl+Shift+3: the playing item again at its current position + 30 s.
 void force(int key) {
   if (GetTickCount() - g_last_key < 600) return;
   g_last_key = GetTickCount();
@@ -234,11 +277,21 @@ void force(int key) {
     return;
   }
   const std::uint32_t pos = position(idx, p.slot);
-  const bool ok = key == 1   ? start_item(idx, p.list + 8, p.category, p.track + 1, 60000)
-                  : key == 2 ? start_item(idx, p.list, p.category, p.track, pos + 30000)
-                             : start_item(idx, p.list, p.category, p.track, 0);
-  log::info("Radio probe: key {}: [{}] {} cat {} #{} at {} of {} ms -> {}: {}", key, idx, list_name(p.list), p.category,
-            p.track, pos, position(idx, p.slot, 0x994), key == 1 ? "next item, 60 s in" : key == 2 ? "+30 s" : "from 0", ok ? "ok" : "FAILED");
+  std::uint32_t track = p.track + 1, item = resolve_item(idx, p.category, track);
+  if (!item) track = 0, item = resolve_item(idx, p.category, 0);
+  bool ok;
+  std::uint32_t offset;
+  if (key == 3) {
+    offset = pos + 30000;
+    ok = start_item(idx, p.list, p.category, p.track, offset);
+  } else {
+    offset = key == 1 ? 30000 : 0;
+    ok = item && start_item(idx, item, p.category, track, offset);
+  }
+  log::info("Radio probe: key {}: [{}] was cat {} #{} ({}) at {} ms; started {} #{} at {} ms: {}", key, idx, p.category,
+            p.track, list_name(p.list), pos, key == 3 ? "same item" : list_name(item), key == 3 ? p.track : track, offset,
+            ok ? "ok" : "FAILED");
+  g_trace = {idx, p.slot, 40, 0};
 }
 
 } // namespace
@@ -250,6 +303,7 @@ void configure(bool enabled) {
 
 void tick() {
   if (!g_enabled) return;
+  trace_step(GetTickCount());
   if (input::pressed_ctrl_shift('1', g_k1)) force(1);
   if (input::pressed_ctrl_shift('2', g_k2)) force(2);
   if (input::pressed_ctrl_shift('3', g_k3)) force(3);

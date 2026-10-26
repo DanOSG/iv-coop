@@ -8,10 +8,10 @@
 // metadata lookups of candidate list names. Both slots are logged (crossfades, DJ talk over intros),
 // and the tuned slot is scanned for a steadily rising counter (the play position, for mid-item joins).
 //
-// Keys (on the station you're tuned to; they start items directly on the stream slot, see start_item):
-//   Ctrl+Shift+1  the next item of the playing list (entry + 8), 60 s in
-//   Ctrl+Shift+2  the playing item again, 30 s further on (start_item with an offset)
-//   Ctrl+Shift+3  the playing item again, from the start
+// Keys (on the station you're tuned to; each traces the slot for 4 s afterwards):
+//   Ctrl+Shift+1  the next item of the playing category, started 30 s in
+//   Ctrl+Shift+2  the same, from its start (control)
+//   Ctrl+Shift+3  the playing item again, 30 s further on
 
 namespace ivc::radio_probe {
 
