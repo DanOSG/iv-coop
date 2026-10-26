@@ -263,17 +263,18 @@ docs/
   lock-on, no damage; default), **On** (lock-on and damage), **Damage only** (no lock-on, damage); downed and
   revive; shared mission pay; radio sync; clock and weather sync; partner blips. Later: invasions allowed (M11),
   free cutscenes, max players.
-- **M11: invasions** (Dark Souls style, added 2026-10-26). A group (1-5 players) can invade another group's
+- **M11: invasions** (Dark Souls style, added 2026-10-26). A group (1-4 players) can invade another group's
   session while it is **on a mission** or at **3+ wanted stars** (the invaded group's host decides when the
   window is open; it closes when the mission ends or the wanted level drops below 3). Invaders spawn as **FBI
   agents** (FBI model, FBI weapons) and their goal is to **hunt down the invaded group's protagonist** (the
-  host's Niko). Sessions grow to up to 10 players (5 + 5). Needs:
+  host's Niko). Sessions grow to up to 8 players (4 + 4); co-op stays 4 (cars seat 4, so an
+  invading group spawns together in one FBI car). Needs:
   - Matchmaking: a Steam lobby flag "open to invasion" set by the host while the window is open, and an
     "Invade" item in the phone's Multiplayer menu that finds such a lobby and joins it as an invading group.
   - Sessions above 4 players: our ENet session (not the native MP session) raises its player cap; extra
-    player slots for puppets (player_slots has 3 now), bandwidth/interest management for 10 players.
+    player slots for puppets (player_slots has 3 now), bandwidth/interest management for 8 players.
   - Invader mode: invaders don't take part in the host's story (no story replication of objectives/HUD, no
-    payouts), spawn at a distance from the target with an FBI loadout, see the target's blip, and leave or
+    payouts), spawn together in one FBI car at a distance from the target, with an FBI loadout, see the target's blip, and leave or
     respawn on death; the invaded group's downed/revive rules apply to them as normal.
   - Outcomes: protagonist killed -> the invaded group fails (mission failed / wasted) and invaders get a
     reward; invaders all killed or the window closes -> they're sent home. Invaders return to their own
