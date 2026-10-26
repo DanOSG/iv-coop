@@ -2,14 +2,19 @@
 
 #include <windows.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <format>
 #include <fstream>
 #include <map>
 #include <sstream>
+#include <string>
 #include <vector>
 
 #include "core/log.h"
 #include "net/bytes.h"
+#include "sync/downed.h"
 
 namespace ivc::melee_sync {
 namespace {
@@ -18,25 +23,50 @@ using n::invoke;
 
 constexpr std::uint32_t kIsCharPlayingAnim = 0x673E4CD2, kRequestAnims = 0x65F874DE, kHaveAnimsLoaded = 0x1D3F681D,
                         kTaskPlayAnim = 0x28EE78D8, kTaskPlayAnimSecondary = 0x273C2D35,
-                        kIsCharInMeleeCombat = 0x68855BE7;
-constexpr DWORD kMirrorMs = 1500; // longest we let a mirrored clip hold the copy
+                        kIsCharInMeleeCombat = 0x68855BE7, kGetPedBonePosition = 0x43475BB3,
+                        kPlaySoundFromPed = 0x56F37A81;
+constexpr DWORD kMirrorMs = 1500;     // longest we let a mirrored clip hold a copy
+constexpr float kBodyRadius = 0.18f;  // around each of the target's head/neck/chest bones
+constexpr float kDamageScale = 2.0f;  // the table's damage is tuned for peds; players have 100 to lose
+const std::string kLocomotion = "move_melee";
+
+// Bone tags (IV ped skeleton; head 1205 / neck 1204 / left hand 1232 as scripts use them).
+const std::map<std::string, std::uint32_t> kBones = {
+    {"HEAD", 1205},       {"NECK", 1204},       {"L_UPPERARM", 1220}, {"L_FOREARM", 1230}, {"L_HAND", 1232},
+    {"R_UPPERARM", 1250}, {"R_FOREARM", 1260}, {"R_HAND", 1262},     {"L_THIGH", 1300},   {"L_CALF", 1310},
+    {"L_FOOT", 1320},     {"R_THIGH", 1340},    {"R_CALF", 1350},     {"R_FOOT", 1360}};
+constexpr std::uint32_t kTargetBones[] = {1205, 1204, 1203, 1201}; // head, neck, chest, belly
 
 struct Clip {
   std::string dict, name;
 };
-std::vector<Clip> g_clips;
-int g_current = -1;         // the clip our player is playing (index), -1 none
-DWORD g_melee_until = 0;    // keep scanning briefly after melee combat ends (reactions)
+struct Strike {
+  std::uint32_t bones[2] = {0, 0};
+  float radii[2] = {0, 0};
+  std::uint16_t damage = 0;
+  std::string recoil; // clip name in the same dictionary ("" none)
+  std::string sound;  // MELEE_COMBAT_* ("" none)
+};
+
+std::vector<Clip> g_clips;               // every melee clip but the locomotion set
+std::map<std::string, Strike> g_strikes; // by lower-case "dict/clip"
+int g_current = -1;                      // the clip our player is playing
+DWORD g_melee_until = 0;
+bool g_swing_connected = false;          // this swing already hit someone
 
 struct Mirror {
   Clip clip;
   DWORD started = 0;
 };
-std::map<n::Ped, Mirror> g_mirrors; // copies playing a partner's clip
+std::map<n::Ped, Mirror> g_mirrors;
 
-bool is_playing(n::Ped ped, const Clip& c) {
-  return invoke<bool>(kIsCharPlayingAnim, ped, c.dict.c_str(), c.name.c_str());
+std::string lower(std::string s) {
+  for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return s;
 }
+std::string key(const std::string& dict, const std::string& clip) { return lower(dict) + "/" + lower(clip); }
+
+bool is_playing(n::Ped ped, const Clip& c) { return invoke<bool>(kIsCharPlayingAnim, ped, c.dict.c_str(), c.name.c_str()); }
 
 int find_clip(const std::string& dict, const std::string& name) {
   for (std::size_t i = 0; i < g_clips.size(); ++i)
@@ -45,18 +75,8 @@ int find_clip(const std::string& dict, const std::string& name) {
   return -1;
 }
 
-std::vector<std::uint8_t> encode(const Clip& c) {
-  net::Writer w;
-  w.put(kMsg).put(std::uint8_t{0}).put(static_cast<std::uint8_t>(c.dict.size()));
-  for (char ch : c.dict) w.put(ch);
-  w.put(static_cast<std::uint8_t>(c.name.size()));
-  for (char ch : c.name) w.put(ch);
-  return std::move(w.data());
-}
-
-// Plays a clip on `ped` once the dictionary is loaded (requested on the way); false if not loaded yet.
-// A copy plays a partner's move as its main task (fast blend); `overlay` plays it as a secondary anim on
-// top of what the ped is doing - for our own reactions, so we keep control like a real flinch.
+// A copy plays a partner's clip as its main task (fast blend); `overlay` plays it on top of what the ped
+// is doing (our own reactions: we keep control). False while the dictionary is still loading.
 bool play(n::Ped ped, const Clip& c, bool overlay = false) {
   invoke(kRequestAnims, c.dict.c_str());
   if (!invoke<bool>(kHaveAnimsLoaded, c.dict.c_str())) return false;
@@ -64,14 +84,63 @@ bool play(n::Ped ped, const Clip& c, bool overlay = false) {
   return true;
 }
 
-} // namespace
+void sound(n::Ped ped, const std::string& name) {
+  if (!name.empty() && ped && n::DoesCharExist(ped)) invoke(kPlaySoundFromPed, -1, name.c_str(), ped);
+}
 
-void load(const std::filesystem::path& game_dir) {
-  std::ifstream in(game_dir / "common" / "data" / "MeleeAnims.dat");
-  if (!in) {
-    log::warn("Melee: common/data/MeleeAnims.dat not found; melee moves won't be mirrored");
-    return;
+n::Vector3 bone(n::Ped ped, std::uint32_t tag) {
+  n::Vector3 v{};
+  invoke(kGetPedBonePosition, ped, tag, 0.0f, 0.0f, 0.0f, &v);
+  return v;
+}
+
+float dist(const n::Vector3& a, const n::Vector3& b) { return std::hypot(a.x - b.x, a.y - b.y, a.z - b.z); }
+
+// The side a blow from `attacker` comes from, relative to `ped`'s facing: -180..180, + = from the left.
+float side_of(n::Ped ped, n::Ped attacker) {
+  if (!attacker || !n::DoesCharExist(attacker)) return 0;
+  const n::Vector3 a = n::GetCharCoordinates(ped), b = n::GetCharCoordinates(attacker);
+  const float bearing = std::atan2(-(b.x - a.x), b.y - a.y) * 57.2958f; // IV: degrees, 0 = +y, CCW
+  return std::fmod(bearing - n::GetCharHeading(ped) + 540.0f, 360.0f) - 180.0f;
+}
+
+std::vector<std::uint8_t> encode_clip(std::uint8_t type, std::uint8_t target, const Clip& c) {
+  net::Writer w;
+  w.put(type).put(std::uint8_t{0}).put(target).put(static_cast<std::uint8_t>(c.dict.size()));
+  for (char ch : c.dict) w.put(ch);
+  w.put(static_cast<std::uint8_t>(c.name.size()));
+  for (char ch : c.name) w.put(ch);
+  return std::move(w.data());
+}
+
+bool decode_clip(std::span<const std::uint8_t> d, std::uint8_t& target, Clip& c) {
+  net::Reader r(d);
+  std::uint8_t type, sender, len;
+  if (!r.get(type) || !r.get(sender) || !r.get(target) || !r.get(len)) return false;
+  for (int i = 0; i < len; ++i) {
+    char ch;
+    if (!r.get(ch)) return false;
+    c.dict += ch;
   }
+  if (!r.get(len)) return false;
+  for (int i = 0; i < len; ++i) {
+    char ch;
+    if (!r.get(ch)) return false;
+    c.name += ch;
+  }
+  return true;
+}
+
+std::vector<std::string> split_csv(const std::string& line) {
+  std::vector<std::string> out;
+  std::string cell;
+  std::istringstream s(line);
+  while (std::getline(s, cell, ',')) out.push_back(cell);
+  return out;
+}
+
+void load_clips(const std::filesystem::path& file, std::map<std::string, std::string>& group_dicts) {
+  std::ifstream in(file);
   std::string line, dict;
   bool header = false;
   while (std::getline(in, line)) {
@@ -89,36 +158,120 @@ void load(const std::filesystem::path& game_dir) {
     if (header) { // "<group> <dictionary> ..."
       std::string group;
       words >> group >> dict;
+      group_dicts[lower(group)] = dict;
       header = false;
       continue;
     }
     std::string clip;
     words >> clip;
-    if (!dict.empty() && !clip.empty()) g_clips.push_back({dict, clip});
+    if (!dict.empty() && !clip.empty() && _stricmp(dict.c_str(), kLocomotion.c_str()) != 0) g_clips.push_back({dict, clip});
   }
-  log::info("Melee: {} clips from MeleeAnims.dat", g_clips.size());
 }
 
-void tick(bool in_session, net::Session& net) {
+void load_strikes(const std::filesystem::path& file, const std::map<std::string, std::string>& group_dicts) {
+  std::ifstream in(file);
+  std::string line;
+  while (std::getline(in, line)) {
+    const auto t = split_csv(line);
+    if (t.size() < 10 || t[0].size() < 4 || t[0].compare(t[0].size() - 4, 4, "_Res") != 0) continue;
+    const auto group = group_dicts.find(lower(t[2]));
+    if (group == group_dicts.end()) continue;
+    std::size_t b = 0;
+    for (std::size_t i = 4; i + 4 < t.size() && !b; ++i)
+      if (kBones.contains(t[i])) b = i;
+    if (!b) continue; // not a strike (reactions, idles)
+    Strike s;
+    for (int k = 0; k < 2; ++k) {
+      const auto it = kBones.find(t[b + 2 * k]);
+      s.bones[k] = it != kBones.end() ? it->second : 0;
+      try {
+        s.radii[k] = std::stof(t[b + 2 * k + 1]);
+      } catch (...) {
+      }
+    }
+    try {
+      s.damage = static_cast<std::uint16_t>(std::stof(t[b + 4]) * kDamageScale);
+    } catch (...) {
+    }
+    if (b + 7 < t.size() && t[b + 7] != "None") {
+      std::string recoil = t[b + 7];
+      if (recoil.size() > 4 && recoil.compare(recoil.size() - 4, 4, "_Act") == 0) recoil.resize(recoil.size() - 4);
+      if (find_clip(group->second, recoil) >= 0) s.recoil = recoil;
+    }
+    for (auto it = t.rbegin(); it != t.rend(); ++it)
+      if (it->rfind("MELEE_COMBAT_", 0) == 0) {
+        s.sound = *it;
+        break;
+      }
+    g_strikes.try_emplace(key(group->second, t[3]), s); // the first row for a clip wins
+  }
+}
+
+// Our swing: its striking bones against each partner's head/neck/chest; the first touch is the hit.
+void check_contact(const Clip& clip, std::span<const Partner> partners, net::Session& net) {
+  if (g_swing_connected) return;
+  const auto strike = g_strikes.find(key(clip.dict, clip.name));
+  if (strike == g_strikes.end()) return;
+  const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
+  const n::Vector3 at = n::GetCharCoordinates(me);
+  for (const Partner& p : partners) {
+    if (!p.ped || !n::DoesCharExist(p.ped) || dist(at, n::GetCharCoordinates(p.ped)) > 2.5f) continue;
+    for (int k = 0; k < 2; ++k) {
+      if (!strike->second.bones[k]) continue;
+      const n::Vector3 fist = bone(me, strike->second.bones[k]);
+      for (std::uint32_t tag : kTargetBones)
+        if (dist(fist, bone(p.ped, tag)) < strike->second.radii[k] + kBodyRadius) {
+          g_swing_connected = true;
+          net.send_game(encode_clip(kMsgHit, p.id, clip), true);
+          sound(p.ped, strike->second.sound);
+          log::info("Melee: {} connected with partner #{}", clip.name, p.id);
+          return;
+        }
+    }
+  }
+}
+
+void log_bones_once(n::Ped me) {
+  static bool done = false;
+  if (done) return;
+  done = true;
+  const n::Vector3 root = n::GetCharCoordinates(me);
+  std::string out;
+  for (const auto& [name, tag] : kBones) out += std::format(" {}={:.2f}", name, dist(bone(me, tag), root));
+  log::info("Melee: bone distances from the ped origin (sanity check of the tags):{}", out);
+}
+
+} // namespace
+
+void load(const std::filesystem::path& game_dir) {
+  const auto data = game_dir / "common" / "data";
+  std::map<std::string, std::string> group_dicts;
+  load_clips(data / "MeleeAnims.dat", group_dicts);
+  load_strikes(data / "action_table.csv", group_dicts);
+  log::info("Melee: {} clips (MeleeAnims.dat), {} strikes with contact bones (action_table.csv)", g_clips.size(),
+            g_strikes.size());
+}
+
+void tick(bool in_session, bool can_hit, std::span<const Partner> partners, net::Session& net) {
   if (!in_session || g_clips.empty()) return;
   const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
   if (!me || !n::DoesCharExist(me)) return;
   const DWORD now = GetTickCount();
-  if (invoke<bool>(kIsCharInMeleeCombat, me)) g_melee_until = now + 1500;
+  if (invoke<bool>(kIsCharInMeleeCombat, me)) g_melee_until = now + 1500, log_bones_once(me);
   int found = -1;
   if (now < g_melee_until || g_current >= 0) {
-    if (g_current >= 0 && is_playing(me, g_clips[g_current])) found = g_current; // still the same one
+    if (g_current >= 0 && is_playing(me, g_clips[g_current])) found = g_current;
     else
       for (std::size_t i = 0; i < g_clips.size() && found < 0; ++i)
         if (is_playing(me, g_clips[i])) found = static_cast<int>(i);
   }
-  if (found != g_current && found >= 0) {
-    net.send_game(encode(g_clips[found]), true);
-    log::info("Melee: our player plays {}:{}", g_clips[found].dict, g_clips[found].name); // (to learn the block clip)
+  if (found != g_current) {
+    g_swing_connected = false; // a new move
+    if (found >= 0) net.send_game(encode_clip(kMsgClip, 0xFF, g_clips[found]), true);
   }
   g_current = found;
+  if (found >= 0 && can_hit) check_contact(g_clips[found], partners, net);
 
-  // Mirrored clips that ended free their copy.
   for (auto it = g_mirrors.begin(); it != g_mirrors.end();) {
     const bool over = now - it->second.started > kMirrorMs ||
                       (now - it->second.started > 150 && n::DoesCharExist(it->first) && !is_playing(it->first, it->second.clip));
@@ -126,50 +279,56 @@ void tick(bool in_session, net::Session& net) {
   }
 }
 
-void on_message(const net::GameMessage& m, n::Ped ped, std::uint32_t now_ms) {
-  net::Reader r(m.data);
-  std::uint8_t type, sender, len;
+void on_message(const net::GameMessage& m, std::uint8_t my_id, n::Ped from_ped, net::Session& net) {
+  std::uint8_t target = 0xFF;
   Clip c;
-  if (!r.get(type) || !r.get(sender) || !r.get(len)) return;
-  for (int i = 0; i < len; ++i) {
-    char ch;
-    if (!r.get(ch)) return;
-    c.dict += ch;
+  if (!decode_clip(m.data, target, c)) return;
+  const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
+  switch (m.data[0]) {
+    case kMsgClip:
+      if (find_clip(c.dict, c.name) >= 0 && from_ped && n::DoesCharExist(from_ped) && play(from_ped, c))
+        g_mirrors[from_ped] = {c, GetTickCount()};
+      break;
+
+    case kMsgHit: { // their swing touched us: we decide
+      if (target != my_id || !me || n::IsCharDead(me)) break;
+      const auto strike = g_strikes.find(key(c.dict, c.name));
+      const std::uint16_t damage = strike != g_strikes.end() ? strike->second.damage : 10;
+      const float side = side_of(me, from_ped);
+      const bool behind = std::fabs(side) > 120.0f;
+      const bool blocking = is_playing(me, {"MELEE_UNARMED_BASE", "Block"}) ||
+                            is_playing(me, {"MELEE_HITS_COMMON", "DAM_Block_Front"}) ||
+                            is_playing(me, {"MELEE_HITS_COMMON", "DAM_Block_Left"}) ||
+                            is_playing(me, {"MELEE_HITS_COMMON", "DAM_Block_Right"});
+      if (blocking && !behind) {
+        play(me, {"MELEE_HITS_COMMON", side > 35 ? "DAM_Block_Left" : side < -35 ? "DAM_Block_Right" : "DAM_Block_Front"},
+             true);
+        net.send_game(encode_clip(kMsgBlocked, m.from, c), true);
+        log::info("Melee: blocked #{}'s {}", m.from, c.name);
+        break;
+      }
+      // The hit reaction: the attack's own one if the base set has it (Hit_Jab, Hit_Cross_R...), else by side.
+      std::string reaction = "Hit_" + c.name;
+      if (find_clip("MELEE_UNARMED_BASE", reaction) < 0 || behind)
+        reaction = behind ? "Hit_Back" : side > 35 ? "Hit_Left" : side < -35 ? "Hit_Right" : "Hit_Jab";
+      play(me, {"MELEE_UNARMED_BASE", reaction}, true);
+      if (strike != g_strikes.end()) sound(me, strike->second.sound);
+      const std::uint32_t h = n::GetCharHealth(me);
+      n::SetCharHealth(me, downed::floor_health(h > damage ? h - damage : 0));
+      log::info("Melee: took {} from #{}'s {}, health {} -> {}", damage, m.from, c.name, h, h > damage ? h - damage : 0);
+      break;
+    }
+
+    case kMsgBlocked: { // our swing was blocked: the fist bounces off
+      if (target != my_id || !me) break;
+      const auto strike = g_strikes.find(key(c.dict, c.name));
+      if (strike != g_strikes.end() && !strike->second.recoil.empty()) play(me, {c.dict, strike->second.recoil});
+      log::info("Melee: our {} was blocked", c.name);
+      break;
+    }
   }
-  if (!r.get(len)) return;
-  for (int i = 0; i < len; ++i) {
-    char ch;
-    if (!r.get(ch)) return;
-    c.name += ch;
-  }
-  if (find_clip(c.dict, c.name) < 0 || !ped || !n::DoesCharExist(ped)) return; // only clips the game lists
-  if (play(ped, c)) g_mirrors[ped] = {c, now_ms};
 }
 
 bool playing(n::Ped ped) { return g_mirrors.contains(ped); }
-
-bool react_to_hit(n::Ped attacker) {
-  const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
-  if (!me || !n::DoesCharExist(me)) return false;
-  static const Clip kBlock{"MELEE_UNARMED_BASE", "Block"};
-  const bool blocking = is_playing(me, kBlock) || is_playing(me, {"MELEE_HITS_COMMON", "DAM_Block_Front"}) ||
-                        is_playing(me, {"MELEE_HITS_COMMON", "DAM_Block_Left"}) ||
-                        is_playing(me, {"MELEE_HITS_COMMON", "DAM_Block_Right"});
-  // Which side the blow came from: the attacker's bearing against our heading (IV: degrees, 0 = +y, CCW).
-  float side = 0;
-  if (attacker && n::DoesCharExist(attacker)) {
-    const n::Vector3 a = n::GetCharCoordinates(me), b = n::GetCharCoordinates(attacker);
-    const float bearing = std::atan2(-(b.x - a.x), b.y - a.y) * 57.2958f;
-    side = std::fmod(bearing - n::GetCharHeading(me) + 540.0f, 360.0f) - 180.0f; // -180..180, + = left
-  }
-  const bool behind = std::fabs(side) > 120.0f;
-  if (blocking && !behind) {
-    play(me, {"MELEE_HITS_COMMON", side > 35 ? "DAM_Block_Left" : side < -35 ? "DAM_Block_Right" : "DAM_Block_Front"}, true);
-    return true;
-  }
-  play(me, {"MELEE_UNARMED_BASE", behind ? "Hit_Back" : side > 35 ? "Hit_Left" : side < -35 ? "Hit_Right" : "Hit_Jab"},
-       true);
-  return false;
-}
 
 } // namespace ivc::melee_sync

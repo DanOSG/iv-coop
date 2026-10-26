@@ -224,13 +224,17 @@ int main(int argc, char** argv) {
   // --melee: the move we're on, when it started, whether we're blocking, and a punch waiting to land.
   std::size_t melee_step = 0;
   std::uint32_t melee_at = 0, block_until = 0, punch_lands_at = 0;
-  auto send_clip = [&session](const char* dict, const char* clip) { // melee_sync's message (id 46)
-    std::vector<std::uint8_t> m{46, 0, static_cast<std::uint8_t>(std::strlen(dict))};
-    m.insert(m.end(), dict, dict + std::strlen(dict));
-    m.push_back(static_cast<std::uint8_t>(std::strlen(clip)));
-    m.insert(m.end(), clip, clip + std::strlen(clip));
+  std::string swing_dict, swing_clip; // the attack waiting to land
+  // melee_sync's messages: 46 a clip we play, 47 our swing touched player `target`, 48 we blocked `target`'s
+  // swing. Each: [type][0][target][dict len][dict][clip len][clip].
+  auto send_melee = [&session](std::uint8_t type, std::uint8_t target, const std::string& dict, const std::string& clip) {
+    std::vector<std::uint8_t> m{type, 0, target, static_cast<std::uint8_t>(dict.size())};
+    m.insert(m.end(), dict.begin(), dict.end());
+    m.push_back(static_cast<std::uint8_t>(clip.size()));
+    m.insert(m.end(), clip.begin(), clip.end());
     session.send_game(std::move(m), true);
   };
+  auto send_clip = [&send_melee](const std::string& dict, const std::string& clip) { send_melee(46, 0xFF, dict, clip); };
 
   while (!g_quit) {
     std::this_thread::sleep_for(std::chrono::milliseconds(16));
@@ -294,6 +298,28 @@ int main(int argc, char** argv) {
     const std::uint8_t my_id = session.status().my_id;
     static unsigned world_ops = 0;
     for (const auto& gm : session.drain_game()) {
+      // --melee: the host's swing touched us (47), or blocked ours (48).
+      if (a.melee && gm.data.size() >= 5 && (gm.data[0] == 47 || gm.data[0] == 48) && gm.data[2] == my_id) {
+        const std::size_t dl = gm.data[3];
+        const std::string dict(gm.data.begin() + 4, gm.data.begin() + 4 + std::min(dl, gm.data.size() - 4));
+        const std::string clip = 4 + dl < gm.data.size()
+                                     ? std::string(gm.data.begin() + 5 + dl, gm.data.end())
+                                     : std::string();
+        if (gm.data[0] == 48) {
+          std::printf("[%s] our %s was blocked\n", a.name.c_str(), clip.c_str());
+          send_clip(dict, clip + "_Recoil");
+        } else if (now < block_until) {
+          std::printf("[%s] blocked the host's %s\n", a.name.c_str(), clip.c_str());
+          send_clip("MELEE_HITS_COMMON", "DAM_Block_Front");
+          send_melee(48, gm.from, dict, clip);
+        } else if (!dead_until) {
+          send_clip("MELEE_UNARMED_BASE", "Hit_Jab");
+          health -= 12;
+          std::printf("[%s] took the host's %s, health %d\n", a.name.c_str(), clip.c_str(), health);
+          if (health < 100) dead_until = now + 5000;
+        }
+        continue;
+      }
       // downed::Msg::Revive (41) aimed at us: back up.
       if (gm.data.size() >= 3 && gm.data[0] == 41 && gm.data[2] == session.status().my_id && downed) {
         downed = false, health = 150; // half health, like a revived player
@@ -360,12 +386,7 @@ int main(int argc, char** argv) {
         }
       } else if (m->type == sync::GameMsg::Damage) {
         const auto& d = m->damage;
-        if (d.kind == sync::DamageTarget::Player && d.target == my_id && !dead_until && a.melee && d.weapon <= 3 &&
-            now < block_until) {
-          std::printf("[%s] blocked a melee hit from #%u\n", a.name.c_str(), gm.from);
-          send_clip("MELEE_HITS_COMMON", "DAM_Block_Front");
-        } else if (d.kind == sync::DamageTarget::Player && d.target == my_id && !dead_until) {
-          if (a.melee && d.weapon <= 3) send_clip("MELEE_UNARMED_BASE", "Hit_Jab");
+        if (d.kind == sync::DamageTarget::Player && d.target == my_id && !dead_until) {
           health -= d.amount;
           damage_taken += d.amount;
           std::printf("[%s] hit by #%u for %u (weapon %u), health %d\n", a.name.c_str(), gm.from, d.amount, d.weapon,
@@ -488,8 +509,9 @@ int main(int argc, char** argv) {
     if (a.melee) h = std::atan2(-(cx - s.x), cy - s.y) * 180.0f / kPi; // face the host
     s.heading = h < 0 ? h + 360.0f : h;
 
-    // --melee: a move every 1.5 s - jab, cross, block (1.2 s), hook, low kick. Attacks land 350 ms in (we
-    // stand within reach), as a melee hit the host's game decides on (it may block).
+    // --melee: a move every 1.5 s - jab, cross, block (1.2 s), hook, low kick. We can't test bone contact (no
+    // game here), so an attack "connects" 350 ms in - about when the fist reaches - as a melee hit the host's
+    // game decides on (it may block, and tell us to play the recoil).
     if (a.melee && !dead_until && !downed && now - melee_at >= 1500) {
       struct Move { const char* dict; const char* clip; bool attack; };
       static const Move kMoves[] = {{"MELEE_UNARMED_BASE", "Jab", true},
@@ -500,13 +522,13 @@ int main(int argc, char** argv) {
       const Move& mv = kMoves[melee_step++ % std::size(kMoves)];
       melee_at = now;
       send_clip(mv.dict, mv.clip);
-      if (mv.attack) punch_lands_at = now + 350;
+      if (mv.attack) punch_lands_at = now + 350, swing_dict = mv.dict, swing_clip = mv.clip;
       else block_until = now + 1200;
       std::printf("[%s] melee: %s\n", a.name.c_str(), mv.clip);
     }
     if (punch_lands_at && now >= punch_lands_at) {
       punch_lands_at = 0;
-      session.send_game(sync::encode_damage({sync::DamageTarget::Player, net::kHostId, 10, 0}), true);
+      send_melee(47, net::kHostId, swing_dict, swing_clip);
     }
 
     // Combat: dead for 5 s (standing still), then respawn at full health.

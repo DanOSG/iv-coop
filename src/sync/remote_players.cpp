@@ -592,7 +592,12 @@ void tick() {
     }
     radio_sync::tick(rf, session());
     scream::tick(f.in_session, session());
-    melee_sync::tick(f.in_session, session());
+    {
+      std::vector<melee_sync::Partner> partners;
+      for (const auto& [id, r] : g_remotes)
+        if (r.puppet.spawned()) partners.push_back({id, r.puppet.ped()});
+      melee_sync::tick(f.in_session, f.in_session && session_settings::damage_allowed(), partners, session());
+    }
   }
   net::Session& net = session();
 
@@ -781,8 +786,11 @@ void tick() {
     for (const auto& m : net.drain_game()) {
       if (!in_session(m.from)) continue;
       if (melee_sync::is_msg(m.data)) {
-        if (auto it = g_remotes.find(m.from); it != g_remotes.end())
-          melee_sync::on_message(m, it->second.puppet.ped(), GetTickCount());
+        const bool hit = m.data[0] == melee_sync::kMsgHit;
+        if (!hit || session_settings::damage_allowed()) {
+          const auto it = g_remotes.find(m.from);
+          melee_sync::on_message(m, ss.my_id, it != g_remotes.end() ? it->second.puppet.ped() : 0, net);
+        }
         continue;
       }
       if (scream::is_msg(m.data)) {
@@ -806,13 +814,6 @@ void tick() {
         const auto& d = msg->damage;
         if (d.kind == sync::DamageTarget::Player && d.target == ss.my_id && me && !n::IsCharDead(me) &&
             session_settings::damage_allowed()) {
-          // Melee: we decide - a blocked blow does nothing; either way we play the reaction.
-          const bool melee_hit = d.weapon <= 3;
-          const auto attacker = g_remotes.find(m.from);
-          if (melee_hit && melee_sync::react_to_hit(attacker != g_remotes.end() ? attacker->second.puppet.ped() : 0)) {
-            log::info("Blocked a melee hit from player #{}", m.from);
-            continue;
-          }
           const std::uint32_t h = n::GetCharHealth(me);
           n::SetCharHealth(me, downed::floor_health(h > d.amount ? h - d.amount : 0));
           if (d.weapon == team_fire::kWeaponVehicle || d.weapon == team_fire::kWeaponExplosion)

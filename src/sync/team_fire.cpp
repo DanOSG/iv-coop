@@ -10,7 +10,6 @@
 
 #include <windows.h>
 
-#include "core/input.h"
 #include "core/log.h"
 
 namespace ivc::team_fire {
@@ -19,7 +18,6 @@ namespace n = natives;
 using n::invoke;
 
 constexpr std::uint32_t kIsTargettingChar = 0x58A6457C, kIsFreeAimingAtChar = 0x30D427B4,
-                        kIsCharInMeleeCombat = 0x68855BE7, kGetCharMeleeActionFlag0 = 0x103F14E4,
                         kIsCharTouchingVehicle = 0x307A4B8E, kIsExplosionInSphere = 0x47A77D2E,
                         kGetCarSpeed = 0x16DD2D00;
 
@@ -54,17 +52,16 @@ float to_float(const std::string& s, float def) {
 
 std::uint32_t g_weapon = 0, g_ammo = 0;
 std::uint32_t g_rounds = 0; // fired this frame
-bool g_strike = false, g_flag_was = false, g_mouse_was = true;
 n::Vehicle g_car = 0;
 float g_car_speed = 0;
 DWORD g_last_explosive = 0;
 
 struct Cooldowns {
-  DWORD melee = 0, car = 0, explosion = 0;
+  DWORD car = 0, explosion = 0;
 };
 std::map<n::Ped, Cooldowns> g_cooldowns;
 
-constexpr float kMeleeReach = 1.9f, kCarHitSpeed = 4.0f; // m, m/s
+constexpr float kCarHitSpeed = 4.0f; // m/s
 constexpr DWORD kExplosiveWindowMs = 8000;
 // Explosion damage by distance (IS_EXPLOSION_IN_SPHERE, tightest first).
 struct Ring {
@@ -72,14 +69,6 @@ struct Ring {
   std::uint16_t damage;
 };
 constexpr Ring kExplosionRings[] = {{2.5f, 160}, {4.5f, 90}, {7.0f, 35}};
-
-std::uint16_t melee_damage(std::uint32_t weapon) {
-  switch (weapon) {
-    case 0: return 10;  // fists
-    case 3: return 35;  // knife
-    default: return 25; // bat, pool cue
-  }
-}
 
 } // namespace
 
@@ -128,17 +117,6 @@ void tick() {
   if (g_weapon == 4 && (weapon != 4 || ammo < g_ammo)) g_last_explosive = GetTickCount();
   g_weapon = weapon, g_ammo = ammo;
 
-  // Melee strikes: the melee action flag rising while in melee combat, else the attack (left) mouse button.
-  g_strike = false;
-  const bool in_melee = invoke<bool>(kIsCharInMeleeCombat, me);
-  const bool flag = in_melee && invoke<bool>(kGetCharMeleeActionFlag0, me);
-  const bool mouse = input::game_focused() && (GetAsyncKeyState(VK_LBUTTON) & 0x8000);
-  if (in_melee && ((flag && !g_flag_was) || (mouse && !g_mouse_was))) {
-    g_strike = true;
-    log::info("Team fire: melee strike ({})", flag && !g_flag_was ? "action flag" : "mouse");
-  }
-  g_flag_was = flag, g_mouse_was = mouse;
-
   // Our car, if we're driving one.
   g_car = 0, g_car_speed = 0;
   if (n::IsCharInAnyCar(me)) {
@@ -168,19 +146,6 @@ Hit hits_on(n::Ped target) {
       hit.amount += static_cast<std::uint16_t>(std::min(w->second.damage * g_rounds, 1000.0f));
       hit.weapon = static_cast<std::uint8_t>(g_weapon);
     }
-  }
-  // Melee: a new strike with them within reach, locked on or roughly in front of us (within 60 degrees).
-  bool in_front = false;
-  if (g_strike && !aimed && dist <= kMeleeReach) {
-    // IV headings: degrees, 0 = north (+y), counter-clockwise.
-    const float to_target = std::atan2(-(b.x - a.x), b.y - a.y) * 57.2958f;
-    const float diff = std::fabs(std::fmod(to_target - n::GetCharHeading(me) + 540.0f, 360.0f) - 180.0f);
-    in_front = diff < 60.0f;
-  }
-  if (g_strike && (aimed || in_front) && dist <= kMeleeReach && now - cd.melee > 250) {
-    cd.melee = now;
-    hit.amount += melee_damage(g_weapon);
-    hit.weapon = static_cast<std::uint8_t>(g_weapon);
   }
   // Our car at speed.
   if (g_car && g_car_speed > kCarHitSpeed && now - cd.car > 1000 && invoke<bool>(kIsCharTouchingVehicle, target, g_car)) {
