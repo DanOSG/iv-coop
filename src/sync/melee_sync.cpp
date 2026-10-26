@@ -17,7 +17,8 @@ namespace n = natives;
 using n::invoke;
 
 constexpr std::uint32_t kIsCharPlayingAnim = 0x673E4CD2, kRequestAnims = 0x65F874DE, kHaveAnimsLoaded = 0x1D3F681D,
-                        kTaskPlayAnim = 0x28EE78D8, kIsCharInMeleeCombat = 0x68855BE7;
+                        kTaskPlayAnim = 0x28EE78D8, kTaskPlayAnimSecondary = 0x273C2D35,
+                        kIsCharInMeleeCombat = 0x68855BE7;
 constexpr DWORD kMirrorMs = 1500; // longest we let a mirrored clip hold the copy
 
 struct Clip {
@@ -54,10 +55,12 @@ std::vector<std::uint8_t> encode(const Clip& c) {
 }
 
 // Plays a clip on `ped` once the dictionary is loaded (requested on the way); false if not loaded yet.
-bool play(n::Ped ped, const Clip& c) {
+// A copy plays a partner's move as its main task (fast blend); `overlay` plays it as a secondary anim on
+// top of what the ped is doing - for our own reactions, so we keep control like a real flinch.
+bool play(n::Ped ped, const Clip& c, bool overlay = false) {
   invoke(kRequestAnims, c.dict.c_str());
   if (!invoke<bool>(kHaveAnimsLoaded, c.dict.c_str())) return false;
-  invoke(kTaskPlayAnim, ped, c.name.c_str(), c.dict.c_str(), 8.0f, 0, 0, 0, 0, -1);
+  invoke(overlay ? kTaskPlayAnimSecondary : kTaskPlayAnim, ped, c.name.c_str(), c.dict.c_str(), 16.0f, 0, 0, 0, 0, -1);
   return true;
 }
 
@@ -109,7 +112,10 @@ void tick(bool in_session, net::Session& net) {
       for (std::size_t i = 0; i < g_clips.size() && found < 0; ++i)
         if (is_playing(me, g_clips[i])) found = static_cast<int>(i);
   }
-  if (found != g_current && found >= 0) net.send_game(encode(g_clips[found]), true);
+  if (found != g_current && found >= 0) {
+    net.send_game(encode(g_clips[found]), true);
+    log::info("Melee: our player plays {}:{}", g_clips[found].dict, g_clips[found].name); // (to learn the block clip)
+  }
   g_current = found;
 
   // Mirrored clips that ended free their copy.
@@ -158,10 +164,11 @@ bool react_to_hit(n::Ped attacker) {
   }
   const bool behind = std::fabs(side) > 120.0f;
   if (blocking && !behind) {
-    play(me, {"MELEE_HITS_COMMON", side > 35 ? "DAM_Block_Left" : side < -35 ? "DAM_Block_Right" : "DAM_Block_Front"});
+    play(me, {"MELEE_HITS_COMMON", side > 35 ? "DAM_Block_Left" : side < -35 ? "DAM_Block_Right" : "DAM_Block_Front"}, true);
     return true;
   }
-  play(me, {"MELEE_UNARMED_BASE", behind ? "Hit_Back" : side > 35 ? "Hit_Left" : side < -35 ? "Hit_Right" : "Hit_Jab"});
+  play(me, {"MELEE_UNARMED_BASE", behind ? "Hit_Back" : side > 35 ? "Hit_Left" : side < -35 ? "Hit_Right" : "Hit_Jab"},
+       true);
   return false;
 }
 

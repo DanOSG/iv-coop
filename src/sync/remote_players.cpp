@@ -717,7 +717,8 @@ void tick() {
             r.pose.up(r.puppet.ped());
             r.puppet.mirror_body((smp->flags & sync::PlayerState::kRagdoll) != 0,
                                  (smp->flags & sync::PlayerState::kOnFire) != 0, now);
-            if (!melee_sync::playing(r.puppet.ped())) r.puppet.drive(*smp, now); // a mirrored melee move runs
+            if (!melee_sync::playing(r.puppet.ped())) r.puppet.drive(*smp, now);
+            else n::SetCharHeading(r.puppet.ped(), smp->heading); // a mirrored melee move runs; keep facing as they do
           }
         }
         if (!down || veh) r.puppet.apply_combat(*smp, now);
