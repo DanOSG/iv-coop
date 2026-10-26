@@ -116,6 +116,7 @@ add_library(iv-coop SHARED
   src/sync/wallet.cpp
   src/sync/scream.cpp
   src/sync/team_fire.cpp
+  src/sync/melee_sync.cpp
   src/sync/car_follower.cpp
   src/sync/entity_sync.cpp
   src/render/d3d9_hook.cpp

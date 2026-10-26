@@ -31,6 +31,7 @@
 #include "sync/wallet.h"
 #include "sync/scream.h"
 #include "sync/team_fire.h"
+#include "sync/melee_sync.h"
 #include "sync/remote_players.h"
 
 namespace {
@@ -98,6 +99,7 @@ void startup(HMODULE self) {
   wallet::configure(dir);
   scream::configure(dir / "iv-coop.ini");
   team_fire::load(dir.parent_path()); // the game folder (plugins\..)
+  melee_sync::load(dir.parent_path());
   if (cfg.debug_log) log::set_min_level(log::Level::Debug);
   input::g_dev_keys = cfg.dev_keys;
   log::info("iv-coop " IVCOOP_VERSION " loading (built " __DATE__ " " __TIME__ "), instance slot {}, pid {}{}", slot,

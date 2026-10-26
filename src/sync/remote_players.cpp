@@ -27,6 +27,7 @@
 #include "sync/wallet.h"
 #include "sync/scream.h"
 #include "sync/team_fire.h"
+#include "sync/melee_sync.h"
 #include "story/dialogue.h"
 #include "story/story_sync.h"
 #include "sync/entity_sync.h"
@@ -591,6 +592,7 @@ void tick() {
     }
     radio_sync::tick(rf, session());
     scream::tick(f.in_session, session());
+    melee_sync::tick(f.in_session, session());
   }
   net::Session& net = session();
 
@@ -715,7 +717,7 @@ void tick() {
             r.pose.up(r.puppet.ped());
             r.puppet.mirror_body((smp->flags & sync::PlayerState::kRagdoll) != 0,
                                  (smp->flags & sync::PlayerState::kOnFire) != 0, now);
-            r.puppet.drive(*smp, now);
+            if (!melee_sync::playing(r.puppet.ped())) r.puppet.drive(*smp, now); // a mirrored melee move runs
           }
         }
         if (!down || veh) r.puppet.apply_combat(*smp, now);
@@ -777,6 +779,11 @@ void tick() {
     process_pending_spawn(me);
     for (const auto& m : net.drain_game()) {
       if (!in_session(m.from)) continue;
+      if (melee_sync::is_msg(m.data)) {
+        if (auto it = g_remotes.find(m.from); it != g_remotes.end())
+          melee_sync::on_message(m, it->second.puppet.ped(), GetTickCount());
+        continue;
+      }
       if (scream::is_msg(m.data)) {
         if (auto it = g_remotes.find(m.from); it != g_remotes.end()) scream::on_message(m, it->second.puppet.ped());
         continue;
@@ -798,6 +805,13 @@ void tick() {
         const auto& d = msg->damage;
         if (d.kind == sync::DamageTarget::Player && d.target == ss.my_id && me && !n::IsCharDead(me) &&
             session_settings::damage_allowed()) {
+          // Melee: we decide - a blocked blow does nothing; either way we play the reaction.
+          const bool melee_hit = d.weapon <= 3;
+          const auto attacker = g_remotes.find(m.from);
+          if (melee_hit && melee_sync::react_to_hit(attacker != g_remotes.end() ? attacker->second.puppet.ped() : 0)) {
+            log::info("Blocked a melee hit from player #{}", m.from);
+            continue;
+          }
           const std::uint32_t h = n::GetCharHealth(me);
           n::SetCharHealth(me, downed::floor_health(h > d.amount ? h - d.amount : 0));
           if (d.weapon == team_fire::kWeaponVehicle || d.weapon == team_fire::kWeaponExplosion)

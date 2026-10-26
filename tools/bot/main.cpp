@@ -22,6 +22,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 #include <format>
 #include <optional>
 #include <map>
@@ -61,6 +62,7 @@ struct Args {
   int leave_after = 0;      // leave the session N seconds after joining (0 = never)
   bool armed = false;       // hold a pistol (weapon type 7) and aim at the host
   bool downed = false;      // report being downed (stand still) until a partner revives us
+  bool melee = false;       // stand next to the host and box: punches (real hits), blocks; react to theirs
   int shoot_host = 0;       // fire at the host every N seconds (10 damage per hit); implies armed
   int health = 200;         // starting (and respawn) health
   std::string replay;       // --serve: replay a recorded host session (.ivcrec) to the first client
@@ -133,6 +135,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--leave-after") a.leave_after = std::atoi(next());
     else if (k == "--armed") a.armed = true;
     else if (k == "--downed") a.downed = true;
+    else if (k == "--melee") a.melee = true, a.radius = 1.3f;
     else if (k == "--health") a.health = std::atoi(next());
     else if (k == "--replay") a.replay = next(), a.serve = true;
     else if (k == "--model") a.model = next();
@@ -218,6 +221,16 @@ int main(int argc, char** argv) {
   bool was_joined = false;
   std::uint32_t joined_at = 0;
   bool downed = a.downed; // --downed, until a partner revives us
+  // --melee: the move we're on, when it started, whether we're blocking, and a punch waiting to land.
+  std::size_t melee_step = 0;
+  std::uint32_t melee_at = 0, block_until = 0, punch_lands_at = 0;
+  auto send_clip = [&session](const char* dict, const char* clip) { // melee_sync's message (id 46)
+    std::vector<std::uint8_t> m{46, 0, static_cast<std::uint8_t>(std::strlen(dict))};
+    m.insert(m.end(), dict, dict + std::strlen(dict));
+    m.push_back(static_cast<std::uint8_t>(std::strlen(clip)));
+    m.insert(m.end(), clip, clip + std::strlen(clip));
+    session.send_game(std::move(m), true);
+  };
 
   while (!g_quit) {
     std::this_thread::sleep_for(std::chrono::milliseconds(16));
@@ -347,7 +360,12 @@ int main(int argc, char** argv) {
         }
       } else if (m->type == sync::GameMsg::Damage) {
         const auto& d = m->damage;
-        if (d.kind == sync::DamageTarget::Player && d.target == my_id && !dead_until) {
+        if (d.kind == sync::DamageTarget::Player && d.target == my_id && !dead_until && a.melee && d.weapon <= 3 &&
+            now < block_until) {
+          std::printf("[%s] blocked a melee hit from #%u\n", a.name.c_str(), gm.from);
+          send_clip("MELEE_HITS_COMMON", "DAM_Block_Front");
+        } else if (d.kind == sync::DamageTarget::Player && d.target == my_id && !dead_until) {
+          if (a.melee && d.weapon <= 3) send_clip("MELEE_UNARMED_BASE", "Hit_Jab");
           health -= d.amount;
           damage_taken += d.amount;
           std::printf("[%s] hit by #%u for %u (weapon %u), health %d\n", a.name.c_str(), gm.from, d.amount, d.weapon,
@@ -455,7 +473,7 @@ int main(int argc, char** argv) {
 
     // Walk the circle at constant speed; heading follows the direction of travel.
     const bool paused = a.pause_every > 0 && ((now - started) / 1000) % static_cast<std::uint32_t>(a.pause_every) < 3;
-    const float speed = (paused || dead_until || downed) ? 0.0f : a.speed; // the dead and downed don't walk
+    const float speed = (paused || dead_until || downed || a.melee) ? 0.0f : a.speed; // the dead and downed don't walk
     angle += speed / a.radius * dt;
     sync::PlayerState s;
     s.x = cx + std::cos(angle) * a.radius;
@@ -467,7 +485,29 @@ int main(int argc, char** argv) {
     // IV heading: degrees counter-clockwise from north (+Y). Tangent to the circle, so a
     // paused bot keeps facing the way it was walking.
     float h = std::atan2(std::sin(angle), std::cos(angle)) * 180.0f / kPi;
+    if (a.melee) h = std::atan2(-(cx - s.x), cy - s.y) * 180.0f / kPi; // face the host
     s.heading = h < 0 ? h + 360.0f : h;
+
+    // --melee: a move every 1.5 s - jab, cross, block (1.2 s), hook, low kick. Attacks land 350 ms in (we
+    // stand within reach), as a melee hit the host's game decides on (it may block).
+    if (a.melee && !dead_until && !downed && now - melee_at >= 1500) {
+      struct Move { const char* dict; const char* clip; bool attack; };
+      static const Move kMoves[] = {{"MELEE_UNARMED_BASE", "Jab", true},
+                                    {"MELEE_UNARMED_BASE", "Cross_R", true},
+                                    {"MELEE_UNARMED_BASE", "Block", false},
+                                    {"MELEE_PLAYER_UNARMED", "Hook_L", true},
+                                    {"MELEE_UNARMED_BASE", "Low_Kick_R", true}};
+      const Move& mv = kMoves[melee_step++ % std::size(kMoves)];
+      melee_at = now;
+      send_clip(mv.dict, mv.clip);
+      if (mv.attack) punch_lands_at = now + 350;
+      else block_until = now + 1200;
+      std::printf("[%s] melee: %s\n", a.name.c_str(), mv.clip);
+    }
+    if (punch_lands_at && now >= punch_lands_at) {
+      punch_lands_at = 0;
+      session.send_game(sync::encode_damage({sync::DamageTarget::Player, net::kHostId, 10, 0}), true);
+    }
 
     // Combat: dead for 5 s (standing still), then respawn at full health.
     if (dead_until && now >= dead_until) {
