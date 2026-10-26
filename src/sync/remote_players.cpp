@@ -24,6 +24,7 @@
 #include "sync/downed.h"
 #include "sync/radio_sync.h"
 #include "sync/session_settings.h"
+#include "sync/wallet.h"
 #include "story/dialogue.h"
 #include "story/story_sync.h"
 #include "sync/entity_sync.h"
@@ -566,6 +567,12 @@ void tick() {
       for (const auto& p : st.players)
         if (p.id == id && id != st.my_id) f.teammates.push_back({id, r.name, r.puppet.ped(), r.downed});
     session_settings::tick(f.in_session, f.hosting, session());
+    {
+      std::string host_name;
+      for (const auto& p : st.players)
+        if (p.id == net::kHostId) host_name = p.name;
+      wallet::tick(st.mode == net::Mode::Joined, host_name);
+    }
     const session_settings::Settings& settings = session_settings::current();
     const bool session_live = f.in_session;
     f.in_session = f.in_session && settings.downed; // off: deaths are normal

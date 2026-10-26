@@ -242,9 +242,10 @@ docs/
     (story/dialogue); cutscenes for joiners (story/cutscene, M7 basics); duplicate mission car for partners;
     downed/revive (sync/downed); Go to Host (phone); script-drawn mission HUD (story/hud); clock and weather
     (story/environment, 2026-10-26); radio sync - every station's item and position follow the host, the
-    passenger follows the driver's station (sync/radio_sync, game/radio; docs/research-radio.md sections 8-10).
+    passenger follows the driver's station (sync/radio_sync, game/radio; docs/research-radio.md sections 8-10);
+    joiner wallets per host campaign (sync/wallet; first visit $1000).
   - Left: task forwarding for mission entities, objects, blips on non-networked entities, the free-cutscene
-    option, scripted-camera scenes, wallets persisted per campaign, matching the host's outfit in cutscenes,
+    option, scripted-camera scenes, matching the host's outfit in cutscenes,
     the one-frame lethal-hit gap in downed.
 - **M7:** cutscenes and scripted cameras, mission teleport/"join host".
 - **M8:** mission audit: play IV start to finish with 4 players and fill in `docs/missions.md`, applying
