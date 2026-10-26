@@ -26,6 +26,7 @@
 #include "render/d3d9_hook.h"
 #include "render/overlay.h"
 #include "sync/ghost.h"
+#include "sync/downed.h"
 #include "sync/session_settings.h"
 #include "sync/wallet.h"
 #include "sync/remote_players.h"
@@ -60,6 +61,7 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
   story::configure(cfg.story);
   story::register_hooks();
   phone::install();
+  downed::install();
   story::audit::configure(cfg.audit);
   story::audit::register_hooks();
   native_hooks::set_trace(cfg.story_trace_calls);

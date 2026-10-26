@@ -8,8 +8,8 @@
 // left down bleeds out after 60 s and dies normally (hospital); the host never bleeds out.
 // When every player is down at once, the host sends AllDown and everyone dies for real, so
 // the mission fails as normal. Outside missions deaths are normal and per player.
-// Limit: a single hit large enough to go from healthy to dead in one frame (explosions)
-// still kills; catching it would need a health buffer the HUD would show.
+// Lethal hits: while on a mission the player's health setters are hooked so no damage takes them below
+// the downed level; a hit that would have killed puts them down instead (install()).
 
 #include <cstdint>
 #include <span>
@@ -51,6 +51,8 @@ struct Frame {
   std::vector<Teammate> teammates;
 };
 
+// Hooks the player's health setters (the lethal-damage guard). Once, at startup.
+bool install();
 // Game thread, every frame.
 void tick(const Frame& f, net::Session& net);
 void on_message(const net::GameMessage& m, std::uint8_t my_id);

@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include <MinHook.h>
+
 #include <cmath>
 #include <format>
 
@@ -63,6 +65,57 @@ bool held(int vk) { return input::game_focused() && (GetAsyncKeyState(vk) & 0x80
 
 InjuredPose g_pose; // our own player while downed
 
+// Lethal-damage guard. A player dies below 100 health and goes down at 115, so any hit bigger than the
+// gap between (a shotgun blast at 130) killed outright. While on a mission the player's health setters
+// (CPlayerPed: set 0xA2D240, set 0xA2B510, add 0xA29E40 - health float at +0xE9C) are kept from going
+// below kDownedHealth; a clamped hit puts us down. die() lifts the guard for its own SetCharHealth(0).
+constexpr std::uintptr_t kFnSetHealth = 0xA2D240, kFnSetHealth2 = 0xA2B510, kFnAddHealth = 0xA29E40,
+                         kPedPool = 0x18B6F1C, kFnPoolAt = 0x499D20, kOffHealth = 0xE9C;
+void* g_guard_ped = nullptr;      // our CPed
+volatile bool g_guard = false;    // on a mission with downed on
+volatile bool g_allow_death = false;
+volatile bool g_lethal_hit = false;
+
+template <class T> T at_static(std::uintptr_t va) {
+  return reinterpret_cast<T>(va - 0x400000 + reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr)));
+}
+
+bool guarding(void* ped) { return ped && ped == g_guard_ped && g_guard && !g_allow_death; }
+
+float floor_hit(float value) {
+  if (value >= static_cast<float>(kDownedHealth)) return value;
+  g_lethal_hit = true;
+  return static_cast<float>(kDownedHealth);
+}
+
+using SetHealthFn = void(__thiscall*)(void*, float, int);
+using SetHealth2Fn = void(__thiscall*)(void*, float);
+SetHealthFn g_set_health = nullptr;
+SetHealth2Fn g_set_health2 = nullptr, g_add_health = nullptr;
+
+void __fastcall set_health_detour(void* ped, void*, float value, int flag) {
+  g_set_health(ped, guarding(ped) ? floor_hit(value) : value, flag);
+}
+void __fastcall set_health2_detour(void* ped, void*, float value) {
+  g_set_health2(ped, guarding(ped) ? floor_hit(value) : value);
+}
+void __fastcall add_health_detour(void* ped, void*, float delta) {
+  if (guarding(ped)) {
+    const float now = *reinterpret_cast<float*>(static_cast<std::uint8_t*>(ped) + kOffHealth);
+    delta = floor_hit(now + delta) - now;
+  }
+  g_add_health(ped, delta);
+}
+
+void* ped_object(n::Ped handle) {
+  __try {
+    using PoolAt = void*(__thiscall*)(void*, n::Ped);
+    return at_static<PoolAt>(kFnPoolAt)(*at_static<void**>(kPedPool), handle);
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return nullptr;
+  }
+}
+
 void go_down(n::Ped me) {
   g_downed = true;
   g_downed_since = GetTickCount();
@@ -86,7 +139,9 @@ void die(n::Ped me) {
   g_pose.up(me);
   invoke(kSetPlayerControl, n::GetPlayerId(), true);
   n::SetCharInvincible(me, false);
+  g_allow_death = true;
   n::SetCharHealth(me, 0);
+  g_allow_death = false;
   prompt("");
 }
 
@@ -138,6 +193,22 @@ void InjuredPose::up(n::Ped ped) {
   if (ped && n::DoesCharExist(ped)) n::ClearCharTasks(ped);
 }
 
+bool install() {
+  struct Hook { std::uintptr_t va; void* detour; void** orig; };
+  const Hook hooks[] = {{kFnSetHealth, reinterpret_cast<void*>(&set_health_detour), reinterpret_cast<void**>(&g_set_health)},
+                        {kFnSetHealth2, reinterpret_cast<void*>(&set_health2_detour), reinterpret_cast<void**>(&g_set_health2)},
+                        {kFnAddHealth, reinterpret_cast<void*>(&add_health_detour), reinterpret_cast<void**>(&g_add_health)}};
+  for (const Hook& h : hooks) {
+    void* target = at_static<void*>(h.va);
+    if (MH_CreateHook(target, h.detour, h.orig) != MH_OK || MH_EnableHook(target) != MH_OK) {
+      log::error("Downed: could not hook the player health setter at {:#x}", h.va);
+      return false;
+    }
+  }
+  log::info("Downed: lethal-damage guard installed");
+  return true;
+}
+
 bool is_msg(std::span<const std::uint8_t> d) {
   return !d.empty() && d[0] >= static_cast<std::uint8_t>(Msg::MissionFlag) &&
          d[0] <= static_cast<std::uint8_t>(Msg::AllDown);
@@ -165,7 +236,10 @@ void tick(const Frame& f, net::Session& net) {
   const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
   if (!me || !n::DoesCharExist(me)) return;
   const DWORD now = GetTickCount();
+  g_guard_ped = ped_object(me);
+  g_guard = f.in_session && g_on_mission;
   if (!f.in_session) {
+    g_guard = false;
     if (g_downed) get_up(me, kRevivedHealth);
     clear();
     return;
@@ -204,9 +278,11 @@ void tick(const Frame& f, net::Session& net) {
       const DWORD left = f.hosting ? 0 : (kBleedOutMs - (now - g_downed_since)) / 1000;
       prompt(f.hosting ? "You're down! A partner can revive you." : std::format("You're down! A partner can revive you ({} s).", left / 10 * 10 + 10));
     }
-  } else if (g_on_mission && !n::IsCharDead(me) && n::GetCharHealth(me) <= kDownAt) {
+  } else if (g_on_mission && !n::IsCharDead(me) && (g_lethal_hit || n::GetCharHealth(me) <= kDownAt)) {
+    if (g_lethal_hit) log::info("Downed: a lethal hit was held at {}", kDownedHealth);
     go_down(me);
   }
+  g_lethal_hit = false;
 
   // --- host: everyone down at once -> everyone dies (the mission fails as normal)
   if (f.hosting && g_on_mission && g_downed && !f.teammates.empty()) {
