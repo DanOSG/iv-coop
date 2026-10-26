@@ -10,7 +10,7 @@ namespace ivc::sync {
 namespace n = natives;
 namespace {
 constexpr std::uint32_t kUnlockRagdoll = 0x2F2F51E9, kIsPedRagdoll = 0x3E251ADE, kSwitchPedToRagdoll = 0x1A0F56C5,
-                        kIsCharOnFire = 0x358E21C5, kStartCharFire = 0x5FB31295, kExtinguishCharFire = 0x5D786EEE;
+                        kAllowReactionAnims = 0x0FEA6230, kIsCharOnFire = 0x358E21C5, kStartCharFire = 0x5FB31295, kExtinguishCharFire = 0x5D786EEE;
 
 // Tuning for animated mode.
 constexpr float kSnapDist = 5.0f;       // m of horizontal error before we teleport
@@ -80,6 +80,7 @@ bool Puppet::ensure(const n::Vector3& at) {
     n::SetCharWillMoveWhenInjured(ped_, true);
     // Hits don't knock a partner over here; they ragdoll when their owner does (mirror_body).
     n::invoke(kUnlockRagdoll, ped_, false);
+    n::invoke(kAllowReactionAnims, ped_, false); // nor the canned knockdown/stagger anims
     ragdoll_locked_ = true, mirroring_ragdoll_ = false;
   } else {
     n::SetCharCollision(ped_, false);
