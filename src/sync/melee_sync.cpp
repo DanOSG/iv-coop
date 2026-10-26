@@ -8,6 +8,7 @@
 #include <format>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -89,13 +90,16 @@ void sound(n::Ped ped, const std::string& name) {
   if (!name.empty() && ped && n::DoesCharExist(ped)) invoke(kPlaySoundFromPed, -1, name.c_str(), ped);
 }
 
-n::Vector3 bone(n::Ped ped, std::uint32_t tag) {
+float dist(const n::Vector3& a, const n::Vector3& b) { return std::hypot(a.x - b.x, a.y - b.y, a.z - b.z); }
+
+// A bone's world position, or nothing if the tag isn't one of this skeleton's (an unknown tag returns
+// garbage - the same garbage for every ped, which once made every swing "touch").
+std::optional<n::Vector3> bone(n::Ped ped, std::uint32_t tag) {
   n::Vector3 v{};
   invoke(kGetPedBonePosition, ped, tag, 0.0f, 0.0f, 0.0f, &v);
+  if (dist(v, n::GetCharCoordinates(ped)) > 2.0f) return std::nullopt;
   return v;
 }
-
-float dist(const n::Vector3& a, const n::Vector3& b) { return std::hypot(a.x - b.x, a.y - b.y, a.z - b.z); }
 
 // The side a blow from `attacker` comes from, relative to `ped`'s facing: -180..180, + = from the left.
 float side_of(n::Ped ped, n::Ped attacker) {
@@ -194,6 +198,7 @@ void load_strikes(const std::filesystem::path& file, const std::map<std::string,
       s.damage = static_cast<std::uint16_t>(std::stof(t[b + 4]) * kDamageScale);
     } catch (...) {
     }
+    if (!s.damage) continue; // blocks and the like
     if (b + 7 < t.size() && t[b + 7] != "None") {
       std::string recoil = t[b + 7];
       if (recoil.size() > 4 && recoil.compare(recoil.size() - 4, 4, "_Act") == 0) recoil.resize(recoil.size() - 4);
@@ -252,25 +257,39 @@ void check_incoming(net::Session& net) {
     if (strike == g_strikes.end()) continue;
     for (int k = 0; k < 2 && !mirror.connected; ++k) {
       if (!strike->second.bones[k]) continue;
-      const n::Vector3 fist = bone(ped, strike->second.bones[k]);
-      for (std::uint32_t tag : kTargetBones)
-        if (dist(fist, bone(me, tag)) < strike->second.radii[k] + kBodyRadius) {
-          mirror.connected = true;
-          resolve_hit(mirror.attacker, ped, mirror.clip, net);
-          break;
-        }
+      const auto fist = bone(ped, strike->second.bones[k]);
+      if (!fist) continue;
+      for (std::uint32_t tag : kTargetBones) {
+        const auto body = bone(me, tag);
+        if (!body || dist(*fist, *body) >= strike->second.radii[k] + kBodyRadius) continue;
+        mirror.connected = true;
+        resolve_hit(mirror.attacker, ped, mirror.clip, net);
+        break;
+      }
     }
   }
 }
 
-void log_bones_once(n::Ped me) {
+// Once, in melee: every bone tag 0..2999 this skeleton answers to, with its position in the ped's own frame
+// (right, forward, up from the ped origin) - to pin down the real tags for hands, forearms, legs and chest.
+void scan_bones_once(n::Ped me) {
   static bool done = false;
   if (done) return;
   done = true;
-  const n::Vector3 root = n::GetCharCoordinates(me);
+  const n::Vector3 o = n::GetCharCoordinates(me);
+  const float h = n::GetCharHeading(me) * 3.14159265f / 180.0f;
+  const float fx = -std::sin(h), fy = std::cos(h); // forward (IV: 0 = +y, CCW)
+  const float rx = fy, ry = -fx;                   // right
   std::string out;
-  for (const auto& [name, tag] : kBones) out += std::format(" {}={:.2f}", name, dist(bone(me, tag), root));
-  log::info("Melee: bone distances from the ped origin (sanity check of the tags):{}", out);
+  int found = 0;
+  for (std::uint32_t tag = 0; tag < 3000; ++tag) {
+    const auto v = bone(me, tag);
+    if (!v) continue;
+    const float dx = v->x - o.x, dy = v->y - o.y, dz = v->z - o.z;
+    out += std::format(" {}:({:.2f},{:.2f},{:.2f})", tag, dx * rx + dy * ry, dx * fx + dy * fy, dz);
+    ++found;
+  }
+  log::info("Melee: {} valid bone tags (tag:(right,forward,up) m):{}", found, out);
 }
 
 } // namespace
@@ -289,7 +308,7 @@ void tick(bool in_session, bool can_hit, net::Session& net) {
   const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
   if (!me || !n::DoesCharExist(me)) return;
   const DWORD now = GetTickCount();
-  if (invoke<bool>(kIsCharInMeleeCombat, me)) g_melee_until = now + 1500, log_bones_once(me);
+  if (invoke<bool>(kIsCharInMeleeCombat, me)) g_melee_until = now + 1500, scan_bones_once(me);
   int found = -1;
   if (now < g_melee_until || g_current >= 0) {
     if (g_current >= 0 && is_playing(me, g_clips[g_current])) found = g_current;
