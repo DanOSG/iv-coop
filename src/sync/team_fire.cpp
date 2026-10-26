@@ -169,8 +169,15 @@ Hit hits_on(n::Ped target) {
       hit.weapon = static_cast<std::uint8_t>(g_weapon);
     }
   }
-  // Melee: a new strike while locked on within reach.
-  if (g_strike && aimed && dist <= kMeleeReach && now - cd.melee > 250) {
+  // Melee: a new strike with them within reach, locked on or roughly in front of us (within 60 degrees).
+  bool in_front = false;
+  if (g_strike && !aimed && dist <= kMeleeReach) {
+    // IV headings: degrees, 0 = north (+y), counter-clockwise.
+    const float to_target = std::atan2(-(b.x - a.x), b.y - a.y) * 57.2958f;
+    const float diff = std::fabs(std::fmod(to_target - n::GetCharHeading(me) + 540.0f, 360.0f) - 180.0f);
+    in_front = diff < 60.0f;
+  }
+  if (g_strike && (aimed || in_front) && dist <= kMeleeReach && now - cd.melee > 250) {
     cd.melee = now;
     hit.amount += melee_damage(g_weapon);
     hit.weapon = static_cast<std::uint8_t>(g_weapon);

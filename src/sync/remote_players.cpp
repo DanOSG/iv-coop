@@ -726,6 +726,12 @@ void tick() {
         r.downed = down;
         r.puppet.set_downed_marker(r.downed);
         r.puppet.apply_settings(session_settings::targeting_allowed(), session_settings::current().partner_blips);
+        {
+          // Player peds can't be locked on to by another player unless the game allows it.
+          static int allowed = -1;
+          const int want = session_settings::targeting_allowed();
+          if (want != allowed) n::invoke(0x362B5D1B, n::GetPlayerId(), want != 0), allowed = want; // ALLOW_LOCKON_TO_FRIENDLY_PLAYERS
+        }
       }
       if (local) dist = std::hypot(smp->x - local->x, smp->y - local->y, smp->z - local->z);
     }
