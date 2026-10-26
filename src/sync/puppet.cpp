@@ -69,9 +69,13 @@ bool Puppet::ensure(const n::Vector3& at) {
   n::SetBlockingOfNonTemporaryEvents(ped_, true);
   // Not invincible (hits must register so we can report them), but on a big health buffer
   // that is refilled every frame, so a local hit can never kill it: only its owner decides.
-  n::SetCharMaxHealth(ped_, kPuppetHealthBuffer);
-  n::SetCharHealth(ped_, kPuppetHealthBuffer);
-  shown_health_ = kPuppetHealthBuffer;
+  // A player ped takes no damage from us (team_fire detects our hits), so it carries the partner's real
+  // health (a player's 100..200) and its lock-on health bar reads like a player's. An ordinary ped can be
+  // hurt here, so it sits on a big buffer refilled every frame.
+  const std::uint32_t max_health = is_player_ped_ ? 200 : kPuppetHealthBuffer;
+  n::SetCharMaxHealth(ped_, max_health);
+  n::SetCharHealth(ped_, max_health);
+  shown_health_ = max_health;
   n::SetCharAccuracy(ped_, 100); // its shots go where the remote player aimed
   dead_ = false, weapon_ = 0, have_shots_ = false, outfit_applied_ = false;
   if (animated_) {
@@ -394,7 +398,9 @@ void Puppet::show_health(std::uint32_t health) {
   // max) reads the same, but never below kMinShown: one local hit must not kill the copy here.
   constexpr std::uint32_t kMinShown = 300;
   const std::uint32_t above = health > 100 ? std::min<std::uint32_t>(health - 100, 100) : 0;
-  const std::uint32_t shown = std::max(kMinShown, 100 + above * (kPuppetHealthBuffer - 100) / 100);
+  // A player ped shows it as is (101 at least: at 100 it would die here).
+  const std::uint32_t shown = is_player_ped_ ? 100 + std::max<std::uint32_t>(above, 1)
+                                             : std::max(kMinShown, 100 + above * (kPuppetHealthBuffer - 100) / 100);
   if (shown == shown_health_) return;
   shown_health_ = shown;
   n::SetCharHealth(ped_, shown);

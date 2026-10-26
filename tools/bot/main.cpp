@@ -355,7 +355,7 @@ int main(int argc, char** argv) {
           if (a.downed && health <= 115) { // --downed: knocked down again instead of dying (as on a mission)
             if (!downed) std::printf("[%s] downed\n", a.name.c_str());
             downed = true, health = 110;
-          } else if (health <= 0) {
+          } else if (health < 100) { // a player dies below 100 (health runs 100..200)
             dead_until = now + 5000;
             std::printf("[%s] died; respawning in 5 s\n", a.name.c_str());
           }

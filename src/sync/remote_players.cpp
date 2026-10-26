@@ -576,22 +576,6 @@ void tick() {
       wallet::tick(st.mode == net::Mode::Joined, host_name);
     }
     const session_settings::Settings& settings = session_settings::current();
-    // Partners are player peds, and player-on-player damage is gated by the game's network friendly-fire
-    // option (the setter lives in protected code; we only call the native). Keep it matching Team fire.
-    {
-      static int applied = -1;
-      static DWORD last = 0;
-      const int want = f.in_session && session_settings::damage_allowed();
-      if (want != applied || GetTickCount() - last > 2000) {
-        n::invoke(0x5AC43965, want); // NETWORK_SET_FRIENDLY_FIRE_OPTION
-        if (want != applied) {
-          int now = -1;
-          n::invoke(0x577144A0, &now); // NETWORK_GET_FRIENDLY_FIRE_OPTION
-          log::info("Team fire: network friendly-fire option set to {}, reads back {}", want, now);
-        }
-        applied = want, last = GetTickCount();
-      }
-    }
     const bool session_live = f.in_session;
     f.in_session = f.in_session && settings.downed; // off: deaths are normal
     downed::tick(f, session());
