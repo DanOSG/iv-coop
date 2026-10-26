@@ -714,6 +714,7 @@ void tick() {
           }
         }
         if (!down || veh) r.puppet.apply_combat(*smp, now);
+        r.puppet.show_health(smp->health);
         r.health = smp->health, r.weapon = smp->weapon, r.dead = (smp->flags & sync::PlayerState::kDead) != 0;
         r.wanted = smp->wanted;
         r.vehicle_id = smp->vehicle_id;

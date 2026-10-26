@@ -67,6 +67,7 @@ bool Puppet::ensure(const n::Vector3& at) {
   // that is refilled every frame, so a local hit can never kill it: only its owner decides.
   n::SetCharMaxHealth(ped_, kPuppetHealthBuffer);
   n::SetCharHealth(ped_, kPuppetHealthBuffer);
+  shown_health_ = kPuppetHealthBuffer;
   n::SetCharAccuracy(ped_, 100); // its shots go where the remote player aimed
   dead_ = false, weapon_ = 0, have_shots_ = false, outfit_applied_ = false;
   if (animated_) {
@@ -251,9 +252,9 @@ void Puppet::apply_outfit(const PlayerState& s) {
 std::uint16_t Puppet::take_hits_from(n::Ped attacker) {
   if (!ped_ || dead_ || !n::DoesCharExist(ped_)) return 0;
   const std::uint32_t h = n::GetCharHealth(ped_);
-  const std::uint32_t lost = h < kPuppetHealthBuffer ? kPuppetHealthBuffer - h : 0;
+  const std::uint32_t lost = h < shown_health_ ? shown_health_ - h : 0;
   const bool by_attacker = attacker && n::HasCharBeenDamagedByChar(ped_, attacker);
-  if (lost) n::SetCharHealth(ped_, kPuppetHealthBuffer);
+  if (lost) n::SetCharHealth(ped_, shown_health_);
   n::ClearCharLastDamageEntity(ped_);
   return by_attacker ? static_cast<std::uint16_t>(std::min<std::uint32_t>(lost, 0xFFFF)) : 0;
 }
@@ -331,6 +332,18 @@ void Puppet::apply_settings(bool targetable, bool blip_visible) {
     n::ChangeBlipDisplay(blip_, blip_visible ? 2 : 0);
     blip_visible_ = blip_visible;
   }
+}
+
+void Puppet::show_health(std::uint32_t health) {
+  if (!ped_ || dead_) return;
+  // Player health runs 100 (dead) .. 200. Scale that onto the buffer so the lock-on health bar (health /
+  // max) reads the same, but never below kMinShown: one local hit must not kill the copy here.
+  constexpr std::uint32_t kMinShown = 300;
+  const std::uint32_t above = health > 100 ? std::min<std::uint32_t>(health - 100, 100) : 0;
+  const std::uint32_t shown = std::max(kMinShown, 100 + above * (kPuppetHealthBuffer - 100) / 100);
+  if (shown == shown_health_) return;
+  shown_health_ = shown;
+  n::SetCharHealth(ped_, shown);
 }
 
 void Puppet::despawn() {

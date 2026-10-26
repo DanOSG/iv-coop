@@ -48,6 +48,8 @@ class Puppet {
   // counter at their aim point), aiming, and death/respawn. Call after drive()/sit_in().
   void apply_combat(const PlayerState& s, std::uint32_t now_ms);
   bool dead() const { return dead_; }
+  // Shows the remote player's health (100..200) on the copy's lock-on health bar.
+  void show_health(std::uint32_t health);
 
   // --- appearance (M6d) ---
   // Use this exact model (the remote player's real model, e.g. Niko for the host) instead
@@ -92,6 +94,7 @@ class Puppet {
   // Appearance state.
   std::uint32_t model_override_ = 0;
   std::uint32_t rejected_model_ = 0;
+  std::uint32_t shown_health_ = 2000; // the copy's health as last set (take_hits_from refills to it)
   bool targetable_ = true, blip_visible_ = true; // apply_settings, as last applied to this ped/blip
   bool downed_marker_ = false; // last model set_model refused (logged once)
   std::uint8_t worn_drawable_[11] = {};

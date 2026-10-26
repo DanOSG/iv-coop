@@ -25,7 +25,7 @@ bool g_force_send = true;
 const char* ff_name(FriendlyFire f) {
   switch (f) {
     case FriendlyFire::On: return "On";
-    case FriendlyFire::DamageOnly: return "Damage only";
+    case FriendlyFire::DamageOnly: return "No aim";
     default: return "Off";
   }
 }
@@ -53,8 +53,9 @@ struct Entry {
   const char* name;
   int values;
 };
-constexpr Entry kEntries[] = {{"Friendly fire", 3},   {"Downed and revive", 2}, {"Shared mission pay", 2},
-                              {"Radio sync", 2},      {"Clock and weather sync", 2}, {"Partner blips", 2}};
+// Labels fit one phone line (about 19 characters with the value).
+constexpr Entry kEntries[] = {{"Team fire", 3},  {"Revive", 2},       {"Shared pay", 2},
+                              {"Radio sync", 2}, {"Weather sync", 2}, {"Partner blips", 2}};
 
 int value_of(const Settings& s, int i) {
   switch (i) {
