@@ -263,8 +263,8 @@ void register_hooks() {
   on(0x44D349D9, "CHANGE_BLIP_SCALE", [](const Call& c) { blip_prop(c, BlipPropKind::Scale); });
   on(0x0A9D695E, "CHANGE_BLIP_NAME_FROM_TEXT_FILE", [](const Call& c) { blip_prop(c, BlipPropKind::Name); });
 
-  // Mission entities: created -> networked (pinned to the host); deleted/released ->
-  // removed from the network. (Objects come later.)
+  // Mission entities (peds, cars, objects): created -> networked (pinned to the host);
+  // deleted/released -> removed from the network.
   on(0x4A673763, "CREATE_CHAR",
      [](const Call& c) { entity_created(c, sync::EntityType::Ped, c.arg<std::uint32_t>(1), 5); });
   on(0x2F1D6843, "CREATE_CAR",
@@ -273,6 +273,12 @@ void register_hooks() {
      [](const Call& c) { entity_created(c, sync::EntityType::Ped, c.arg<std::uint32_t>(2), 3); });
   on(0x442B1C1D, "CREATE_CHAR_AS_PASSENGER",
      [](const Call& c) { entity_created(c, sync::EntityType::Ped, c.arg<std::uint32_t>(2), 4); });
+  on(0x4DE152A0, "CREATE_OBJECT",
+     [](const Call& c) { entity_created(c, sync::EntityType::Object, c.arg<std::uint32_t>(0), 4); });
+  on(0x75C51A26, "CREATE_OBJECT_NO_OFFSET",
+     [](const Call& c) { entity_created(c, sync::EntityType::Object, c.arg<std::uint32_t>(0), 4); });
+  before(0x62FE6290, "DELETE_OBJECT", entity_released);
+  before(0x493B655B, "MARK_OBJECT_AS_NO_LONGER_NEEDED", entity_released);
   before(0x0E3B49BF, "DELETE_CHAR", entity_released);
   before(0x7F71342D, "DELETE_CAR", entity_released);
   before(0x0B774604, "MARK_CHAR_AS_NO_LONGER_NEEDED", entity_released);

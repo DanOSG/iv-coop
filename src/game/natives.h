@@ -219,6 +219,22 @@ inline void SetCarCoordinatesNoOffset(Vehicle v, Vector3 p) { invoke(0x12D64378,
 inline void SetCarForwardSpeed(Vehicle v, float s) { invoke(0x65BB0060, v, s); }
 inline Vehicle CreateCar(std::uint32_t model, Vector3 at) { Vehicle v = 0; invoke(0x2F1D6843, model, at.x, at.y, at.z, &v, true); return v; }
 inline void DeleteCar(Vehicle& v) { invoke(0x7F71342D, &v); }
+
+// Objects.
+using Object = Handle;
+inline Object CreateObjectNoOffset(std::uint32_t model, Vector3 at) {
+  Object o = 0;
+  invoke(0x75C51A26, model, at.x, at.y, at.z, &o, true);
+  return o;
+}
+inline void DeleteObject(Object& o) { invoke(0x62FE6290, &o); }
+inline bool DoesObjectExist(Object o) { return invoke<bool>(0x6DAB78CD, o); }
+inline Vector3 GetObjectCoordinates(Object o) { Vector3 v{}; invoke(0x49DA4F9E, o, &v.x, &v.y, &v.z); return v; }
+inline Vector3 GetObjectVelocity(Object o) { Vector3 v{}; invoke(0x06D651A7, o, &v.x, &v.y, &v.z); return v; }
+inline Vector4 GetObjectQuaternion(Object o) { Vector4 q{}; invoke(0x0F731898, o, &q.x, &q.y, &q.z, &q.w); return q; }
+inline void SetObjectCoordinates(Object o, Vector3 at) { invoke(0x52FD30EB, o, at.x, at.y, at.z); }
+inline void SetObjectQuaternion(Object o, Vector4 q) { invoke(0x71270D73, o, q.x, q.y, q.z, q.w); }
+inline void FreezeObjectPosition(Object o, bool frozen) { invoke(0x7CA8382B, o, frozen); }
 inline void WarpCharIntoCar(Ped ped, Vehicle v) { invoke(0x73D3504A, ped, v); }
 inline void WarpCharIntoCarAsPassenger(Ped ped, Vehicle v, std::uint32_t seat) { invoke(0x172376FE, ped, v, seat); }
 inline void WarpCharFromCarToCoord(Ped ped, Vector3 p) { invoke(0x6A77506A, ped, p.x, p.y, p.z); }

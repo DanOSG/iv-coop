@@ -35,7 +35,23 @@ n::MoveState faster(n::MoveState m) {
 
 } // namespace
 
+void Puppet::adopt(n::Ped ped) {
+  ped_ = ped, adopted_ = true, animated_ = true, is_player_ped_ = false;
+  dead_ = false, weapon_ = 0, have_shots_ = false, vehicle_ = 0, seat_ = -1;
+  action_ = Action::None, mirroring_ragdoll_ = false;
+  n::SetBlockingOfNonTemporaryEvents(ped_, true);
+  n::SetCharKeepTask(ped_, true);
+  n::SetPedDontDoEvasiveDives(ped_, true);
+  n::SetDontActivateRagdollFromPlayerImpact(ped_, true);
+  n::SetCharWillMoveWhenInjured(ped_, true);
+  n::invoke(kUnlockRagdoll, ped_, false);
+  n::invoke(kAllowReactionAnims, ped_, false);
+  ragdoll_locked_ = true;
+  phase_ = "adopted";
+}
+
 bool Puppet::ensure(const n::Vector3& at) {
+  if (adopted_) return ped_ && n::DoesCharExist(ped_);
   if (ped_ && n::DoesCharExist(ped_)) return true;
   if (ped_) {
     log::warn("Puppet ped {} vanished; respawning", ped_);
@@ -331,7 +347,7 @@ void Puppet::apply_combat(const PlayerState& s, std::uint32_t now_ms) {
     return;
   }
   if (dead_ || n::IsCharDead(ped_)) {
-    despawn(); // ensure() respawns it next frame at their current position
+    if (!adopted_) despawn(); // ensure() respawns it next frame at their current position
     return;
   }
 
@@ -418,6 +434,10 @@ void Puppet::show_health(std::uint32_t health) {
 }
 
 void Puppet::despawn() {
+  if (adopted_) { // not ours to delete
+    ped_ = 0, vehicle_ = 0, action_ = Action::None, dead_ = false;
+    return;
+  }
   if (blip_) n::RemoveBlip(blip_), blip_ = 0;
   if (player_slots::owns(ped_)) player_slots::release(ped_);
   else if (ped_ && n::DoesCharExist(ped_)) n::DeleteChar(ped_);

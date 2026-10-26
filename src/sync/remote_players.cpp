@@ -832,6 +832,11 @@ void tick() {
       story::client_tick(g_entities);
       handle_mission_cars(ss.my_id);
     }
+    g_entities.player_ped = [my_id = ss.my_id](std::uint8_t id) -> n::Ped {
+      if (id == my_id) return n::GetPlayerChar(n::GetPlayerId());
+      const auto it = g_remotes.find(id);
+      return it != g_remotes.end() ? it->second.puppet.ped() : 0;
+    };
     g_entities.tick(now, ss.my_id, g_was_host, positions, net);
     for (const auto& hit : g_entities.collect_hits(me)) {
       net.send_game(sync::encode_damage({hit.kind, hit.target, hit.amount, local ? local->weapon : 0}), true);

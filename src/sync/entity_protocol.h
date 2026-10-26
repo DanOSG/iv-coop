@@ -39,7 +39,7 @@ struct Damage {
   std::uint32_t weapon = 0;
 };
 
-enum class EntityType : std::uint8_t { Ped = 1, Vehicle = 2 };
+enum class EntityType : std::uint8_t { Ped = 1, Vehicle = 2, Object = 3 };
 
 struct EntityState {
   std::uint32_t time_ms = 0;
@@ -47,8 +47,19 @@ struct EntityState {
   std::uint32_t id = 0;
   float x = 0, y = 0, z = 0;
   float vx = 0, vy = 0, vz = 0;
-  float qx = 0, qy = 0, qz = 0, qw = 1; // vehicles: full orientation; peds: yaw only
+  float qx = 0, qy = 0, qz = 0, qw = 1; // vehicles/objects: full orientation; peds: yaw only
   std::uint16_t health = 200;
+
+  // Peds: what they're doing, so a joiner's copy does the same (walk/run, gun, shots at the same target,
+  // crouch, ragdoll, fire, seat).
+  std::uint32_t weapon = 0;
+  std::uint16_t shots = 0;           // cumulative rounds fired (wraps); copies fire the difference
+  std::uint8_t flags = 0;            // kShooting | kRagdoll | kOnFire | kDucking
+  float ax = 0, ay = 0, az = 0;      // aim point (world)
+  std::uint8_t target = 0xFF;        // the player it's shooting at (copies aim at their copy of them)
+  std::uint32_t vehicle = 0;         // networked vehicle it sits in (0: on foot)
+  std::int8_t seat = -1;             // -1 driver, 0.. passenger seats
+  static constexpr std::uint8_t kShooting = 1, kRagdoll = 2, kOnFire = 4, kDucking = 8;
 
   static EntityState lerp(const EntityState& a, const EntityState& b, float k) {
     EntityState o = b;
@@ -113,7 +124,8 @@ inline std::vector<std::uint8_t> encode_owner(std::uint32_t id, std::uint8_t sim
 inline std::vector<std::uint8_t> encode_entity_state(const EntityState& s) {
   net::Writer w;
   w.put(GameMsg::EntityState).put(std::uint8_t{0}).put(s.id).put(s.seq).put(s.time_ms).put(s.x).put(s.y).put(s.z)
-      .put(s.vx).put(s.vy).put(s.vz).put(s.qx).put(s.qy).put(s.qz).put(s.qw).put(s.health);
+      .put(s.vx).put(s.vy).put(s.vz).put(s.qx).put(s.qy).put(s.qz).put(s.qw).put(s.health).put(s.weapon).put(s.shots)
+      .put(s.flags).put(s.ax).put(s.ay).put(s.az).put(s.target).put(s.vehicle).put(s.seat);
   return std::move(w.data());
 }
 
@@ -155,6 +167,8 @@ inline std::optional<EntityMsg> decode_entity_msg(std::span<const std::uint8_t> 
       auto& s = m.state;
       r.get(s.id), r.get(s.seq), r.get(s.time_ms), r.get(s.x), r.get(s.y), r.get(s.z), r.get(s.vx), r.get(s.vy);
       r.get(s.vz), r.get(s.qx), r.get(s.qy), r.get(s.qz), r.get(s.qw), r.get(s.health);
+      r.get(s.weapon), r.get(s.shots), r.get(s.flags), r.get(s.ax), r.get(s.ay), r.get(s.az), r.get(s.target);
+      r.get(s.vehicle), r.get(s.seat);
       break;
     }
     case GameMsg::Damage:

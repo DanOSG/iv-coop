@@ -16,8 +16,20 @@ constexpr std::uint32_t kCarBuffer = 1000;   // follower vehicle health buffer (
 
 bool exists(EntityType t, n::Handle h) {
   if (!h) return false;
-  return t == EntityType::Ped ? n::DoesCharExist(h) : n::DoesVehicleExist(h);
+  switch (t) {
+    case EntityType::Ped: return n::DoesCharExist(h);
+    case EntityType::Vehicle: return n::DoesVehicleExist(h);
+    default: return n::DoesObjectExist(h);
+  }
 }
+
+const char* type_name(EntityType t) {
+  return t == EntityType::Ped ? "ped" : t == EntityType::Vehicle ? "vehicle" : "object";
+}
+
+constexpr std::uint32_t kGetCurrentCharWeapon = 0x5AB8289F, kIsCharShooting = 0x324D1594,
+                        kIsPedInCombat = 0x020106D6, kIsCharDucking = 0x495D6021, kIsCharOnFire = 0x358E21C5,
+                        kGetMaxPassengers = 0x554014F1, kGetCharInPassengerSeat = 0x5E756B51;
 
 float dist(const EntityState& s, const n::Vector3& p) { return std::hypot(s.x - p.x, s.y - p.y, s.z - p.z); }
 
@@ -39,7 +51,7 @@ std::optional<std::uint32_t> EntitySync::host_register(n::Handle handle, EntityT
   c.id = id, c.type = type, c.model = model, c.x = e.last.x, c.y = e.last.y, c.z = e.last.z;
   c.qx = e.last.qx, c.qy = e.last.qy, c.qz = e.last.qz, c.qw = e.last.qw, c.sim_owner = net::kHostId;
   net.send_game(encode_create(c), true);
-  log::info("Entity {} registered: {} model 0x{:08X} handle {}", id, type == EntityType::Ped ? "ped" : "vehicle", model,
+  log::info("Entity {} registered: {} model 0x{:08X} handle {}", id, type_name(type), model,
             handle);
   return id;
 }
@@ -104,7 +116,7 @@ void EntitySync::apply_create(const EntityCreate& c, std::uint8_t my_id) {
     e.last.id = c.id, e.last.x = c.x, e.last.y = c.y, e.last.z = c.z;
     e.last.qx = c.qx, e.last.qy = c.qy, e.last.qz = c.qz, e.last.qw = c.qw;
     log::info("Entity {} created by host ({} model 0x{:08X}), sim owner #{}", c.id,
-              c.type == EntityType::Ped ? "ped" : "vehicle", c.model, c.sim_owner);
+              type_name(c.type), c.model, c.sim_owner);
   } else {
     set_owner(e, c.sim_owner, my_id);
   }
@@ -195,10 +207,13 @@ bool EntitySync::ensure_spawned(Entity& e, std::uint8_t my_id) {
   n::RequestModel(e.model);
   if (!n::HasModelLoaded(e.model)) return false;
   const n::Vector3 at{e.last.x, e.last.y, e.last.z};
-  e.handle = e.type == EntityType::Ped ? n::CreateChar(n::kPedTypeCivMale, e.model, at) : n::CreateCar(e.model, at);
+  e.handle = e.type == EntityType::Ped       ? n::CreateChar(n::kPedTypeCivMale, e.model, at)
+             : e.type == EntityType::Vehicle ? n::CreateCar(e.model, at)
+                                             : n::CreateObjectNoOffset(e.model, at);
   n::MarkModelAsNoLongerNeeded(e.model);
   if (!e.handle) return false;
   if (e.type == EntityType::Vehicle) n::SetVehicleQuaternion(e.handle, {e.last.qx, e.last.qy, e.last.qz, e.last.qw});
+  else if (e.type == EntityType::Object) n::SetObjectQuaternion(e.handle, {e.last.qx, e.last.qy, e.last.qz, e.last.qw});
   else n::SetCharHeading(e.handle, e.last.heading());
   if (e.sim_owner == my_id)
     make_live(e);
@@ -210,6 +225,8 @@ bool EntitySync::ensure_spawned(Entity& e, std::uint8_t my_id) {
 
 void EntitySync::make_live(Entity& e) {
   e.live = true;
+  e.driver.reset();
+  if (e.type == EntityType::Object) return; // the script that made it decides (it may have frozen it)
   // Wake up from the last synced pose, keeping its motion.
   const EntityState& s = e.last;
   if (e.type == EntityType::Ped) {
@@ -234,13 +251,18 @@ void EntitySync::make_live(Entity& e) {
 void EntitySync::make_follower(Entity& e) {
   e.live = false;
   if (e.type == EntityType::Ped) {
+    // A physical ped walking/running to the stream and doing what its owner's copy does.
     n::ClearCharTasks(e.handle);
-    n::FreezeCharPosition(e.handle, true);
-    n::SetCharCollision(e.handle, false);
+    n::FreezeCharPosition(e.handle, false);
+    n::SetCharCollision(e.handle, true);
     if (!n::IsCharDead(e.handle)) {
       n::SetCharMaxHealth(e.handle, kPedBuffer);
       n::SetCharHealth(e.handle, kPedBuffer);
     }
+    e.driver = std::make_unique<Puppet>();
+    e.driver->adopt(e.handle);
+  } else if (e.type == EntityType::Object) {
+    n::FreezeObjectPosition(e.handle, true); // posed from the stream
   } else {
     // Stays physical: pushed along the owner's track (see pose_follower), so its wheels
     // roll and it reacts to what is around it here.
@@ -251,10 +273,72 @@ void EntitySync::make_follower(Entity& e) {
   }
 }
 
-EntityState EntitySync::read_local(const Entity& e, std::uint32_t now_ms) {
+// What a ped is doing, for its copies: gun, rounds fired, shooting (and at which player: the one most in
+// line with its facing - there's no native for its target), crouch, ragdoll, fire, seat.
+void EntitySync::read_ped_behaviour(Entity& e, EntityState& s, std::uint32_t now_ms) {
+  const n::Ped ped = e.handle;
+  std::uint32_t weapon = 0;
+  n::invoke(kGetCurrentCharWeapon, ped, &weapon);
+  const std::uint32_t ammo = weapon ? n::GetAmmoInCharWeapon(ped, weapon) : 0;
+  const bool shooting = n::invoke<bool>(kIsCharShooting, ped);
+  if (weapon && weapon == e.own_weapon && ammo < e.own_ammo) {
+    e.own_shots = static_cast<std::uint16_t>(e.own_shots + std::min<std::uint32_t>(e.own_ammo - ammo, 10));
+    e.own_last_shot_ms = now_ms;
+  } else if (shooting && now_ms - e.own_last_shot_ms > 250) { // AI with endless ammo: the shooting flag
+    ++e.own_shots;
+    e.own_last_shot_ms = now_ms;
+  }
+  e.own_weapon = weapon, e.own_ammo = ammo;
+  s.weapon = weapon, s.shots = e.own_shots;
+
+  const bool fighting = shooting || now_ms - e.own_last_shot_ms < 1500 || (weapon && n::invoke<bool>(kIsPedInCombat, ped));
+  if (fighting && weapon) s.flags |= EntityState::kShooting;
+  if (n::IsPedRagdoll(ped)) s.flags |= EntityState::kRagdoll;
+  if (n::invoke<bool>(kIsCharOnFire, ped)) s.flags |= EntityState::kOnFire;
+  if (n::invoke<bool>(kIsCharDucking, ped)) s.flags |= EntityState::kDucking;
+
+  // Target: the player most in line with its facing (within 45 degrees, 80 m); aim at their chest.
+  const float h = n::GetCharHeading(ped) * 3.14159265f / 180.0f;
+  const float fx = -std::sin(h), fy = std::cos(h);
+  s.ax = s.x + fx * 10.0f, s.ay = s.y + fy * 10.0f, s.az = s.z + 0.5f;
+  if (s.flags & EntityState::kShooting) {
+    float best = 0.707f; // cos 45
+    for (const PlayerPos& p : players_) {
+      const float dx = p.pos.x - s.x, dy = p.pos.y - s.y, d = std::hypot(dx, dy);
+      if (d < 0.5f || d > 80.0f) continue;
+      const float c = (dx * fx + dy * fy) / d;
+      if (c > best) best = c, s.target = p.id, s.ax = p.pos.x, s.ay = p.pos.y, s.az = p.pos.z + 0.4f;
+    }
+  }
+
+  if (n::IsCharInAnyCar(ped)) {
+    const n::Vehicle car = n::StoreCarCharIsInNoSave(ped);
+    if (const auto id = id_for_handle(car)) {
+      s.vehicle = *id;
+      if (n::GetDriverOfCar(car) != ped) {
+        std::uint32_t seats = 0;
+        n::invoke(kGetMaxPassengers, car, &seats);
+        for (std::uint32_t i = 0; i < seats && i < 8; ++i) {
+          n::Ped p = 0;
+          n::invoke(kGetCharInPassengerSeat, car, i, &p);
+          if (p == ped) s.seat = static_cast<std::int8_t>(i);
+        }
+      }
+    }
+  }
+}
+
+EntityState EntitySync::read_local(Entity& e, std::uint32_t now_ms) {
   EntityState s;
   s.id = e.id;
   s.time_ms = now_ms;
+  if (e.type == EntityType::Object) {
+    const n::Vector3 p = n::GetObjectCoordinates(e.handle), v = n::GetObjectVelocity(e.handle);
+    const n::Vector4 q = n::GetObjectQuaternion(e.handle);
+    s.x = p.x, s.y = p.y, s.z = p.z, s.vx = v.x, s.vy = v.y, s.vz = v.z;
+    s.qx = q.x, s.qy = q.y, s.qz = q.z, s.qw = q.w;
+    return s;
+  }
   if (e.type == EntityType::Ped) {
     const n::Vector3 p = n::GetCharCoordinates(e.handle), v = n::GetCharVelocity(e.handle);
     s.x = p.x, s.y = p.y, s.z = p.z, s.vx = v.x, s.vy = v.y, s.vz = v.z;
@@ -263,6 +347,7 @@ EntityState EntitySync::read_local(const Entity& e, std::uint32_t now_ms) {
     s.health = n::IsCharDead(e.handle)
                    ? 0
                    : static_cast<std::uint16_t>(std::clamp<std::uint32_t>(n::GetCharHealth(e.handle), 1, 0xFFFF));
+    if (s.health) read_ped_behaviour(e, s, now_ms);
   } else {
     const n::Vector3 p = n::GetCarCoordinates(e.handle), v = n::GetCarSpeedVector(e.handle);
     const n::Vector4 q = n::GetVehicleQuaternion(e.handle);
@@ -274,17 +359,52 @@ EntityState EntitySync::read_local(const Entity& e, std::uint32_t now_ms) {
 }
 
 void EntitySync::pose_follower(Entity& e, const EntityState& s, std::uint32_t now_ms) {
+  if (e.type == EntityType::Object) {
+    const n::Vector3 at = n::GetObjectCoordinates(e.handle);
+    if (std::hypot(at.x - s.x, at.y - s.y, at.z - s.z) > 0.01f || std::fabs(s.vx) + std::fabs(s.vy) + std::fabs(s.vz) > 0.01f) {
+      n::SetObjectCoordinates(e.handle, {s.x, s.y, s.z});
+      n::SetObjectQuaternion(e.handle, {s.qx, s.qy, s.qz, s.qw});
+    }
+    return;
+  }
   if (e.type == EntityType::Ped) {
-    if (s.health == 0) { // the owner's copy died: die here too, once, and stop posing it
+    if (s.health == 0) { // the owner's copy died: die here too, once
       if (!e.shown_dead) {
-        n::FreezeCharPosition(e.handle, false);
+        if (e.driver) e.driver->unlock_ragdoll(); // a death falls like one
         n::SetCharHealth(e.handle, 0);
         e.shown_dead = true;
       }
       return;
     }
-    n::SetCharCoordinatesNoOffset(e.handle, {s.x, s.y, s.z});
-    n::SetCharHeading(e.handle, s.heading());
+    if (!e.driver) {
+      e.driver = std::make_unique<Puppet>();
+      e.driver->adopt(e.handle);
+    }
+    // The stream as a player state: the partner-copy driver does the rest.
+    PlayerState p;
+    p.x = s.x, p.y = s.y, p.z = s.z, p.vx = s.vx, p.vy = s.vy, p.vz = s.vz, p.heading = s.heading();
+    p.weapon = s.weapon, p.shots = s.shots, p.health = s.health;
+    if (s.flags & EntityState::kShooting) p.flags |= PlayerState::kAiming;
+    if (s.flags & EntityState::kRagdoll) p.flags |= PlayerState::kRagdoll;
+    if (s.flags & EntityState::kOnFire) p.flags |= PlayerState::kOnFire;
+    p.ax = s.ax, p.ay = s.ay, p.az = s.az;
+    if (s.target != 0xFF && player_ped) // aim at our copy of the player it's shooting at (us included)
+      if (const n::Ped t = player_ped(s.target); t && n::DoesCharExist(t)) {
+        const n::Vector3 tp = n::GetCharCoordinates(t);
+        p.ax = tp.x, p.ay = tp.y, p.az = tp.z + 0.4f;
+      }
+    Puppet& d = *e.driver;
+    const n::Vehicle car = s.vehicle ? handle_for_id(s.vehicle) : 0;
+    if (car) {
+      d.sit_in(car, s.seat);
+    } else {
+      if (d.in_vehicle()) d.leave_vehicle({s.x, s.y, s.z});
+      d.mirror_body((s.flags & EntityState::kRagdoll) != 0, (s.flags & EntityState::kOnFire) != 0, now_ms);
+      d.drive(p, now_ms);
+    }
+    d.apply_combat(p, now_ms);
+    const bool ducking = (s.flags & EntityState::kDucking) != 0;
+    if (ducking != n::invoke<bool>(kIsCharDucking, e.handle)) n::invoke(0x64302F16, e.handle, ducking); // SET_CHAR_DUCKING
   } else {
     CarPose t{s.x, s.y, s.z, s.qx, s.qy, s.qz, s.qw, s.vx, s.vy, s.vz, 0.0f};
     t.speed = forward_speed(t);
@@ -293,11 +413,14 @@ void EntitySync::pose_follower(Entity& e, const EntityState& s, std::uint32_t no
 }
 
 void EntitySync::destroy_copy(Entity& e) {
+  e.driver.reset();
   if (exists(e.type, e.handle)) {
     if (e.type == EntityType::Ped)
       n::DeleteChar(e.handle);
-    else
+    else if (e.type == EntityType::Vehicle)
       n::DeleteCar(e.handle);
+    else
+      n::DeleteObject(e.handle);
   }
   e.handle = 0;
 }
@@ -306,6 +429,7 @@ void EntitySync::destroy_copy(Entity& e) {
 
 void EntitySync::tick(std::uint32_t now_ms, std::uint8_t my_id, bool hosting, const std::vector<PlayerPos>& players,
                       net::Session& net) {
+  players_ = players;
   if (hosting && now_ms - last_eval_ms_ >= kEvalIntervalMs) {
     last_eval_ms_ = now_ms;
     evaluate_ownership(players, my_id, net);
@@ -360,7 +484,7 @@ std::vector<Damage> EntitySync::collect_hits(n::Ped attacker) {
   std::vector<Damage> hits;
   if (!attacker) return hits;
   for (auto& [id, e] : ents_) {
-    if (e.live || e.shown_dead || !exists(e.type, e.handle)) continue;
+    if (e.live || e.shown_dead || e.type == EntityType::Object || !exists(e.type, e.handle)) continue;
     std::uint32_t lost = 0;
     bool by_attacker = false;
     if (e.type == EntityType::Ped) {
@@ -386,7 +510,7 @@ void EntitySync::apply_damage(std::uint32_t id, std::uint16_t amount, std::uint8
   auto it = ents_.find(id);
   if (it == ents_.end()) return;
   Entity& e = it->second;
-  if (e.sim_owner != my_id || !exists(e.type, e.handle)) return;
+  if (e.sim_owner != my_id || e.type == EntityType::Object || !exists(e.type, e.handle)) return;
   if (e.type == EntityType::Ped) {
     if (n::IsCharDead(e.handle)) return;
     const std::uint32_t h = n::GetCharHealth(e.handle);

@@ -14,7 +14,9 @@
 // the last synced pose; its copy wakes up from there.
 
 #include <cstdint>
+#include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -23,6 +25,7 @@
 #include "net/session.h"
 #include "sync/car_follower.h"
 #include "sync/entity_protocol.h"
+#include "sync/puppet.h"
 
 namespace ivc::sync {
 
@@ -44,6 +47,8 @@ struct EntityStatus {
 class EntitySync {
  public:
   std::uint32_t send_hz = 15;
+  // Our local ped for a player id (us or their copy), for copies aiming at the player a mission ped shoots.
+  std::function<natives::Ped(std::uint8_t)> player_ped;
   std::uint32_t interp_delay_ms = 100;
   float handover_margin_m = 25.0f; // another player must be this much closer to take over
 
@@ -97,6 +102,11 @@ class EntitySync {
     bool shown_dead = false; // follower: owner reported death, we killed our copy
     bool pinned = false;     // host-only: never migrate (host always simulates)
     CarFollower car;         // vehicle followers: physics-follow (wheels roll, collisions)
+    // Ped followers: driven like a partner's copy (walk/run to the stream, gun, shots, ragdoll, seat).
+    std::unique_ptr<Puppet> driver;
+    // Ped owner: rounds fired so far (from ammo, or the shooting flag where ammo doesn't drop).
+    std::uint32_t own_weapon = 0, own_ammo = 0, own_last_shot_ms = 0;
+    std::uint16_t own_shots = 0;
   };
 
   void apply_create(const EntityCreate& c, std::uint8_t my_id);
@@ -104,7 +114,8 @@ class EntitySync {
   bool ensure_spawned(Entity& e, std::uint8_t my_id);
   void make_live(Entity& e);
   void make_follower(Entity& e);
-  EntityState read_local(const Entity& e, std::uint32_t now_ms);
+  EntityState read_local(Entity& e, std::uint32_t now_ms);
+  void read_ped_behaviour(Entity& e, EntityState& s, std::uint32_t now_ms);
   void pose_follower(Entity& e, const EntityState& s, std::uint32_t now_ms);
   void evaluate_ownership(const std::vector<PlayerPos>& players, std::uint8_t my_id, net::Session& net);
   void destroy_copy(Entity& e);
@@ -112,6 +123,7 @@ class EntitySync {
   std::map<std::uint32_t, Entity> ents_;
   std::uint32_t next_id_ = 1;
   std::uint32_t last_eval_ms_ = 0;
+  std::vector<PlayerPos> players_; // this frame's (for the target a mission ped is shooting at)
 };
 
 } // namespace ivc::sync

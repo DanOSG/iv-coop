@@ -24,6 +24,9 @@ class Puppet {
   // Game thread, script context. Requests the model and spawns when it's loaded; returns
   // true once the ped exists (respawning it if the game removed it).
   bool ensure(const natives::Vector3& at);
+  // Drives an existing ped instead (a mission ped's copy on a joiner, spawned by EntitySync): same movement,
+  // combat and ragdoll mirroring, no blip; despawn() just lets go of it.
+  void adopt(natives::Ped ped);
   // Moves the ped toward `target` (animated) or onto it (frozen). Call once per frame.
   void drive(const PlayerState& target, std::uint32_t now_ms);
   void despawn();
@@ -103,7 +106,8 @@ class Puppet {
   // Appearance state.
   std::uint32_t model_override_ = 0;
   std::uint32_t rejected_model_ = 0;
-  bool is_player_ped_ = false; // an extra player slot (player hit reactions) vs an ordinary ped
+  bool is_player_ped_ = false;
+  bool adopted_ = false; // an extra player slot (player hit reactions) vs an ordinary ped
   bool ragdoll_locked_ = false, mirroring_ragdoll_ = false;
   std::uint32_t ragdoll_since_ = 0;
   std::uint32_t shown_health_ = 2000; // the copy's health as last set (take_hits_from refills to it)
