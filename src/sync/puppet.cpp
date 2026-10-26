@@ -10,7 +10,8 @@ namespace ivc::sync {
 namespace n = natives;
 namespace {
 constexpr std::uint32_t kUnlockRagdoll = 0x2F2F51E9, kIsPedRagdoll = 0x3E251ADE, kSwitchPedToRagdoll = 0x1A0F56C5,
-                        kAllowReactionAnims = 0x0FEA6230, kIsCharOnFire = 0x358E21C5, kStartCharFire = 0x5FB31295, kExtinguishCharFire = 0x5D786EEE;
+                        kAllowReactionAnims = 0x0FEA6230,
+                        kClearCharTasksImmediately = 0x3C116620, kIsCharGettingUp = 0x4A906237, kIsCharOnFire = 0x358E21C5, kStartCharFire = 0x5FB31295, kExtinguishCharFire = 0x5D786EEE;
 
 // Tuning for animated mode.
 constexpr float kSnapDist = 5.0f;       // m of horizontal error before we teleport
@@ -286,12 +287,19 @@ void Puppet::apply_outfit(const PlayerState& s) {
   outfit_applied_ = true;
 }
 
-std::uint16_t Puppet::take_hits_from(n::Ped attacker) {
+std::uint16_t Puppet::take_hits_from(n::Ped attacker, bool cancel_knockdowns) {
   if (!ped_ || dead_ || !n::DoesCharExist(ped_)) return 0;
   const std::uint32_t h = n::GetCharHealth(ped_);
   const std::uint32_t lost = h < shown_health_ ? shown_health_ - h : 0;
   const bool by_attacker = attacker && n::HasCharBeenDamagedByChar(ped_, attacker);
   if (lost) n::SetCharHealth(ped_, shown_health_);
+  // With its ragdoll locked, a hit that would knock it over plays a canned fall instead; cancel whatever the
+  // hit started this frame (before it shows) and let drive() hand it its movement again.
+  if (cancel_knockdowns && animated_ && !mirroring_ragdoll_ && !vehicle_ && // (clearing would pull it out of a car)
+      (lost || n::invoke<bool>(kIsCharGettingUp, ped_))) {
+    n::invoke(kClearCharTasksImmediately, ped_);
+    action_ = Action::None;
+  }
   n::ClearCharLastDamageEntity(ped_);
   return by_attacker ? static_cast<std::uint16_t>(std::min<std::uint32_t>(lost, 0xFFFF)) : 0;
 }

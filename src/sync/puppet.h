@@ -48,7 +48,7 @@ class Puppet {
   // The puppet never really loses health: it sits on a large buffer that is refilled every
   // frame. Returns how much damage `attacker` (normally our own player) did to it since
   // the last call, so it can be reported to the player it stands for.
-  std::uint16_t take_hits_from(natives::Ped attacker);
+  std::uint16_t take_hits_from(natives::Ped attacker, bool cancel_knockdowns = true);
   // Mirrors the remote player's weapon, shots (fires the difference of their cumulative
   // counter at their aim point), aiming, and death/respawn. Call after drive()/sit_in().
   void apply_combat(const PlayerState& s, std::uint32_t now_ms);

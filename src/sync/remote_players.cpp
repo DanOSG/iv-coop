@@ -729,7 +729,7 @@ void tick() {
     }
     // Our hits on their puppet go to them; they apply the damage to themselves.
     if (active && me) {
-      const std::uint16_t dmg = r.puppet.take_hits_from(me);
+      const std::uint16_t dmg = r.puppet.take_hits_from(me, !r.downed); // a downed copy keeps its pose
       if (dmg && session_settings::damage_allowed()) {
         net.send_game(sync::encode_damage({sync::DamageTarget::Player, id, dmg, local ? local->weapon : 0}), true);
         log::info("Hit player #{} '{}' for {}", id, r.name, dmg);
