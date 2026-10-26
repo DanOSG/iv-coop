@@ -135,7 +135,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--leave-after") a.leave_after = std::atoi(next());
     else if (k == "--armed") a.armed = true;
     else if (k == "--downed") a.downed = true;
-    else if (k == "--melee") a.melee = true, a.radius = 1.3f;
+    else if (k == "--melee") a.melee = true, a.radius = 0.9f; // within fist reach (a jab reaches ~0.8 m)
     else if (k == "--health") a.health = std::atoi(next());
     else if (k == "--replay") a.replay = next(), a.serve = true;
     else if (k == "--model") a.model = next();
@@ -223,8 +223,10 @@ int main(int argc, char** argv) {
   bool downed = a.downed; // --downed, until a partner revives us
   // --melee: the move we're on, when it started, whether we're blocking, and a punch waiting to land.
   std::size_t melee_step = 0;
-  std::uint32_t melee_at = 0, block_until = 0, punch_lands_at = 0;
-  std::string swing_dict, swing_clip; // the attack waiting to land
+  std::uint32_t melee_at = 0, block_until = 0;
+  std::string incoming_dict, incoming_clip; // the host's attack about to reach us
+  std::uint32_t incoming_at = 0;
+  std::uint8_t incoming_from = 0;
   // melee_sync's messages: 46 a clip we play, 47 our swing touched player `target`, 48 we blocked `target`'s
   // swing. Each: [type][0][target][dict len][dict][clip len][clip].
   auto send_melee = [&session](std::uint8_t type, std::uint8_t target, const std::string& dict, const std::string& clip) {
@@ -298,25 +300,24 @@ int main(int argc, char** argv) {
     const std::uint8_t my_id = session.status().my_id;
     static unsigned world_ops = 0;
     for (const auto& gm : session.drain_game()) {
-      // --melee: the host's swing touched us (47), or blocked ours (48).
-      if (a.melee && gm.data.size() >= 5 && (gm.data[0] == 47 || gm.data[0] == 48) && gm.data[2] == my_id) {
+      // --melee: melee_sync messages from the host. The one being hit decides contact; we have no game to test
+      // bones in, so an attack clip of the host's (46) counts as touching us 350 ms in (we stand in reach). 47:
+      // our swing landed on them, 48: they blocked it (we play the recoil).
+      if (a.melee && gm.data.size() >= 5 && gm.data[0] >= 46 && gm.data[0] <= 48) {
         const std::size_t dl = gm.data[3];
         const std::string dict(gm.data.begin() + 4, gm.data.begin() + 4 + std::min(dl, gm.data.size() - 4));
         const std::string clip = 4 + dl < gm.data.size()
                                      ? std::string(gm.data.begin() + 5 + dl, gm.data.end())
                                      : std::string();
-        if (gm.data[0] == 48) {
+        auto starts = [&clip](const char* p) { return _strnicmp(clip.c_str(), p, std::strlen(p)) == 0; };
+        if (gm.data[0] == 46 && !starts("Hit") && !starts("DAM_") && !starts("Block") && !starts("Idle") &&
+            !starts("Shoved") && !starts("Disarmed") && !starts("Move")) {
+          incoming_dict = dict, incoming_clip = clip, incoming_at = now + 350, incoming_from = gm.from;
+        } else if (gm.data[0] == 48 && gm.data[2] == my_id) {
           std::printf("[%s] our %s was blocked\n", a.name.c_str(), clip.c_str());
           send_clip(dict, clip + "_Recoil");
-        } else if (now < block_until) {
-          std::printf("[%s] blocked the host's %s\n", a.name.c_str(), clip.c_str());
-          send_clip("MELEE_HITS_COMMON", "DAM_Block_Front");
-          send_melee(48, gm.from, dict, clip);
-        } else if (!dead_until) {
-          send_clip("MELEE_UNARMED_BASE", "Hit_Jab");
-          health -= 12;
-          std::printf("[%s] took the host's %s, health %d\n", a.name.c_str(), clip.c_str(), health);
-          if (health < 100) dead_until = now + 5000;
+        } else if (gm.data[0] == 47 && gm.data[2] == my_id) {
+          std::printf("[%s] our %s landed\n", a.name.c_str(), clip.c_str());
         }
         continue;
       }
@@ -509,9 +510,8 @@ int main(int argc, char** argv) {
     if (a.melee) h = std::atan2(-(cx - s.x), cy - s.y) * 180.0f / kPi; // face the host
     s.heading = h < 0 ? h + 360.0f : h;
 
-    // --melee: a move every 1.5 s - jab, cross, block (1.2 s), hook, low kick. We can't test bone contact (no
-    // game here), so an attack "connects" 350 ms in - about when the fist reaches - as a melee hit the host's
-    // game decides on (it may block, and tell us to play the recoil).
+    // --melee: a move every 1.5 s - jab, cross, block (1.2 s), hook, low kick. Whether our swings land is up
+    // to the host's game (its copy of us has to actually reach the host there).
     if (a.melee && !dead_until && !downed && now - melee_at >= 1500) {
       struct Move { const char* dict; const char* clip; bool attack; };
       static const Move kMoves[] = {{"MELEE_UNARMED_BASE", "Jab", true},
@@ -522,13 +522,23 @@ int main(int argc, char** argv) {
       const Move& mv = kMoves[melee_step++ % std::size(kMoves)];
       melee_at = now;
       send_clip(mv.dict, mv.clip);
-      if (mv.attack) punch_lands_at = now + 350, swing_dict = mv.dict, swing_clip = mv.clip;
-      else block_until = now + 1200;
+      if (!mv.attack) block_until = now + 1200;
       std::printf("[%s] melee: %s\n", a.name.c_str(), mv.clip);
     }
-    if (punch_lands_at && now >= punch_lands_at) {
-      punch_lands_at = 0;
-      send_melee(47, net::kHostId, swing_dict, swing_clip);
+    // The host's swing reaching us: blocked (we tell them: their recoil) or taken (we tell them it landed).
+    if (incoming_at && now >= incoming_at) {
+      incoming_at = 0;
+      if (now < block_until) {
+        std::printf("[%s] blocked the host's %s\n", a.name.c_str(), incoming_clip.c_str());
+        send_clip("MELEE_HITS_COMMON", "DAM_Block_Front");
+        send_melee(48, incoming_from, incoming_dict, incoming_clip);
+      } else if (!dead_until) {
+        send_clip("MELEE_UNARMED_BASE", "Hit_Jab");
+        send_melee(47, incoming_from, incoming_dict, incoming_clip);
+        health -= 12;
+        std::printf("[%s] took the host's %s, health %d\n", a.name.c_str(), incoming_clip.c_str(), health);
+        if (health < 100) dead_until = now + 5000;
+      }
     }
 
     // Combat: dead for 5 s (standing still), then respawn at full health.

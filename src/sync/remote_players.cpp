@@ -592,12 +592,7 @@ void tick() {
     }
     radio_sync::tick(rf, session());
     scream::tick(f.in_session, session());
-    {
-      std::vector<melee_sync::Partner> partners;
-      for (const auto& [id, r] : g_remotes)
-        if (r.puppet.spawned()) partners.push_back({id, r.puppet.ped()});
-      melee_sync::tick(f.in_session, f.in_session && session_settings::damage_allowed(), partners, session());
-    }
+    melee_sync::tick(f.in_session, f.in_session && session_settings::damage_allowed(), session());
   }
   net::Session& net = session();
 
@@ -786,11 +781,8 @@ void tick() {
     for (const auto& m : net.drain_game()) {
       if (!in_session(m.from)) continue;
       if (melee_sync::is_msg(m.data)) {
-        const bool hit = m.data[0] == melee_sync::kMsgHit;
-        if (!hit || session_settings::damage_allowed()) {
-          const auto it = g_remotes.find(m.from);
-          melee_sync::on_message(m, ss.my_id, it != g_remotes.end() ? it->second.puppet.ped() : 0, net);
-        }
+        const auto it = g_remotes.find(m.from);
+        melee_sync::on_message(m, ss.my_id, it != g_remotes.end() ? it->second.puppet.ped() : 0);
         continue;
       }
       if (scream::is_msg(m.data)) {

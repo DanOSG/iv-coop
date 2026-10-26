@@ -6,15 +6,15 @@
 // melee locomotion set, which plays underneath everything - and sends each new one; partners' copies play
 // it (fast blend), facing the way the player faces.
 //
-// Contact: common/data/action_table.csv gives each attack (its "_Res" row) its striking bones and radii
-// (a jab: L_HAND 0.05 m, L_FOREARM 0.06 m), damage, blocked-recoil and impact sound. While our player
-// swings an attack, its striking bones are tested every frame against each partner copy's head, neck and
-// chest; the first touch is the hit (once per swing) - so it lands when the blow actually connects, and a
-// step back or a dodge avoids it. The hit goes to the victim's game, which decides:
-//   - blocking (the Block clip or a block reaction) and facing it: no damage, they play the block
-//     reaction for that side, and we're told - our player plays the attack's recoil (the fist bouncing
-//     off);
-//   - otherwise the damage (table value x kDamageScale) and the hit reaction for that side.
+// Contact is decided by the one being hit, on their screen: common/data/action_table.csv gives each attack
+// (its "_Res" row) its striking bones and radii (a jab: L_HAND 0.05 m, L_FOREARM 0.06 m), damage,
+// blocked-recoil and impact sound. While a partner's copy plays an attack clip here, its striking bones are
+// tested every frame against our head, neck and chest; the first touch is the hit (once per swing) - so it
+// lands when the blow visibly connects, and stepping back or dodging avoids it. We then decide:
+//   - blocking (the Block clip or a block reaction) and facing it: no damage, our block reaction for that
+//     side, and the attacker is told - their player plays the attack's recoil (the fist bouncing off);
+//   - otherwise the damage (table value x kDamageScale) and the hit reaction for that side; the attacker is
+//     told, for the impact sound on their screen.
 // The impact sound plays on both screens. Reactions on the victim play as an overlay (they keep control,
 // like the engine's flinch).
 
@@ -32,19 +32,15 @@ constexpr std::uint8_t kMsgClip = 46, kMsgHit = 47, kMsgBlocked = 48;
 // Reads MeleeAnims.dat and action_table.csv (game folder: common/data). Once, at startup.
 void load(const std::filesystem::path& game_dir);
 
-struct Partner {
-  std::uint8_t id;
-  natives::Ped ped; // their copy here
-};
-// Game thread, every frame: our clip (mirroring) and our swings' contacts with `partners`. `can_hit`: the
+// Game thread, every frame: our clip (mirroring) and partners' swings landing on us. `can_hit`: the
 // session's team fire allows damage.
-void tick(bool in_session, bool can_hit, std::span<const Partner> partners, net::Session& net);
+void tick(bool in_session, bool can_hit, net::Session& net);
 
 inline bool is_msg(std::span<const std::uint8_t> d) {
   return !d.empty() && (d[0] == kMsgClip || d[0] == kMsgHit || d[0] == kMsgBlocked);
 }
-// `from_ped`: the sender's copy here. Applies hits to us (damage floored by downed), plays reactions.
-void on_message(const net::GameMessage& m, std::uint8_t my_id, natives::Ped from_ped, net::Session& net);
+// `from_ped`: the sender's copy here (their mirrored clips; landed/blocked notices for our swings).
+void on_message(const net::GameMessage& m, std::uint8_t my_id, natives::Ped from_ped);
 // True while a copy is playing a mirrored clip (its driver should leave it alone).
 bool playing(natives::Ped ped);
 

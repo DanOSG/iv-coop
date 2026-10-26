@@ -52,13 +52,14 @@ std::vector<Clip> g_clips;               // every melee clip but the locomotion 
 std::map<std::string, Strike> g_strikes; // by lower-case "dict/clip"
 int g_current = -1;                      // the clip our player is playing
 DWORD g_melee_until = 0;
-bool g_swing_connected = false;          // this swing already hit someone
 
 struct Mirror {
   Clip clip;
   DWORD started = 0;
+  std::uint8_t attacker = 0xFF;
+  bool connected = false; // this swing already touched us
 };
-std::map<n::Ped, Mirror> g_mirrors;
+std::map<n::Ped, Mirror> g_mirrors; // copies playing a partner's clip
 
 std::string lower(std::string s) {
   for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -207,25 +208,56 @@ void load_strikes(const std::filesystem::path& file, const std::map<std::string,
   }
 }
 
-// Our swing: its striking bones against each partner's head/neck/chest; the first touch is the hit.
-void check_contact(const Clip& clip, std::span<const Partner> partners, net::Session& net) {
-  if (g_swing_connected) return;
-  const auto strike = g_strikes.find(key(clip.dict, clip.name));
-  if (strike == g_strikes.end()) return;
+// A partner's swing (their copy playing an attack clip here) touched us: we decide - a block (no damage,
+// our block reaction; they're told, to play their recoil) or a hit (damage, our hit reaction; they're told,
+// for the impact sound).
+void resolve_hit(std::uint8_t attacker, n::Ped from_ped, const Clip& c, net::Session& net) {
   const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
-  const n::Vector3 at = n::GetCharCoordinates(me);
-  for (const Partner& p : partners) {
-    if (!p.ped || !n::DoesCharExist(p.ped) || dist(at, n::GetCharCoordinates(p.ped)) > 2.5f) continue;
-    for (int k = 0; k < 2; ++k) {
+  const auto strike = g_strikes.find(key(c.dict, c.name));
+  const std::uint16_t damage = strike != g_strikes.end() ? strike->second.damage : 10;
+  const float side = side_of(me, from_ped);
+  const bool behind = std::fabs(side) > 120.0f;
+  const bool blocking = is_playing(me, {"MELEE_UNARMED_BASE", "Block"}) ||
+                        is_playing(me, {"MELEE_HITS_COMMON", "DAM_Block_Front"}) ||
+                        is_playing(me, {"MELEE_HITS_COMMON", "DAM_Block_Left"}) ||
+                        is_playing(me, {"MELEE_HITS_COMMON", "DAM_Block_Right"});
+  if (blocking && !behind) {
+    play(me, {"MELEE_HITS_COMMON", side > 35 ? "DAM_Block_Left" : side < -35 ? "DAM_Block_Right" : "DAM_Block_Front"},
+         true);
+    net.send_game(encode_clip(kMsgBlocked, attacker, c), true);
+    log::info("Melee: blocked #{}'s {}", attacker, c.name);
+    return;
+  }
+  // The hit reaction: the attack's own one if the base set has it (Hit_Jab, Hit_Cross_R...), else by side.
+  std::string reaction = "Hit_" + c.name;
+  if (find_clip("MELEE_UNARMED_BASE", reaction) < 0 || behind)
+    reaction = behind ? "Hit_Back" : side > 35 ? "Hit_Left" : side < -35 ? "Hit_Right" : "Hit_Jab";
+  play(me, {"MELEE_UNARMED_BASE", reaction}, true);
+  if (strike != g_strikes.end()) sound(me, strike->second.sound);
+  net.send_game(encode_clip(kMsgHit, attacker, c), true);
+  const std::uint32_t h = n::GetCharHealth(me);
+  n::SetCharHealth(me, downed::floor_health(h > damage ? h - damage : 0));
+  log::info("Melee: took {} from #{}'s {}, health {} -> {}", damage, attacker, c.name, h, h > damage ? h - damage : 0);
+}
+
+// Partners' swings as we see them: each copy playing an attack clip has its striking bones tested against
+// our head/neck/chest every frame; the first touch is the hit (once per swing). What lands is what our
+// screen shows - stepping out of reach or dodging works.
+void check_incoming(net::Session& net) {
+  const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
+  if (!me || n::IsCharDead(me)) return;
+  for (auto& [ped, mirror] : g_mirrors) {
+    if (mirror.connected || !n::DoesCharExist(ped)) continue;
+    const auto strike = g_strikes.find(key(mirror.clip.dict, mirror.clip.name));
+    if (strike == g_strikes.end()) continue;
+    for (int k = 0; k < 2 && !mirror.connected; ++k) {
       if (!strike->second.bones[k]) continue;
-      const n::Vector3 fist = bone(me, strike->second.bones[k]);
+      const n::Vector3 fist = bone(ped, strike->second.bones[k]);
       for (std::uint32_t tag : kTargetBones)
-        if (dist(fist, bone(p.ped, tag)) < strike->second.radii[k] + kBodyRadius) {
-          g_swing_connected = true;
-          net.send_game(encode_clip(kMsgHit, p.id, clip), true);
-          sound(p.ped, strike->second.sound);
-          log::info("Melee: {} connected with partner #{}", clip.name, p.id);
-          return;
+        if (dist(fist, bone(me, tag)) < strike->second.radii[k] + kBodyRadius) {
+          mirror.connected = true;
+          resolve_hit(mirror.attacker, ped, mirror.clip, net);
+          break;
         }
     }
   }
@@ -252,7 +284,7 @@ void load(const std::filesystem::path& game_dir) {
             g_strikes.size());
 }
 
-void tick(bool in_session, bool can_hit, std::span<const Partner> partners, net::Session& net) {
+void tick(bool in_session, bool can_hit, net::Session& net) {
   if (!in_session || g_clips.empty()) return;
   const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
   if (!me || !n::DoesCharExist(me)) return;
@@ -265,12 +297,9 @@ void tick(bool in_session, bool can_hit, std::span<const Partner> partners, net:
       for (std::size_t i = 0; i < g_clips.size() && found < 0; ++i)
         if (is_playing(me, g_clips[i])) found = static_cast<int>(i);
   }
-  if (found != g_current) {
-    g_swing_connected = false; // a new move
-    if (found >= 0) net.send_game(encode_clip(kMsgClip, 0xFF, g_clips[found]), true);
-  }
+  if (found != g_current && found >= 0) net.send_game(encode_clip(kMsgClip, 0xFF, g_clips[found]), true);
   g_current = found;
-  if (found >= 0 && can_hit) check_contact(g_clips[found], partners, net);
+  if (can_hit) check_incoming(net);
 
   for (auto it = g_mirrors.begin(); it != g_mirrors.end();) {
     const bool over = now - it->second.started > kMirrorMs ||
@@ -279,7 +308,7 @@ void tick(bool in_session, bool can_hit, std::span<const Partner> partners, net:
   }
 }
 
-void on_message(const net::GameMessage& m, std::uint8_t my_id, n::Ped from_ped, net::Session& net) {
+void on_message(const net::GameMessage& m, std::uint8_t my_id, n::Ped from_ped) {
   std::uint8_t target = 0xFF;
   Clip c;
   if (!decode_clip(m.data, target, c)) return;
@@ -287,35 +316,14 @@ void on_message(const net::GameMessage& m, std::uint8_t my_id, n::Ped from_ped, 
   switch (m.data[0]) {
     case kMsgClip:
       if (find_clip(c.dict, c.name) >= 0 && from_ped && n::DoesCharExist(from_ped) && play(from_ped, c))
-        g_mirrors[from_ped] = {c, GetTickCount()};
+        g_mirrors[from_ped] = {c, GetTickCount(), m.from, false};
       break;
 
-    case kMsgHit: { // their swing touched us: we decide
-      if (target != my_id || !me || n::IsCharDead(me)) break;
+    case kMsgHit: { // our swing landed on them (their screen decided): the impact, on their copy here
+      if (target != my_id) break;
       const auto strike = g_strikes.find(key(c.dict, c.name));
-      const std::uint16_t damage = strike != g_strikes.end() ? strike->second.damage : 10;
-      const float side = side_of(me, from_ped);
-      const bool behind = std::fabs(side) > 120.0f;
-      const bool blocking = is_playing(me, {"MELEE_UNARMED_BASE", "Block"}) ||
-                            is_playing(me, {"MELEE_HITS_COMMON", "DAM_Block_Front"}) ||
-                            is_playing(me, {"MELEE_HITS_COMMON", "DAM_Block_Left"}) ||
-                            is_playing(me, {"MELEE_HITS_COMMON", "DAM_Block_Right"});
-      if (blocking && !behind) {
-        play(me, {"MELEE_HITS_COMMON", side > 35 ? "DAM_Block_Left" : side < -35 ? "DAM_Block_Right" : "DAM_Block_Front"},
-             true);
-        net.send_game(encode_clip(kMsgBlocked, m.from, c), true);
-        log::info("Melee: blocked #{}'s {}", m.from, c.name);
-        break;
-      }
-      // The hit reaction: the attack's own one if the base set has it (Hit_Jab, Hit_Cross_R...), else by side.
-      std::string reaction = "Hit_" + c.name;
-      if (find_clip("MELEE_UNARMED_BASE", reaction) < 0 || behind)
-        reaction = behind ? "Hit_Back" : side > 35 ? "Hit_Left" : side < -35 ? "Hit_Right" : "Hit_Jab";
-      play(me, {"MELEE_UNARMED_BASE", reaction}, true);
-      if (strike != g_strikes.end()) sound(me, strike->second.sound);
-      const std::uint32_t h = n::GetCharHealth(me);
-      n::SetCharHealth(me, downed::floor_health(h > damage ? h - damage : 0));
-      log::info("Melee: took {} from #{}'s {}, health {} -> {}", damage, m.from, c.name, h, h > damage ? h - damage : 0);
+      if (strike != g_strikes.end()) sound(from_ped, strike->second.sound);
+      log::info("Melee: our {} landed on #{}", c.name, m.from);
       break;
     }
 
@@ -323,7 +331,7 @@ void on_message(const net::GameMessage& m, std::uint8_t my_id, n::Ped from_ped, 
       if (target != my_id || !me) break;
       const auto strike = g_strikes.find(key(c.dict, c.name));
       if (strike != g_strikes.end() && !strike->second.recoil.empty()) play(me, {c.dict, strike->second.recoil});
-      log::info("Melee: our {} was blocked", c.name);
+      log::info("Melee: our {} was blocked by #{}", c.name, m.from);
       break;
     }
   }
