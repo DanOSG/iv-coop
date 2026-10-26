@@ -27,6 +27,7 @@ constexpr std::uintptr_t kFnLookup = 0x00894EC0;     // thiscall(store, const ch
 constexpr std::uint32_t kSlotSize = 0xBD0, kOffCurSlot = 0x1917, kOffFrozen = 0x1927, kOffCurTrack = 0x190C;
 constexpr std::uint32_t kSlotCategory = 0xBC0, kSlotTrack = 0xBC4, kSlotList = 0x960; // what ForceTrack sets
 constexpr std::uint32_t kSlotPosition = 0x990; // play position, ms (rises 1000/s while playing)
+constexpr std::uint32_t kSlotSeek = 0x99C;  // int32 correction added to the position (0x946E70)
 constexpr std::uint32_t kSlotActive = 0xBCA; // set to 1 when the slot starts; ForceTrack stops it first if set
 
 constexpr std::uint32_t kGetStationIndex = 0x4E493AAF, kGetRadioName = 0x7EC9580E, kIsRetuning = 0x45C344AA;
@@ -180,21 +181,35 @@ std::string list_name(std::uint32_t p) {
   return std::format("ADVERTS{:+#x}", static_cast<std::int64_t>(p) - anchor);
 }
 
-// Starts item (list, category, track) on the station's current stream slot at `offset_ms`, as ForceTrack
-// 0x945120 does but without the name lookup or frozen check: stop the slot (0xB76C10) if busy, load the
-// item (0xB76660, which picks a random start position into slot +0x990), overwrite that position, start the
-// stream (0xB769A0, 0xB76920), then record it as the station's current track like ForceTrack does.
-bool start_item(int station, std::uint32_t list, std::uint8_t category, std::uint32_t track, std::uint32_t offset_ms) {
+// Seeks the playing item: slot +0x99C is a correction added to the stream position, the way the engine's own
+// network radio sync (0x946E70) moves a playing slot to a remote position: target - current position.
+bool seek(int station, std::uint32_t target_ms) {
   __try {
     auto* st = (*at_static<std::uint8_t***>(kStationArray))[station];
-    if (!st || !list) return false;
+    if (!st || st[kOffCurSlot] > 1) return false;
+    std::uint8_t* slot = st + st[kOffCurSlot] * kSlotSize;
+    *reinterpret_cast<std::int32_t*>(slot + kSlotSeek) =
+        static_cast<std::int32_t>(target_ms - *reinterpret_cast<std::uint32_t*>(slot + kSlotPosition));
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
+// Starts item `item` (a track entry pointer: entries of one list are 8 bytes apart, so track n is
+// list + 8n) on the station's current slot, as ForceTrack 0x945120 does but without its name lookup and
+// frozen check: stop the slot (0xB76C10) if busy, load (0xB76660), start (0xB769A0, 0xB76920), then record
+// it as the station's current track.
+bool start_item(int station, std::uint32_t item, std::uint8_t category, std::uint32_t track) {
+  __try {
+    auto* st = (*at_static<std::uint8_t***>(kStationArray))[station];
+    if (!st || !item) return false;
     const std::uint8_t cur = st[kOffCurSlot];
     if (cur > 1) return false;
     std::uint8_t* slot = st + cur * kSlotSize;
     if (slot[kSlotActive]) at_static<void(__thiscall*)(void*)>(0xB76C10)(slot);
     at_static<void(__thiscall*)(void*, int, int, std::uint32_t, int)>(0xB76660)(slot, category, static_cast<int>(track),
-                                                                                 list, 0);
-    *reinterpret_cast<std::uint32_t*>(slot + kSlotPosition) = offset_ms;
+                                                                                 item, 0);
     const std::uint32_t meta = *reinterpret_cast<std::uint32_t*>(st + 0x17A0 + 4 * cur);
     at_static<void(__thiscall*)(void*, std::uint32_t, int, int, int)>(0xB769A0)(slot, meta, 0, st[0x191A], st[0x191B]);
     at_static<void(__thiscall*)(void*)>(0xB76920)(slot);
@@ -215,8 +230,8 @@ std::uint32_t position(int station, int slot) {
   }
 }
 
-// Ctrl+Shift+1: next track number of the playing list from 0. 2: the playing item, 30 s further on.
-// 3: the playing item from 0.
+// Ctrl+Shift+1: the next track of the playing list, from its start. 2: the playing item, 30 s further on.
+// 3: the playing item from its start.
 void force(int key) {
   const int idx = invoke<int>(kGetStationIndex);
   Playing p;
@@ -225,11 +240,11 @@ void force(int key) {
     return;
   }
   const std::uint32_t pos = position(idx, p.slot);
-  const std::uint32_t track = key == 1 ? p.track + 1 : p.track;
-  const std::uint32_t offset = key == 2 ? pos + 30000 : 0;
-  const bool ok = start_item(idx, p.list, p.category, track, offset);
-  log::info("Radio probe: key {}: start [{}] list {} cat {} #{} at {} ms (was #{} at {} ms): {}", key, idx,
-            list_name(p.list), p.category, track, offset, p.track, pos, ok ? "ok" : "FAILED");
+  bool ok = true;
+  if (key == 1) ok = start_item(idx, p.list + 8, p.category, p.track + 1);
+  ok = ok && seek(idx, key == 2 ? pos + 30000 : 0);
+  log::info("Radio probe: key {}: [{}] {} cat {} #{} at {} ms -> {}: {}", key, idx, list_name(p.list), p.category, p.track,
+            pos, key == 1 ? "next item from 0" : key == 2 ? "+30 s" : "from 0", ok ? "ok" : "FAILED");
 }
 
 } // namespace
