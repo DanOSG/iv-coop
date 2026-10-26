@@ -99,6 +99,7 @@ class Puppet {
   // Appearance state.
   std::uint32_t model_override_ = 0;
   std::uint32_t rejected_model_ = 0;
+  bool is_player_ped_ = false; // an extra player slot (player hit reactions) vs an ordinary ped
   bool ragdoll_locked_ = false, mirroring_ragdoll_ = false;
   std::uint32_t ragdoll_since_ = 0;
   std::uint32_t shown_health_ = 2000; // the copy's health as last set (take_hits_from refills to it)

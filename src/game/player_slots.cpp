@@ -55,7 +55,11 @@ struct Slot {
   void* obj = nullptr; // CPed*
   n::Ped ped = 0;      // script handle
   bool in_use = false;
+  std::uint32_t model = kProtagonistModel;
 };
+
+constexpr std::uintptr_t kPedPool = 0x18B6F1C, kFnPoolAt = 0x499D20; // script handle -> CPed*
+constexpr std::uint32_t kChangePlayerModel = 0x232F1A85;
 std::array<Slot, kSlots> g_slots{};
 
 using GetPadFn = void*(__thiscall*)(void*);
@@ -112,6 +116,32 @@ bool alive(std::uint32_t i) {
   return s.obj && slot_info(slot) && handle_of(slot) == s.ped && n::DoesCharExist(s.ped);
 }
 
+void* object_of(n::Ped handle) {
+  __try {
+    return at_static<void*(__thiscall*)(void*, n::Ped)>(kFnPoolAt)(*at_static<void**>(kPedPool), handle);
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return nullptr;
+  }
+}
+
+// Puts `model` on slot i's player (CHANGE_PLAYER_MODEL recreates the ped: new handle and CPed*). The
+// model must be loaded.
+bool wear(std::uint32_t i, std::uint32_t model) {
+  Slot& s = g_slots[i];
+  if (s.model == model) return true;
+  const std::uint32_t slot = kFirstSlot + i;
+  invoke(kChangePlayerModel, invoke<n::Player>(kConvertIntToPlayerIndex, slot), model);
+  const n::Ped ped = handle_of(slot);
+  void* obj = ped ? object_of(ped) : nullptr;
+  if (!ped || !obj) {
+    log::error("PlayerSlots: changing slot {}'s model to 0x{:08X} lost its ped", slot, model);
+    return false;
+  }
+  s.ped = ped, s.obj = obj, s.model = model;
+  log::info("PlayerSlots: slot {} now wears 0x{:08X} (ped {})", slot, model, ped);
+  return true;
+}
+
 void park(n::Ped ped) {
   n::ClearCharTasks(ped);
   n::SetCharVisible(ped, false);
@@ -130,7 +160,7 @@ void place(n::Ped ped, const n::Vector3& at, float heading) {
 
 } // namespace
 
-n::Ped acquire(const n::Vector3& at, float heading) {
+n::Ped acquire(const n::Vector3& at, float heading, std::uint32_t model) {
   if (!hook_get_pad()) return 0;
   // Reuse a parked slot of ours first.
   for (std::uint32_t i = 0; i < kSlots; ++i) {
@@ -141,6 +171,7 @@ n::Ped acquire(const n::Vector3& at, float heading) {
       s = {};
       continue;
     }
+    if (!wear(i, model)) return 0;
     place(s.ped, at, heading);
     s.in_use = true;
     log::info("PlayerSlots: reusing slot {} (ped {})", kFirstSlot + i, s.ped);
@@ -173,6 +204,7 @@ n::Ped acquire(const n::Vector3& at, float heading) {
     invoke(kSetPlayerControl, p, false);
     invoke(kSetPoliceIgnorePlayer, p, true);
     invoke(kSetEveryoneIgnorePlayer, p, true);
+    if (!wear(i, model)) return 0;
     place(s.ped, at, heading);
     s.in_use = true;
     log::info("PlayerSlots: created slot {} (ped {})", slot, s.ped);

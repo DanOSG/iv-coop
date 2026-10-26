@@ -50,14 +50,15 @@ bool Puppet::ensure(const n::Vector3& at) {
     phase_ = "loading model";
     return false;
   }
-  if (model_ == player_slots::kProtagonistModel) {
-    // Only a player ped can wear the protagonist model: borrow an extra player slot.
-    ped_ = player_slots::acquire(at, 0.0f);
-    if (!ped_) {
-      phase_ = "no player slot";
-      return false;
-    }
-  } else {
+  // A player ped (an extra player slot) reacts to hits like a player; only it can wear the protagonist
+  // model. Out of slots, other models fall back to an ordinary ped.
+  ped_ = animated_ ? player_slots::acquire(at, 0.0f, model_) : 0;
+  is_player_ped_ = ped_ != 0;
+  if (!ped_ && model_ == player_slots::kProtagonistModel) {
+    phase_ = "no player slot";
+    return false;
+  }
+  if (!ped_) {
     ped_ = n::CreateChar(n::kPedTypeCivMale, model_, at);
     n::MarkModelAsNoLongerNeeded(model_);
     if (!ped_) {
@@ -79,10 +80,17 @@ bool Puppet::ensure(const n::Vector3& at) {
     n::SetPedDontDoEvasiveDives(ped_, true);
     n::SetDontActivateRagdollFromPlayerImpact(ped_, true);
     n::SetCharWillMoveWhenInjured(ped_, true);
-    // Hits don't knock a partner over here; they ragdoll when their owner does (mirror_body).
-    n::invoke(kUnlockRagdoll, ped_, false);
-    n::invoke(kAllowReactionAnims, ped_, false); // nor the canned knockdown/stagger anims
-    ragdoll_locked_ = true, mirroring_ragdoll_ = false;
+    // Hits don't knock a partner over here; they ragdoll when their owner does (mirror_body). A player
+    // ped already shrugs off hits like a player; an ordinary ped is ragdoll-locked and has its reaction
+    // anims off (and take_hits_from cancels canned knockdowns).
+    mirroring_ragdoll_ = false;
+    if (!is_player_ped_) {
+      n::invoke(kUnlockRagdoll, ped_, false);
+      n::invoke(kAllowReactionAnims, ped_, false);
+      ragdoll_locked_ = true;
+    } else {
+      ragdoll_locked_ = false;
+    }
   } else {
     n::SetCharCollision(ped_, false);
     n::FreezeCharPosition(ped_, true);
@@ -117,10 +125,10 @@ void Puppet::mirror_body(bool ragdoll, bool on_fire, std::uint32_t now_ms) {
       n::invoke(kSwitchPedToRagdoll, ped_, 0, 1500, 1, 1, 1, 0);
       mirroring_ragdoll_ = true, ragdoll_locked_ = false, ragdoll_since_ = now_ms;
     }
-  } else if (mirroring_ragdoll_ || !ragdoll_locked_) {
+  } else if (mirroring_ragdoll_ || (!ragdoll_locked_ && !is_player_ped_)) {
     if (!is_ragdoll) {
-      n::invoke(kUnlockRagdoll, ped_, false);
-      mirroring_ragdoll_ = false, ragdoll_locked_ = true;
+      if (!is_player_ped_) n::invoke(kUnlockRagdoll, ped_, false), ragdoll_locked_ = true;
+      mirroring_ragdoll_ = false;
     }
   }
   const bool burning = n::invoke<bool>(kIsCharOnFire, ped_);
@@ -295,7 +303,7 @@ std::uint16_t Puppet::take_hits_from(n::Ped attacker, bool cancel_knockdowns) {
   if (lost) n::SetCharHealth(ped_, shown_health_);
   // With its ragdoll locked, a hit that would knock it over plays a canned fall instead; cancel whatever the
   // hit started this frame (before it shows) and let drive() hand it its movement again.
-  if (cancel_knockdowns && animated_ && !mirroring_ragdoll_ && !vehicle_ && // (clearing would pull it out of a car)
+  if (cancel_knockdowns && animated_ && !is_player_ped_ && !mirroring_ragdoll_ && !vehicle_ && // (clearing would pull it out of a car)
       (lost || n::invoke<bool>(kIsCharGettingUp, ped_))) {
     n::invoke(kClearCharTasksImmediately, ped_);
     action_ = Action::None;
