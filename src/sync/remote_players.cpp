@@ -732,10 +732,14 @@ void tick() {
     // Our hits on their puppet go to them; they apply the damage to themselves.
     if (active && me) {
       std::uint16_t dmg = r.puppet.take_hits_from(me, !r.downed); // a downed copy keeps its pose
-      if (r.puppet.is_player_ped()) dmg = static_cast<std::uint16_t>(dmg + team_fire::hits_on(r.puppet.ped()));
+      std::uint32_t weapon = local ? local->weapon : 0;
+      if (r.puppet.is_player_ped()) {
+        const team_fire::Hit hit = team_fire::hits_on(r.puppet.ped());
+        if (hit.amount) dmg = static_cast<std::uint16_t>(dmg + hit.amount), weapon = hit.weapon;
+      }
       if (dmg && session_settings::damage_allowed()) {
-        net.send_game(sync::encode_damage({sync::DamageTarget::Player, id, dmg, local ? local->weapon : 0}), true);
-        log::info("Hit player #{} '{}' for {}", id, r.name, dmg);
+        net.send_game(sync::encode_damage({sync::DamageTarget::Player, id, dmg, weapon}), true);
+        log::info("Hit player #{} '{}' for {} (weapon {})", id, r.name, dmg, weapon);
       }
     }
     const auto& st = r.interp.stats();
@@ -790,6 +794,8 @@ void tick() {
             session_settings::damage_allowed()) {
           const std::uint32_t h = n::GetCharHealth(me);
           n::SetCharHealth(me, downed::floor_health(h > d.amount ? h - d.amount : 0));
+          if (d.weapon == team_fire::kWeaponVehicle || d.weapon == team_fire::kWeaponExplosion)
+            n::invoke(0x1A0F56C5, me, 0, 2000, 1, 1, 1, 0); // knocked over (SWITCH_PED_TO_RAGDOLL)
           log::info("Took {} damage from player #{} (weapon {}), health {} -> {}", d.amount, m.from, d.weapon, h,
                     h > d.amount ? h - d.amount : 0);
         } else if (d.kind == sync::DamageTarget::Entity) {

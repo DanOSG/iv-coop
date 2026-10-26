@@ -8,6 +8,9 @@
 #include <sstream>
 #include <string>
 
+#include <windows.h>
+
+#include "core/input.h"
 #include "core/log.h"
 
 namespace ivc::team_fire {
@@ -15,7 +18,10 @@ namespace {
 namespace n = natives;
 using n::invoke;
 
-constexpr std::uint32_t kIsTargettingChar = 0x58A6457C, kIsFreeAimingAtChar = 0x30D427B4;
+constexpr std::uint32_t kIsTargettingChar = 0x58A6457C, kIsFreeAimingAtChar = 0x30D427B4,
+                        kIsCharInMeleeCombat = 0x68855BE7, kGetCharMeleeActionFlag0 = 0x103F14E4,
+                        kIsCharTouchingVehicle = 0x307A4B8E, kIsExplosionInSphere = 0x47A77D2E,
+                        kGetCarSpeed = 0x16DD2D00;
 
 struct Weapon {
   float damage = 0; // per round, player vs player (base x networkplayermod)
@@ -48,6 +54,28 @@ float to_float(const std::string& s, float def) {
 
 std::uint32_t g_weapon = 0, g_ammo = 0;
 std::uint32_t g_rounds = 0; // fired this frame
+bool g_strike = false, g_flag_was = false, g_mouse_was = true;
+n::Vehicle g_car = 0;
+float g_car_speed = 0;
+DWORD g_last_explosive = 0;
+
+struct Cooldowns {
+  DWORD melee = 0, car = 0, explosion = 0;
+};
+std::map<n::Ped, Cooldowns> g_cooldowns;
+
+constexpr float kMeleeReach = 1.9f, kCarHitSpeed = 4.0f; // m, m/s
+constexpr DWORD kExplosiveWindowMs = 8000;
+// Explosion damage by distance (IS_EXPLOSION_IN_SPHERE, tightest first).
+constexpr std::pair<float, std::uint16_t> kExplosionRings[] = {{2.5f, 160}, {4.5f, 90}, {7.0f, 35}};
+
+std::uint16_t melee_damage(std::uint32_t weapon) {
+  switch (weapon) {
+    case 0: return 10;  // fists
+    case 3: return 35;  // knife
+    default: return 25; // bat, pool cue
+  }
+}
 
 } // namespace
 
@@ -91,18 +119,75 @@ void tick() {
   invoke(0x5AB8289F, me, &weapon); // GET_CURRENT_CHAR_WEAPON
   const std::uint32_t ammo = weapon ? n::GetAmmoInCharWeapon(me, weapon) : 0;
   if (weapon && weapon == g_weapon && ammo < g_ammo) g_rounds = std::min<std::uint32_t>(g_ammo - ammo, 10);
+  // Explosive weapons fired (rockets) or thrown (grenades, which use up the weapon).
+  if (g_rounds && (weapon == 4 || weapon == 18)) g_last_explosive = GetTickCount();
+  if (g_weapon == 4 && (weapon != 4 || ammo < g_ammo)) g_last_explosive = GetTickCount();
   g_weapon = weapon, g_ammo = ammo;
+
+  // Melee strikes: the melee action flag rising while in melee combat, else the attack (left) mouse button.
+  g_strike = false;
+  const bool in_melee = invoke<bool>(kIsCharInMeleeCombat, me);
+  const bool flag = in_melee && invoke<bool>(kGetCharMeleeActionFlag0, me);
+  const bool mouse = input::game_focused() && (GetAsyncKeyState(VK_LBUTTON) & 0x8000);
+  if (in_melee && ((flag && !g_flag_was) || (mouse && !g_mouse_was))) {
+    g_strike = true;
+    log::debug("Team fire: melee strike ({})", flag && !g_flag_was ? "action flag" : "mouse");
+  }
+  g_flag_was = flag, g_mouse_was = mouse;
+
+  // Our car, if we're driving one.
+  g_car = 0, g_car_speed = 0;
+  if (n::IsCharInAnyCar(me)) {
+    const n::Vehicle car = n::StoreCarCharIsInNoSave(me);
+    if (car && n::GetDriverOfCar(car) == me) {
+      g_car = car;
+      invoke(kGetCarSpeed, car, &g_car_speed);
+    }
+  }
 }
 
-std::uint16_t hits_on(n::Ped target) {
-  if (!g_rounds || !target || !n::DoesCharExist(target)) return 0;
-  const auto w = g_weapons.find(g_weapon);
-  if (w == g_weapons.end() || w->second.damage <= 0) return 0;
+Hit hits_on(n::Ped target) {
+  Hit hit;
+  if (!target || !n::DoesCharExist(target)) return hit;
   const n::Player player = n::GetPlayerId();
-  if (!invoke<bool>(kIsTargettingChar, player, target) && !invoke<bool>(kIsFreeAimingAtChar, player, target)) return 0;
-  const n::Vector3 a = n::GetCharCoordinates(n::GetPlayerChar(player)), b = n::GetCharCoordinates(target);
-  if (std::hypot(a.x - b.x, a.y - b.y, a.z - b.z) > w->second.range) return 0;
-  return static_cast<std::uint16_t>(std::min(w->second.damage * g_rounds, 1000.0f));
+  const n::Ped me = n::GetPlayerChar(player);
+  const n::Vector3 a = n::GetCharCoordinates(me), b = n::GetCharCoordinates(target);
+  const float dist = std::hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+  const DWORD now = GetTickCount();
+  Cooldowns& cd = g_cooldowns[target];
+  const bool aimed = invoke<bool>(kIsTargettingChar, player, target) || invoke<bool>(kIsFreeAimingAtChar, player, target);
+
+  // Rounds fired at them.
+  if (g_rounds && aimed) {
+    const auto w = g_weapons.find(g_weapon);
+    if (w != g_weapons.end() && w->second.damage > 0 && dist <= w->second.range) {
+      hit.amount += static_cast<std::uint16_t>(std::min(w->second.damage * g_rounds, 1000.0f));
+      hit.weapon = static_cast<std::uint8_t>(g_weapon);
+    }
+  }
+  // Melee: a new strike while locked on within reach.
+  if (g_strike && aimed && dist <= kMeleeReach && now - cd.melee > 250) {
+    cd.melee = now;
+    hit.amount += melee_damage(g_weapon);
+    hit.weapon = static_cast<std::uint8_t>(g_weapon);
+  }
+  // Our car at speed.
+  if (g_car && g_car_speed > kCarHitSpeed && now - cd.car > 1000 && invoke<bool>(kIsCharTouchingVehicle, target, g_car)) {
+    cd.car = now;
+    hit.amount += static_cast<std::uint16_t>(std::min((g_car_speed - kCarHitSpeed + 2.0f) * 8.0f, 160.0f));
+    hit.weapon = kWeaponVehicle, hit.knockdown = true;
+  }
+  // Our explosive (fired or thrown in the last few seconds) going off near them.
+  if (now - g_last_explosive < kExplosiveWindowMs && now - cd.explosion > 1500) {
+    for (const auto& [radius, damage] : kExplosionRings)
+      if (invoke<bool>(kIsExplosionInSphere, -1, b.x, b.y, b.z, radius)) {
+        cd.explosion = now;
+        hit.amount += damage;
+        hit.weapon = kWeaponExplosion, hit.knockdown = true;
+        break;
+      }
+  }
+  return hit;
 }
 
 } // namespace ivc::team_fire
