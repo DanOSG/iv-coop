@@ -8,10 +8,10 @@
 // metadata lookups of candidate list names. Both slots are logged (crossfades, DJ talk over intros),
 // and the tuned slot is scanned for a steadily rising counter (the play position, for mid-item joins).
 //
-// Keys (on the station you're tuned to):
-//   Ctrl+Shift+1  freeze, force the next track number of the playing list, unfreeze
-//   Ctrl+Shift+2  same, but stay frozen (E4: what does unfreezing change?)
-//   Ctrl+Shift+3  freeze, force the playing track again (restarts it?), unfreeze
+// Keys (on the station you're tuned to; they start items directly on the stream slot, see start_item):
+//   Ctrl+Shift+1  the next track number of the playing list, from the start
+//   Ctrl+Shift+2  the playing item again, 30 s further on (does a start position work?)
+//   Ctrl+Shift+3  the playing item again, from the start
 
 namespace ivc::radio_probe {
 

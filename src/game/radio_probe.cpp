@@ -26,10 +26,10 @@ constexpr std::uintptr_t kMetadata = 0x0115D9A0;     // metadata store; lookup(n
 constexpr std::uintptr_t kFnLookup = 0x00894EC0;     // thiscall(store, const char*) -> object*
 constexpr std::uint32_t kSlotSize = 0xBD0, kOffCurSlot = 0x1917, kOffFrozen = 0x1927, kOffCurTrack = 0x190C;
 constexpr std::uint32_t kSlotCategory = 0xBC0, kSlotTrack = 0xBC4, kSlotList = 0x960; // what ForceTrack sets
+constexpr std::uint32_t kSlotPosition = 0x990; // play position, ms (rises 1000/s while playing)
 constexpr std::uint32_t kSlotActive = 0xBCA; // set to 1 when the slot starts; ForceTrack stops it first if set
 
-constexpr std::uint32_t kGetStationIndex = 0x4E493AAF, kGetRadioName = 0x7EC9580E, kIsRetuning = 0x45C344AA,
-                        kFreeze = 0x08A015CF, kUnfreeze = 0x3E5B7E59, kForceTrack = 0x6A7E47C9;
+constexpr std::uint32_t kGetStationIndex = 0x4E493AAF, kGetRadioName = 0x7EC9580E, kIsRetuning = 0x45C344AA;
 
 template <class T> T at_static(std::uintptr_t va) {
   return reinterpret_cast<T>(va - 0x400000 + reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr)));
@@ -175,28 +175,61 @@ void build_names(int count) {
 std::string list_name(std::uint32_t p) {
   if (!p) return "-";
   auto it = g_list_names.find(p);
-  return it != g_list_names.end() ? it->second : std::format("{:#x}", p);
+  if (it != g_list_names.end()) return it->second;
+  static const std::uint32_t anchor = lookup_list("RADIO_ADVERTS");
+  return std::format("ADVERTS{:+#x}", static_cast<std::int64_t>(p) - anchor);
 }
 
-void force(bool next, bool unfreeze) {
+// Starts item (list, category, track) on the station's current stream slot at `offset_ms`, as ForceTrack
+// 0x945120 does but without the name lookup or frozen check: stop the slot (0xB76C10) if busy, load the
+// item (0xB76660, which picks a random start position into slot +0x990), overwrite that position, start the
+// stream (0xB769A0, 0xB76920), then record it as the station's current track like ForceTrack does.
+bool start_item(int station, std::uint32_t list, std::uint8_t category, std::uint32_t track, std::uint32_t offset_ms) {
+  __try {
+    auto* st = (*at_static<std::uint8_t***>(kStationArray))[station];
+    if (!st || !list) return false;
+    const std::uint8_t cur = st[kOffCurSlot];
+    if (cur > 1) return false;
+    std::uint8_t* slot = st + cur * kSlotSize;
+    if (slot[kSlotActive]) at_static<void(__thiscall*)(void*)>(0xB76C10)(slot);
+    at_static<void(__thiscall*)(void*, int, int, std::uint32_t, int)>(0xB76660)(slot, category, static_cast<int>(track),
+                                                                                 list, 0);
+    *reinterpret_cast<std::uint32_t*>(slot + kSlotPosition) = offset_ms;
+    const std::uint32_t meta = *reinterpret_cast<std::uint32_t*>(st + 0x17A0 + 4 * cur);
+    at_static<void(__thiscall*)(void*, std::uint32_t, int, int, int)>(0xB769A0)(slot, meta, 0, st[0x191A], st[0x191B]);
+    at_static<void(__thiscall*)(void*)>(0xB76920)(slot);
+    *reinterpret_cast<std::uint32_t*>(st + 0x1908) = *reinterpret_cast<std::uint32_t*>(st + kOffCurTrack);
+    *reinterpret_cast<std::uint32_t*>(st + kOffCurTrack) = *reinterpret_cast<std::uint32_t*>(slot + kSlotTrack);
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
+std::uint32_t position(int station, int slot) {
+  __try {
+    auto* st = (*at_static<std::uint8_t***>(kStationArray))[station];
+    return st && slot <= 1 ? *reinterpret_cast<std::uint32_t*>(st + slot * kSlotSize + kSlotPosition) : 0;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return 0;
+  }
+}
+
+// Ctrl+Shift+1: next track number of the playing list from 0. 2: the playing item, 30 s further on.
+// 3: the playing item from 0.
+void force(int key) {
   const int idx = invoke<int>(kGetStationIndex);
   Playing p;
-  if (idx < 0 || idx >= 32 || !read_station(idx, p) || p.slot > 1) {
+  if (idx < 0 || idx >= 32 || !read_station(idx, p) || p.slot > 1 || !p.list) {
     log::info("Radio probe: no station playing (index {})", idx);
     return;
   }
-  const std::string st = station_name(idx);
-  const auto it = g_list_names.find(p.list);
-  if (it == g_list_names.end()) {
-    log::info("Radio probe: playing list {:#x} has no known name; can't force", p.list);
-    return;
-  }
-  const std::uint32_t track = next ? p.track + 1 : p.track;
-  log::info("Radio probe: FORCE_RADIO_TRACK({}, {}, {}, {}){}", st, it->second, p.category, track,
-            unfreeze ? " + unfreeze" : ", staying frozen");
-  invoke(kFreeze, st.c_str());
-  invoke(kForceTrack, st.c_str(), it->second.c_str(), static_cast<int>(p.category), static_cast<int>(track));
-  if (unfreeze) invoke(kUnfreeze, st.c_str());
+  const std::uint32_t pos = position(idx, p.slot);
+  const std::uint32_t track = key == 1 ? p.track + 1 : p.track;
+  const std::uint32_t offset = key == 2 ? pos + 30000 : 0;
+  const bool ok = start_item(idx, p.list, p.category, track, offset);
+  log::info("Radio probe: key {}: start [{}] list {} cat {} #{} at {} ms (was #{} at {} ms): {}", key, idx,
+            list_name(p.list), p.category, track, offset, p.track, pos, ok ? "ok" : "FAILED");
 }
 
 } // namespace
@@ -208,9 +241,9 @@ void configure(bool enabled) {
 
 void tick() {
   if (!g_enabled) return;
-  if (input::pressed_ctrl_shift('1', g_k1)) force(true, true);
-  if (input::pressed_ctrl_shift('2', g_k2)) force(true, false);
-  if (input::pressed_ctrl_shift('3', g_k3)) force(false, true);
+  if (input::pressed_ctrl_shift('1', g_k1)) force(1);
+  if (input::pressed_ctrl_shift('2', g_k2)) force(2);
+  if (input::pressed_ctrl_shift('3', g_k3)) force(3);
 
   const DWORD now = GetTickCount();
   if (now - g_last < 1000) return;
@@ -233,9 +266,9 @@ void tick() {
       slots += std::format(" | {}{}: {} cat {} #{} {}", k, k == p.slot ? "*" : "", ss.active ? "on" : "off", ss.category,
                            static_cast<int>(ss.track), list_name(ss.list));
     }
-    log::info("Radio probe: [{}] {}{} cur {} frozen {}{}{}", i, station_name(i), i == tuned ? " (tuned)" : "",
-              static_cast<int>(p.cur_track), p.frozen, invoke<bool>(kIsRetuning) && i == tuned ? " retuning" : "",
-              slots);
+    log::info("Radio probe: [{}] {}{} cur {} frozen {} pos {}{}{}", i, station_name(i), i == tuned ? " (tuned)" : "",
+              static_cast<int>(p.cur_track), p.frozen, p.slot <= 1 ? position(i, p.slot) : 0,
+              invoke<bool>(kIsRetuning) && i == tuned ? " retuning" : "", slots);
   }
 }
 
