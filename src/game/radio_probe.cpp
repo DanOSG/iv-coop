@@ -181,19 +181,47 @@ std::string list_name(std::uint32_t p) {
   return std::format("ADVERTS{:+#x}", static_cast<std::int64_t>(p) - anchor);
 }
 
-// Seeks the playing item: slot +0x99C is a correction added to the stream position, the way the engine's own
-// network radio sync (0x946E70) moves a playing slot to a remote position: target - current position.
-bool seek(int station, std::uint32_t target_ms) {
+// Seeking. A stream slot is a state machine (+0xBC8, updated by 0xB76C90): 1 idle (position advances with
+// time, nothing streams; untuned stations), 2 starting (0xB769A0 starts the stream at +0x990), 3 playing
+// (position read from the sound), 4 stopping (applies the +0x99C correction, stops, back to 1). So a seek is:
+// playing -> set 4; once idle, write the position and set 2. The stream restarts there.
+constexpr std::uint32_t kSlotState = 0xBC8;
+enum SlotPhase : std::uint8_t { kIdle = 1, kStarting = 2, kPlaying = 3, kStopping = 4 };
+
+struct Seek {
+  int station = -1;
+  std::uint32_t target_ms = 0;
+  DWORD requested = 0;
+} g_seek;
+
+std::uint8_t* current_slot(int station) {
+  auto* st = (*at_static<std::uint8_t***>(kStationArray))[station];
+  return st && st[kOffCurSlot] <= 1 ? st + st[kOffCurSlot] * kSlotSize : nullptr;
+}
+
+// One step of a pending seek; true when finished (or abandoned).
+bool step_seek(DWORD now) {
   __try {
-    auto* st = (*at_static<std::uint8_t***>(kStationArray))[station];
-    if (!st || st[kOffCurSlot] > 1) return false;
-    std::uint8_t* slot = st + st[kOffCurSlot] * kSlotSize;
-    *reinterpret_cast<std::int32_t*>(slot + kSlotSeek) =
-        static_cast<std::int32_t>(target_ms - *reinterpret_cast<std::uint32_t*>(slot + kSlotPosition));
+    std::uint8_t* slot = current_slot(g_seek.station);
+    if (!slot || now - g_seek.requested > 3000) return true;
+    std::uint8_t& state = slot[kSlotState];
+    if (state == kPlaying) {
+      *reinterpret_cast<std::int32_t*>(slot + kSlotSeek) = 0;
+      state = kStopping;
+      return false;
+    }
+    if (state != kIdle) return false;
+    *reinterpret_cast<std::uint32_t*>(slot + kSlotPosition) = g_seek.target_ms + (now - g_seek.requested);
+    state = kStarting;
     return true;
   } __except (EXCEPTION_EXECUTE_HANDLER) {
-    return false;
+    return true;
   }
+}
+
+bool seek(int station, std::uint32_t target_ms) {
+  g_seek = {station, target_ms, GetTickCount()};
+  return true;
 }
 
 // Starts item `item` (a track entry pointer: entries of one list are 8 bytes apart, so track n is
@@ -256,6 +284,10 @@ void configure(bool enabled) {
 
 void tick() {
   if (!g_enabled) return;
+  if (g_seek.station >= 0 && step_seek(GetTickCount())) {
+    log::info("Radio probe: seek on [{}] to {} ms done", g_seek.station, g_seek.target_ms);
+    g_seek.station = -1;
+  }
   if (input::pressed_ctrl_shift('1', g_k1)) force(1);
   if (input::pressed_ctrl_shift('2', g_k2)) force(2);
   if (input::pressed_ctrl_shift('3', g_k3)) force(3);

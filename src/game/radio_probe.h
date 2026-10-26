@@ -10,7 +10,7 @@
 //
 // Keys (on the station you're tuned to; they start items directly on the stream slot, see start_item):
 //   Ctrl+Shift+1  the next item of the playing list (entry + 8), from its start
-//   Ctrl+Shift+2  jump 30 s ahead in the playing item (seek via slot +0x99C)
+//   Ctrl+Shift+2  jump 30 s ahead in the playing item (seek: stop, set position, restart)
 //   Ctrl+Shift+3  the playing item again, from the start
 
 namespace ivc::radio_probe {
