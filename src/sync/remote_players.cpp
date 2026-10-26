@@ -26,6 +26,7 @@
 #include "sync/session_settings.h"
 #include "sync/wallet.h"
 #include "sync/scream.h"
+#include "sync/team_fire.h"
 #include "story/dialogue.h"
 #include "story/story_sync.h"
 #include "sync/entity_sync.h"
@@ -706,6 +707,7 @@ void tick() {
   if (local) positions.push_back({ss.my_id, {local->x, local->y, local->z}});
 
   std::vector<RemoteStatus> remotes;
+  team_fire::tick(); // rounds we fired this frame (hits on player-ped partners)
   for (auto& [id, r] : g_remotes) {
     float dist = 0;
     if (auto smp = r.interp.sample(now)) { // once per frame: sampling advances the timeline
@@ -745,7 +747,8 @@ void tick() {
     }
     // Our hits on their puppet go to them; they apply the damage to themselves.
     if (active && me) {
-      const std::uint16_t dmg = r.puppet.take_hits_from(me, !r.downed); // a downed copy keeps its pose
+      std::uint16_t dmg = r.puppet.take_hits_from(me, !r.downed); // a downed copy keeps its pose
+      if (r.puppet.is_player_ped()) dmg = static_cast<std::uint16_t>(dmg + team_fire::hits_on(r.puppet.ped()));
       if (dmg && session_settings::damage_allowed()) {
         net.send_game(sync::encode_damage({sync::DamageTarget::Player, id, dmg, local ? local->weapon : 0}), true);
         log::info("Hit player #{} '{}' for {}", id, r.name, dmg);

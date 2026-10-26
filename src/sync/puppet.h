@@ -64,6 +64,8 @@ class Puppet {
   void apply_outfit(const PlayerState& s);
 
   bool spawned() const { return ped_ != 0; }
+  // An extra player ped: the engine applies no damage to it from us (team_fire detects our hits).
+  bool is_player_ped() const { return ped_ && is_player_ped_; }
   natives::Ped ped() const { return ped_; }
   // Short description of what the puppet is doing, for status displays.
   const char* phase() const { return phase_; }
