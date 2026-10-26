@@ -29,6 +29,7 @@ enum class StoryMsg : std::uint8_t {
   CutsceneStart = 30, // Key name (cutscene.cpp)
   CutsceneEnd = 31,
   Hud = 32, // a frame's mission draw list (hud.cpp)
+  Environment = 33, // clock + weather (environment.cpp)
 };
 
 using Key = std::array<char, 32>;
@@ -120,7 +121,7 @@ struct Decoded {
 
 inline bool is_story_msg(std::span<const std::uint8_t> d) {
   return !d.empty() && d[0] >= static_cast<std::uint8_t>(StoryMsg::Text) &&
-         d[0] <= static_cast<std::uint8_t>(StoryMsg::Hud);
+         d[0] <= static_cast<std::uint8_t>(StoryMsg::Environment);
 }
 
 inline std::optional<Decoded> decode(std::span<const std::uint8_t> d) {
@@ -154,7 +155,8 @@ inline std::optional<Decoded> decode(std::span<const std::uint8_t> d) {
     case StoryMsg::CutsceneStart:
     case StoryMsg::CutsceneEnd:
     case StoryMsg::Hud:
-      break; // payloads decoded by world_state / dialogue / cutscene / hud
+    case StoryMsg::Environment:
+      break; // payloads decoded by world_state / dialogue / cutscene / hud / environment
     case StoryMsg::BlipProp: {
       auto& p = m.blip_prop;
       r.get(p.id), r.get(p.prop), r.get(p.ivalue), r.get(p.fvalue), r.get(p.name);

@@ -14,6 +14,7 @@
 #include "story/story_protocol.h"
 #include "story/cutscene.h"
 #include "story/dialogue.h"
+#include "story/environment.h"
 #include "story/hud.h"
 #include "story/world_state.h"
 
@@ -285,6 +286,7 @@ void host_tick(bool hosting, net::Session& net, sync::EntitySync& ents) {
   dialogue::host_tick(hosting, net, ents);
   cutscene::host_tick(hosting, net);
   hud::host_tick(hosting, net);
+  environment::host_tick(hosting, net);
   if (!hosting) {
     g_ops.clear();
     g_host_blips.clear();
@@ -366,6 +368,9 @@ bool client_on_message(const net::GameMessage& m, sync::EntitySync& ents) {
     case StoryMsg::Hud:
       hud::client_apply(m.data);
       break;
+    case StoryMsg::Environment:
+      environment::client_apply(m.data);
+      break;
     case StoryMsg::Payout:
       n::AddScore(n::GetPlayerId(), d->payout);
       log::info("Story: mission payout ${} (mirrored from the host)", d->payout);
@@ -415,6 +420,7 @@ bool client_on_message(const net::GameMessage& m, sync::EntitySync& ents) {
 
 void client_tick(sync::EntitySync& ents) {
   hud::client_tick();
+  environment::client_tick();
   std::erase_if(g_loading_slots, [](std::uint8_t slot) { return n::HasAdditionalTextLoaded(slot); });
   while (g_loading_slots.empty() && !g_held_texts.empty()) {
     apply_text(g_held_texts.front());
@@ -451,6 +457,7 @@ void clear() {
   dialogue::clear();
   cutscene::clear();
   hud::clear();
+  environment::clear();
   for (auto& [id, cb] : g_client_blips)
     if (cb.local) n::RemoveBlip(cb.local);
   g_client_blips.clear();

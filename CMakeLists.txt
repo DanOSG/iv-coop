@@ -102,6 +102,7 @@ add_library(iv-coop SHARED
   src/story/dialogue.cpp
   src/story/cutscene.cpp
   src/story/hud.cpp
+  src/story/environment.cpp
   src/story/mission_audit.cpp
   src/sync/ghost.cpp
   src/sync/local_player.cpp

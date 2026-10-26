@@ -240,7 +240,8 @@ docs/
   - Done since (2026-10-22, built, joiner side untested without a second player): late-join snapshot of text
     blocks/blips; world-state ledger (progression) and mirrored payouts; positional dialogue and phone calls
     (story/dialogue); cutscenes for joiners (story/cutscene, M7 basics); duplicate mission car for partners;
-    downed/revive (sync/downed); Go to Host (phone); script-drawn mission HUD (story/hud).
+    downed/revive (sync/downed); Go to Host (phone); script-drawn mission HUD (story/hud); clock and weather
+    (story/environment, 2026-10-26).
   - Left: task forwarding for mission entities, objects, blips on non-networked entities, the free-cutscene
     option, scripted-camera scenes, wallets persisted per campaign, matching the host's outfit in cutscenes,
     the one-frame lethal-hit gap in downed.
