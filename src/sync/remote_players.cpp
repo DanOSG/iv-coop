@@ -25,6 +25,7 @@
 #include "sync/radio_sync.h"
 #include "sync/session_settings.h"
 #include "sync/wallet.h"
+#include "sync/scream.h"
 #include "story/dialogue.h"
 #include "story/story_sync.h"
 #include "sync/entity_sync.h"
@@ -588,6 +589,7 @@ void tick() {
         if (driver && driver != me && r.puppet.ped() == driver) rf.driver_id = id;
     }
     radio_sync::tick(rf, session());
+    scream::tick(f.in_session, session());
   }
   net::Session& net = session();
 
@@ -758,6 +760,10 @@ void tick() {
     process_pending_spawn(me);
     for (const auto& m : net.drain_game()) {
       if (!in_session(m.from)) continue;
+      if (scream::is_msg(m.data)) {
+        if (auto it = g_remotes.find(m.from); it != g_remotes.end()) scream::on_message(m, it->second.puppet.ped());
+        continue;
+      }
       if (session_settings::is_msg(m.data)) {
         session_settings::on_message(m);
         continue;

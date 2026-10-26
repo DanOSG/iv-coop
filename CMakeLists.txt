@@ -114,6 +114,7 @@ add_library(iv-coop SHARED
   src/sync/radio_sync.cpp
   src/sync/session_settings.cpp
   src/sync/wallet.cpp
+  src/sync/scream.cpp
   src/sync/car_follower.cpp
   src/sync/entity_sync.cpp
   src/render/d3d9_hook.cpp

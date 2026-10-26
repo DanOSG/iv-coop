@@ -29,6 +29,7 @@
 #include "sync/downed.h"
 #include "sync/session_settings.h"
 #include "sync/wallet.h"
+#include "sync/scream.h"
 #include "sync/remote_players.h"
 
 namespace {
@@ -94,6 +95,7 @@ void startup(HMODULE self) {
   const Config cfg = load_config(dir / "iv-coop.ini");
   session_settings::load(dir / "iv-coop.ini");
   wallet::configure(dir);
+  scream::configure(dir / "iv-coop.ini");
   if (cfg.debug_log) log::set_min_level(log::Level::Debug);
   input::g_dev_keys = cfg.dev_keys;
   log::info("iv-coop " IVCOOP_VERSION " loading (built " __DATE__ " " __TIME__ "), instance slot {}, pid {}{}", slot,
