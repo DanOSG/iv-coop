@@ -182,8 +182,8 @@ n::Ped acquire(const n::Vector3& at, float heading, std::uint32_t model) {
     Slot& s = g_slots[i];
     const std::uint32_t slot = kFirstSlot + i;
     if (s.obj || slot_info(slot)) continue; // ours (in use) or the engine's
-    const std::int32_t model = at_static<std::int32_t(__cdecl*)(const char*)>(kFnModelIndex)("player");
-    void* obj = guarded_create(slot, model);
+    const std::int32_t index = at_static<std::int32_t(__cdecl*)(const char*)>(kFnModelIndex)("player");
+    void* obj = guarded_create(slot, index);
     if (obj == reinterpret_cast<void*>(-1) || !obj) {
       log::error("PlayerSlots: creating slot {} failed ({})", slot, obj ? "engine fault" : "no ped");
       // Drop a half-built slot (leaking it) so the per-frame player update skips it.
