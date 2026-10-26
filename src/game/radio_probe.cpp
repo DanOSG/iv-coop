@@ -182,45 +182,86 @@ std::string list_name(std::uint32_t p) {
 }
 
 // Seeking. A stream slot is a state machine (+0xBC8, updated by 0xB76C90): 1 idle (position advances with
-// time, nothing streams; untuned stations), 2 starting (0xB769A0 starts the stream at +0x990), 3 playing
-// (position read from the sound), 4 stopping (applies the +0x99C correction, stops, back to 1). So a seek is:
-// playing -> set 4; once idle, write the position and set 2. The stream restarts there.
-constexpr std::uint32_t kSlotState = 0xBC8;
-enum SlotPhase : std::uint8_t { kIdle = 1, kStarting = 2, kPlaying = 3, kStopping = 4 };
+// time, nothing streams; untuned stations), 2 starting (0xB769A0 starts the stream at +0x990), 3 playing,
+// 4 stopping. Forcing 4 ourselves makes the station treat the item as finished (it moves on). The engine's
+// own network radio sync (0x946E70) instead writes target - position into +0x99C, which the stop applies
+// when the station stops streaming (retune). So: write the correction, then retune - to the same index
+// (phase 1); if that leaves the slot playing, away to the neighbour and back (phases 2, 3).
+constexpr std::uint32_t kSlotState = 0xBC8, kRetuneToIndex = 0x48ED6432;
 
 struct Seek {
-  int station = -1;
+  int station = -1, phase = 0;
   std::uint32_t target_ms = 0;
-  DWORD requested = 0;
+  DWORD requested = 0, started = 0;
 } g_seek;
 
-std::uint8_t* current_slot(int station) {
-  auto* st = (*at_static<std::uint8_t***>(kStationArray))[station];
-  return st && st[kOffCurSlot] <= 1 ? st + st[kOffCurSlot] * kSlotSize : nullptr;
-}
-
-// One step of a pending seek; true when finished (or abandoned).
-bool step_seek(DWORD now) {
+std::uint32_t current_position(int station) {
   __try {
-    std::uint8_t* slot = current_slot(g_seek.station);
-    if (!slot || now - g_seek.requested > 3000) return true;
-    std::uint8_t& state = slot[kSlotState];
-    if (state == kPlaying) {
-      *reinterpret_cast<std::int32_t*>(slot + kSlotSeek) = 0;
-      state = kStopping;
-      return false;
-    }
-    if (state != kIdle) return false;
-    *reinterpret_cast<std::uint32_t*>(slot + kSlotPosition) = g_seek.target_ms + (now - g_seek.requested);
-    state = kStarting;
-    return true;
+    auto* st = (*at_static<std::uint8_t***>(kStationArray))[station];
+    return st && st[kOffCurSlot] <= 1 ? *reinterpret_cast<std::uint32_t*>(st + st[kOffCurSlot] * kSlotSize + kSlotPosition)
+                                      : 0;
   } __except (EXCEPTION_EXECUTE_HANDLER) {
-    return true;
+    return 0;
   }
 }
 
+bool write_correction(int station, std::uint32_t target_ms) {
+  __try {
+    auto* st = (*at_static<std::uint8_t***>(kStationArray))[station];
+    if (!st || st[kOffCurSlot] > 1) return false;
+    std::uint8_t* slot = st + st[kOffCurSlot] * kSlotSize;
+    const std::uint32_t pos = *reinterpret_cast<std::uint32_t*>(slot + kSlotPosition);
+    // The stop only applies corrections that leave a positive position.
+    const std::uint32_t target = target_ms ? target_ms : 1;
+    *reinterpret_cast<std::int32_t*>(slot + kSlotSeek) = static_cast<std::int32_t>(target - pos);
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
+std::uint8_t slot_state(int station) {
+  __try {
+    auto* st = (*at_static<std::uint8_t***>(kStationArray))[station];
+    return st && st[kOffCurSlot] <= 1 ? st[st[kOffCurSlot] * kSlotSize + kSlotState] : 0;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return 0;
+  }
+}
+
+// One step of a pending seek; true when finished.
+bool step_seek(DWORD now) {
+  const int idx = g_seek.station;
+  switch (g_seek.phase) {
+    case 0:
+      write_correction(idx, g_seek.target_ms + (now - g_seek.requested));
+      invoke(kRetuneToIndex, idx);
+      g_seek.phase = 1, g_seek.requested = now;
+      return false;
+    case 1: { // did retuning to the same station apply it?
+      if (now - g_seek.requested < 300) return false;
+      const std::uint32_t want = g_seek.target_ms + (now - g_seek.started);
+      const std::uint32_t have = current_position(idx);
+      const bool worked = have + 1500 > want && have < want + 1500;
+      log::info("Radio probe: retune to the same station: position {} ms, wanted {} ms, slot state {}: {}", have, want,
+                slot_state(idx), worked ? "applied" : "not applied, retuning away and back");
+      if (worked) return true;
+      write_correction(idx, want);
+      invoke(kRetuneToIndex, idx + 1 < station_count() ? idx + 1 : 0);
+      g_seek.phase = 2, g_seek.requested = now;
+      return false;
+    }
+    case 2: // away (the stop applied the correction); come back
+      if (now - g_seek.requested < 400) return false;
+      invoke(kRetuneToIndex, idx);
+      return true;
+  }
+  return true;
+}
+
 bool seek(int station, std::uint32_t target_ms) {
-  g_seek = {station, target_ms, GetTickCount()};
+  const DWORD now = GetTickCount();
+  g_seek = {station, 0, target_ms, now, now};
   return true;
 }
 
