@@ -285,3 +285,18 @@ possible.
    log into this doc.
 2. Implement the file-hash handshake (cheap, independent of the engine; section 4).
 3. Station sync only (driver -> passengers) first; song/offset sync after E3.
+
+## 8. Probe results (2026-10-26, run 1)
+
+- **Every station plays all the time**, tuned or not (all 23 stations' slots advance and change items while
+  untuned): a live timeline per station, not per-tune state.
+- An item = (track-list metadata pointer, category byte, track number). Categories seen: 0, 1, 2 (music),
+  5, 8, 10 (idle/off). Ads resolve to `RADIO_STATION_ADVERTS_GENERIC`; other list pointers are odd addresses
+  inside one ~80 KB block (the loaded `game.dat16` metadata), so `pointer - lookup("RADIO_ADVERTS")` is a
+  portable item id between machines with the same `game.dat16`.
+- Runtime station names (`GET_RADIO_NAME`) are `RADIO_0`..`RADIO_22`, not the script names (`VLADIVOSTOK`),
+  so name-based natives (`FREEZE_RADIO_STATION`, `FORCE_RADIO_TRACK`) can't be driven from the probe's names.
+- **Play position: slot `+0x990`, ms**, rising 1000/s. `0xB76660` (load item) sets it to a random value
+  (`0x885490`), which is why tuning in starts mid-song; `0xB76C70(slot, ms)` adds to it before the stream
+  starts. Plan: load the item, overwrite `+0x990`, start (`0xB769A0`, `0xB76920`) - `start_item` in the probe.
+- Each station has two slots: the current one plays, the other holds the next item (crossfade / DJ over intro).
