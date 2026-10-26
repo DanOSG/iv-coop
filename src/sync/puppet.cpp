@@ -42,7 +42,7 @@ bool Puppet::ensure(const n::Vector3& at) {
     player_slots::release(ped_);
     ped_ = 0;
     blip_ = 0; // the game removes blips attached to deleted peds
-    targetable_ = true;
+    targetable_ = true, settings_applied_ = false;
   }
   model_ = model_override_ ? model_override_ : n::GetHashKey(model_name_.c_str());
   n::RequestModel(model_);
@@ -382,8 +382,14 @@ void Puppet::set_downed_marker(bool downed) {
 
 void Puppet::apply_settings(bool targetable, bool blip_visible) {
   if (!ped_) return;
-  if (targetable != targetable_) {
+  if (!settings_applied_ || targetable != targetable_) {
+    settings_applied_ = true;
     n::invoke(0x5EA84115, ped_, !targetable); // SET_CHAR_NEVER_TARGETTED
+    // Lock-on skips player peds in a group friendly to ours (0xA29F94), and a partner's player ped is in the
+    // player group. Relationship group 30 (MISSION_8, unused by the scripts, which use 0-28) has no
+    // relationships at all, so there they're lockable like any other ped - without the multiplayer
+    // players-first targeting that ALLOW_LOCKON_TO_FRIENDLY_PLAYERS turns on.
+    if (is_player_ped_) n::invoke(0x61822A3C, ped_, targetable ? 30 : 0); // SET_CHAR_RELATIONSHIP_GROUP
     targetable_ = targetable;
   }
   if (blip_ && blip_visible != blip_visible_) {
@@ -412,7 +418,7 @@ void Puppet::despawn() {
   else if (ped_ && n::DoesCharExist(ped_)) n::DeleteChar(ped_);
   ped_ = 0;
   vehicle_ = 0;
-  targetable_ = blip_visible_ = true;
+  targetable_ = blip_visible_ = true, settings_applied_ = false;
   action_ = Action::None;
   dead_ = false;
   phase_ = "idle";

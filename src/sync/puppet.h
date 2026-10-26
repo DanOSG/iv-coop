@@ -106,6 +106,7 @@ class Puppet {
   std::uint32_t ragdoll_since_ = 0;
   std::uint32_t shown_health_ = 2000; // the copy's health as last set (take_hits_from refills to it)
   bool targetable_ = true, blip_visible_ = true; // apply_settings, as last applied to this ped/blip
+  bool settings_applied_ = false;              // to this ped yet (a new ped starts in the player group)
   bool downed_marker_ = false; // last model set_model refused (logged once)
   std::uint8_t worn_drawable_[11] = {};
   std::uint8_t worn_texture_[11] = {};
