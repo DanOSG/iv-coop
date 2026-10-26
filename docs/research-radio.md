@@ -300,3 +300,29 @@ possible.
   (`0x885490`), which is why tuning in starts mid-song; `0xB76C70(slot, ms)` adds to it before the stream
   starts. Plan: load the item, overwrite `+0x990`, start (`0xB769A0`, `0xB76920`) - `start_item` in the probe.
 - Each station has two slots: the current one plays, the other holds the next item (crossfade / DJ over intro).
+
+## 9. Probe runs 2-6 (2026-10-26): seeking, and the engine's own network radio sync
+
+- Forcing an item works: stop the current slot (`0xB76C10`), load (`0xB76660(slot, cat, track, item, 0)`),
+  start (`0xB769A0(slot, meta, start_ms, st+0x191A, st+0x191B)`, `0xB76920`). Items of one list are 8 bytes
+  apart (`item = list + 8 * track`).
+- A **playing** stream can't be moved: re-starting the same item with a new start offset changes `+0x990`
+  but the audio carries on; stopping the sound (`0x891850`, or slot state 4) makes the station treat the item
+  as finished and move on; `RETUNE_RADIO_TO_STATION_INDEX` uses different numbering from
+  `GET_PLAYER_RADIO_STATION_INDEX`. Loading items into idle slots of other stations didn't stick (and broke
+  WKTT: a list + 8 past its end).
+- Slot state `+0xBC8` (`0xB76C90`): 1 idle (position counts with time; ends at length `+0x994`), 2 starting
+  (start at `+0x990`), 3 playing, 4 stopping (applies the `+0x99C` correction, then idle).
+- **The engine has a network radio sync** (from IV's multiplayer):
+  - `0x945A10(station, record*)`: start following - stops the other slot, ring read `+0x17C8` = 0, write
+    `+0x17CC` = 2, ring `+0x17A8` (4 x 8 bytes: 24-bit start ms, then category and track bytes) seeded from
+    the record (current item + next item), sets `+0x1923` = 1. Caller `0x9A3EF0`.
+  - `0x946E70(station, record*)`: push a record; corrects an idle slot's position directly, a playing one
+    through `+0x99C` (applied at the next stop - so even Rockstar's sync never seeks a playing stream).
+  - Consumer in the station update `0x945FE0` (from `0x9A4FA0`): when choosing the next item, if the ring
+    has an entry: `item = 0x945230(station, cat, 0, track, 0)`, `0xB76660(slot, cat, track, item, 0)`,
+    `0xB769A0(slot, meta, start_ms, ...)`. Gated on the byte `0x128465C` (audio entity `0x12845D0` +0x8C) and
+    on helpers in the protected range (`0x47C2E0/330/350`, network-session checks), so in single player it
+    is skipped; we replicate the consumer ourselves instead (same calls as forcing an item).
+  - `0x9A3BB0` snapshots every station as 8-byte records (position, current cat/track, next cat/track).
+- Item identity for the wire is therefore (station, category, track), resolved with `0x945230` - no pointers.
