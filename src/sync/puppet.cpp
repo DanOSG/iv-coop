@@ -380,8 +380,13 @@ void Puppet::set_downed_marker(bool downed) {
   n::invoke(0x4DFE09D6, blip_, downed); // FLASH_BLIP
 }
 
-void Puppet::apply_settings(bool targetable, bool blip_visible) {
+void Puppet::apply_settings(bool targetable, bool blip_visible, bool damageable) {
   if (!ped_) return;
+  if (is_player_ped_ && (!settings_applied_ || damageable != damageable_)) {
+    const bool was = player_slots::set_damageable(ped_, damageable);
+    if (!settings_applied_) log::info("Puppet ped {}: engine damage {} (slot flag was {})", ped_, damageable ? "on" : "off", was);
+    damageable_ = damageable;
+  }
   if (!settings_applied_ || targetable != targetable_) {
     settings_applied_ = true;
     n::invoke(0x5EA84115, ped_, !targetable); // SET_CHAR_NEVER_TARGETTED

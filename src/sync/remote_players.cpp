@@ -728,7 +728,8 @@ void tick() {
         r.vehicle_id = smp->vehicle_id;
         r.downed = down;
         r.puppet.set_downed_marker(r.downed);
-        r.puppet.apply_settings(session_settings::targeting_allowed(), session_settings::current().partner_blips);
+        r.puppet.apply_settings(session_settings::targeting_allowed(), session_settings::current().partner_blips,
+                                session_settings::damage_allowed());
         {
           // ALLOW_LOCKON_TO_FRIENDLY_PLAYERS switched lock-on to players only (no NPCs) - IV multiplayer's
           // targeting. Keep it off; make sure it is off for anyone who ran the build that set it.
@@ -742,7 +743,7 @@ void tick() {
     if (active && me) {
       std::uint16_t dmg = r.puppet.take_hits_from(me, !r.downed); // a downed copy keeps its pose
       std::uint32_t weapon = local ? local->weapon : 0;
-      if (r.puppet.is_player_ped()) {
+      if (r.puppet.is_player_ped() && !r.puppet.engine_damageable()) {
         const team_fire::Hit hit = team_fire::hits_on(r.puppet.ped());
         if (hit.amount) dmg = static_cast<std::uint16_t>(dmg + hit.amount), weapon = hit.weapon;
       }
@@ -808,6 +809,10 @@ void tick() {
             session_settings::damage_allowed()) {
           const std::uint32_t h = n::GetCharHealth(me);
           n::SetCharHealth(me, downed::floor_health(h > d.amount ? h - d.amount : 0));
+          if (d.weapon <= 3) { // a melee hit: stagger
+            const auto attacker = g_remotes.find(m.from);
+            melee_sync::react_to_melee(attacker != g_remotes.end() ? attacker->second.puppet.ped() : 0);
+          }
           if (d.weapon == team_fire::kWeaponVehicle || d.weapon == team_fire::kWeaponExplosion)
             n::invoke(0x1A0F56C5, me, 0, 2000, 1, 1, 1, 0); // knocked over (SWITCH_PED_TO_RAGDOLL)
           log::info("Took {} damage from player #{} (weapon {}), health {} -> {}", d.amount, m.from, d.weapon, h,

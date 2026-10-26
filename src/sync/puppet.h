@@ -35,7 +35,7 @@ class Puppet {
   // Lets the engine ragdoll it (downed pose, death).
   void unlock_ragdoll();
   // Session settings: can our player lock on to this partner; is their map blip shown.
-  void apply_settings(bool targetable, bool blip_visible);
+  void apply_settings(bool targetable, bool blip_visible, bool damageable);
 
   // Seats the puppet in `vehicle` (seat -1 = driver) if it isn't already there; while
   // seated, don't call drive(). Returns true once seated.
@@ -66,6 +66,8 @@ class Puppet {
   bool spawned() const { return ped_ != 0; }
   // An extra player ped: the engine applies no damage to it from us (team_fire detects our hits).
   bool is_player_ped() const { return ped_ && is_player_ped_; }
+  // The engine damages it natively (player-ped copy with team fire allowing damage).
+  bool engine_damageable() const { return ped_ && is_player_ped_ && damageable_; }
   natives::Ped ped() const { return ped_; }
   // Short description of what the puppet is doing, for status displays.
   const char* phase() const { return phase_; }
@@ -106,7 +108,8 @@ class Puppet {
   std::uint32_t ragdoll_since_ = 0;
   std::uint32_t shown_health_ = 2000; // the copy's health as last set (take_hits_from refills to it)
   bool targetable_ = true, blip_visible_ = true; // apply_settings, as last applied to this ped/blip
-  bool settings_applied_ = false;              // to this ped yet (a new ped starts in the player group)
+  bool settings_applied_ = false;
+  bool damageable_ = false;              // to this ped yet (a new ped starts in the player group)
   bool downed_marker_ = false; // last model set_model refused (logged once)
   std::uint8_t worn_drawable_[11] = {};
   std::uint8_t worn_texture_[11] = {};

@@ -22,5 +22,12 @@ natives::Ped acquire(const natives::Vector3& at, float heading, std::uint32_t mo
 // Parks a ped returned by acquire. Anything else is ignored.
 void release(natives::Ped ped);
 bool owns(natives::Ped ped);
+// The engine's can-be-damaged check (0xCA3360) refuses all damage to a player ped whose CPlayerInfo lacks
+// flag 0x10 at +0x70+0x3D0; the local player has it, our slots are created without it. Setting it lets the
+// engine damage a partner's copy natively - melee (contact, blocks, reactions, sounds), bullets, cars,
+// explosions - the way IV multiplayer damages remote players. Returns the flag's previous state.
+bool set_damageable(natives::Ped ped, bool damageable);
+// The CPed* is one of our slots' (for the health hooks).
+bool is_slot_object(const void* ped_object);
 
 } // namespace ivc::player_slots

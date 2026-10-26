@@ -4,6 +4,7 @@
 
 #include <MinHook.h>
 
+#include <algorithm>
 #include <cmath>
 #include <intrin.h>
 #include <format>
@@ -11,6 +12,7 @@
 #include "core/input.h"
 #include "core/log.h"
 #include "game/phone.h"
+#include "game/player_slots.h"
 #include "net/bytes.h"
 
 namespace ivc::downed {
@@ -83,6 +85,10 @@ template <class T> T at_static(std::uintptr_t va) {
 
 bool guarding(void* ped) { return ped && ped == g_guard_ped && g_guard && !g_allow_death; }
 
+// A partner's copy (one of our player slots) takes engine damage here so it reacts and the hit can be
+// reported (Puppet::take_hits_from), but never dies from it: its owner decides. Kept above 100 (dead).
+constexpr float kCopyFloor = 101.0f;
+
 float floor_hit(float value) {
   if (value >= static_cast<float>(kDownedHealth)) return value;
   g_lethal_hit = true;
@@ -137,14 +143,17 @@ SetHealthFn g_set_health = nullptr;
 SetHealth2Fn g_set_health2 = nullptr, g_add_health = nullptr;
 
 void __fastcall set_health_detour(void* ped, void*, float value, int flag) {
+  if (player_slots::is_slot_object(ped)) return g_set_health(ped, std::max(value, kCopyFloor), flag);
   trace_damage(ped, health_of(ped), value, "SetHealth", _AddressOfReturnAddress());
   g_set_health(ped, guarding(ped) ? floor_hit(value) : value, flag);
 }
 void __fastcall set_health2_detour(void* ped, void*, float value) {
+  if (player_slots::is_slot_object(ped)) return g_set_health2(ped, std::max(value, kCopyFloor));
   trace_damage(ped, health_of(ped), value, "SetHealth2", _AddressOfReturnAddress());
   g_set_health2(ped, guarding(ped) ? floor_hit(value) : value);
 }
 void __fastcall add_health_detour(void* ped, void*, float delta) {
+  if (player_slots::is_slot_object(ped)) return g_add_health(ped, std::max(health_of(ped) + delta, kCopyFloor) - health_of(ped));
   trace_damage(ped, health_of(ped), health_of(ped) + delta, "AddHealth", _AddressOfReturnAddress());
   if (guarding(ped)) {
     const float now = *reinterpret_cast<float*>(static_cast<std::uint8_t*>(ped) + kOffHealth);

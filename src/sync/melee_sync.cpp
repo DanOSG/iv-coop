@@ -318,7 +318,9 @@ void tick(bool in_session, bool can_hit, net::Session& net) {
   }
   if (found != g_current && found >= 0) net.send_game(encode_clip(kMsgClip, 0xFF, g_clips[found]), true);
   g_current = found;
-  if (can_hit) check_incoming(net);
+  // Contact is the engine's now (partners' copies are damageable player peds: CPlayerInfo flag 0x10); our
+  // bone test stays for reference but is off.
+  (void)can_hit;
 
   for (auto it = g_mirrors.begin(); it != g_mirrors.end();) {
     const bool over = now - it->second.started > kMirrorMs ||
@@ -357,5 +359,13 @@ void on_message(const net::GameMessage& m, std::uint8_t my_id, n::Ped from_ped) 
 }
 
 bool playing(n::Ped ped) { return g_mirrors.contains(ped); }
+
+void react_to_melee(n::Ped attacker) {
+  const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
+  if (!me || !n::DoesCharExist(me) || n::IsCharDead(me)) return;
+  const float side = side_of(me, attacker);
+  const bool behind = std::fabs(side) > 120.0f;
+  play(me, {"MELEE_UNARMED_BASE", behind ? "Hit_Back" : side > 35 ? "Hit_Left" : side < -35 ? "Hit_Right" : "Hit_Jab"}, true);
+}
 
 } // namespace ivc::melee_sync

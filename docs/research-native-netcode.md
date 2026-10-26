@@ -237,3 +237,17 @@ Only player peds may wear the protagonist model ("player"); CREATE_CHAR with it 
   (once the encrypted range is understood), and natives like `SET_NETWORK_ID_*` for entity flagging.
 - Cheap immediate win independent of netcode: set `thread+0x95 = 1` on story threads to make them tolerant of any
   later native-network experiment.
+
+## 7c. Damage between player peds (2026-10-26)
+
+Traced with hooks on the player health setters (the call chain on every health drop): a punch from an NPC
+reaches the player through `0xB5F060 -> 0xB60C80 (apply weapon damage) -> 0xCA3820 -> 0xCA4780 (AddHealth)`;
+a punch on a partner's copy (an extra player ped) never reached its health. `0xCA3820` first asks
+`0xCA3360` (can this ped be damaged by this hit), which for a **player victim** (`ped+0x219`) returns false
+unless its `CPlayerInfo` (`ped+0x228`) has flag `0x10` at `+0x70+0x3D0`. The local player has it; slots
+created with flags {1,1} don't. Setting it (`player_slots::set_damageable`) makes the engine damage partners'
+copies natively - melee, bullets, cars, explosions - the way IV multiplayer damages remote players; the copy is
+kept above 100 health by the health hooks (its owner decides deaths), and the loss is reported to the owner.
+Lock-on: `0xA29F94` skips player candidates in a group friendly to ours (`0xB5B100`); a copy in relationship
+group 30 is lockable like any ped. `ALLOW_LOCKON_TO_FRIENDLY_PLAYERS` sets ped `+0x264` bit `0x2000000`, which
+also turns on players-first targeting (`0xA2D0F9`) - not what we want.

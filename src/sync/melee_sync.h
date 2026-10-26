@@ -43,5 +43,7 @@ inline bool is_msg(std::span<const std::uint8_t> d) {
 void on_message(const net::GameMessage& m, std::uint8_t my_id, natives::Ped from_ped);
 // True while a copy is playing a mirrored clip (its driver should leave it alone).
 bool playing(natives::Ped ped);
+// A partner's melee hit on us (their engine decided it): our hit reaction for the side it came from.
+void react_to_melee(natives::Ped attacker);
 
 } // namespace ivc::melee_sync

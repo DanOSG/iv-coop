@@ -225,6 +225,28 @@ void release(n::Ped ped) {
   }
 }
 
+bool set_damageable(n::Ped ped, bool damageable) {
+  void* obj = object_of(ped);
+  if (!obj) return false;
+  __try {
+    auto* info = *reinterpret_cast<std::uint8_t**>(static_cast<std::uint8_t*>(obj) + 0x228); // CPlayerInfo*
+    if (!info) return false;
+    std::uint32_t& flags = *reinterpret_cast<std::uint32_t*>(info + 0x70 + 0x3D0);
+    const bool was = (flags & 0x10) != 0;
+    flags = damageable ? flags | 0x10 : flags & ~0x10u;
+    return was;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return false;
+  }
+}
+
+bool is_slot_object(const void* ped_object) {
+  if (!ped_object) return false;
+  for (const Slot& s : g_slots)
+    if (s.obj == ped_object) return true;
+  return false;
+}
+
 bool owns(n::Ped ped) {
   for (const Slot& s : g_slots)
     if (s.in_use && s.ped == ped) return true;
