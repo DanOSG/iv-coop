@@ -17,6 +17,7 @@
 #include "story/environment.h"
 #include "story/hud.h"
 #include "story/world_state.h"
+#include "sync/attach_sync.h"
 #include "sync/session_settings.h"
 
 namespace ivc::story {
@@ -223,6 +224,7 @@ void register_hooks() {
   world::register_hooks();
   dialogue::register_hooks();
   cutscene::register_hooks();
+  attach_sync::register_hooks();
   hud::register_hooks();
   // Text: (key, [key2 | number], time, flag) per native.
   on(0x73B01573, "PRINT_NOW", [](const Call& c) { text(c, TextKind::PrintNow, 0, -1, -1, 1, 2); });

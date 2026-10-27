@@ -79,6 +79,11 @@ class EntitySync {
 
   std::vector<EntityStatus> status() const;
 
+  // --- attachments (sync/attach_sync) ---
+  // An attached child is moved by its parent: its own state stream is paused (not sent, not posed) until
+  // it is detached, when the timeline restarts and the stream re-places it.
+  void set_attached(std::uint32_t id, bool attached);
+
   // --- combat (M5) ---
   // Damage our player did to follower copies since the last call (copies sit on a
   // refilled health buffer, so local hits never kill them; the sim owner decides).
@@ -101,6 +106,7 @@ class EntitySync {
     std::uint32_t migrations = 0;
     bool shown_dead = false; // follower: owner reported death, we killed our copy
     bool pinned = false;     // host-only: never migrate (host always simulates)
+    bool attached = false;   // attached to a parent: no stream in or out
     CarFollower car;         // vehicle followers: physics-follow (wheels roll, collisions)
     // Ped followers: driven like a partner's copy (walk/run to the stream, gun, shots, ragdoll, seat).
     std::unique_ptr<Puppet> driver;

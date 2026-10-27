@@ -22,6 +22,7 @@
 #include "sync/puppet.h"
 #include "story/cutscene.h"
 #include "sync/downed.h"
+#include "sync/attach_sync.h"
 #include "sync/radio_sync.h"
 #include "sync/session_settings.h"
 #include "sync/wallet.h"
@@ -605,6 +606,7 @@ void tick() {
         if (net.status().mode == net::Mode::Hosting) {
           g_entities.on_player_joined(e.id, net);
           story::host_on_player_joined(e.id, net);
+          attach_sync::host_on_player_joined(net);
         }
         break;
       case K::Left:
@@ -622,6 +624,7 @@ void tick() {
         drop_all();
         g_vehicles.clear();
         g_entities.clear(g_was_host);
+        attach_sync::clear();
         story::clear();
         g_mission_cars.clear();
         steam_relay::stop();
@@ -822,6 +825,10 @@ void tick() {
         }
         continue;
       }
+      if (attach_sync::is_msg(m.data)) {
+        attach_sync::on_message(m, g_entities);
+        continue;
+      }
       if (story::client_on_message(m, g_entities)) continue; // story text/blips from the host
       g_entities.on_message(m, ss.my_id);
     }
@@ -837,6 +844,8 @@ void tick() {
       const auto it = g_remotes.find(id);
       return it != g_remotes.end() ? it->second.puppet.ped() : 0;
     };
+    attach_sync::host_tick(g_was_host, net, g_entities);
+    if (!g_was_host) attach_sync::client_tick(g_entities);
     g_entities.tick(now, ss.my_id, g_was_host, positions, net);
     for (const auto& hit : g_entities.collect_hits(me)) {
       net.send_game(sync::encode_damage({hit.kind, hit.target, hit.amount, local ? local->weapon : 0}), true);

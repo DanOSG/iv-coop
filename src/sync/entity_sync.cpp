@@ -98,6 +98,20 @@ void EntitySync::on_player_joined(std::uint8_t player, net::Session& net) {
   if (!ents_.empty()) log::info("Sent {} entities to late joiner #{}", ents_.size(), player);
 }
 
+void EntitySync::set_attached(std::uint32_t id, bool attached) {
+  const auto it = ents_.find(id);
+  if (it == ents_.end()) return;
+  Entity& e = it->second;
+  const bool was = e.attached;
+  e.attached = attached;
+  if (was && !attached) {
+    e.interp.clear(); // the stream re-places it from its next state
+    e.last_send_ms = 0;
+  }
+  // A frozen follower object would not travel with its parent.
+  if (e.type == EntityType::Object && !e.live && exists(e.type, e.handle)) n::FreezeObjectPosition(e.handle, !attached);
+}
+
 void EntitySync::on_player_left(std::uint8_t player) {
   // Their entities keep their last pose; evaluate_ownership() reassigns them on the next
   // pass because the owner is no longer among the players.
@@ -147,7 +161,7 @@ void EntitySync::on_message(const net::GameMessage& m, std::uint8_t my_id) {
         Entity& e = it->second;
         // Only the current sim owner's stream counts (late packets from a previous owner
         // after a migration are dropped).
-        if (m.from == e.sim_owner && e.sim_owner != my_id) {
+        if (m.from == e.sim_owner && e.sim_owner != my_id && !e.attached) {
           e.interp.push(msg->state, m.arrival_ms);
           e.last = msg->state;
         }
@@ -262,7 +276,7 @@ void EntitySync::make_follower(Entity& e) {
     e.driver = std::make_unique<Puppet>();
     e.driver->adopt(e.handle);
   } else if (e.type == EntityType::Object) {
-    n::FreezeObjectPosition(e.handle, true); // posed from the stream
+    n::FreezeObjectPosition(e.handle, !e.attached); // posed from the stream (unless its parent carries it)
   } else {
     // Stays physical: pushed along the owner's track (see pose_follower), so its wheels
     // roll and it reacts to what is around it here.
@@ -457,13 +471,14 @@ void EntitySync::tick(std::uint32_t now_ms, std::uint8_t my_id, bool hosting, co
     if (e.sim_owner == my_id) {
       if (!e.live) make_live(e);
       e.last = read_local(e, now_ms);
-      if (now_ms - e.last_send_ms >= interval) {
+      if (!e.attached && now_ms - e.last_send_ms >= interval) {
         e.last_send_ms = now_ms;
         e.last.seq = ++e.seq;
         net.send_game(encode_entity_state(e.last), false);
       }
     } else {
       if (e.live) make_follower(e);
+      if (e.attached) continue;
       if (auto s = e.interp.sample(now_ms)) pose_follower(e, *s, now_ms);
     }
   }
