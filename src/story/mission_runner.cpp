@@ -96,6 +96,15 @@ void teleport(const n::Vector3& at) {
   n::SetCharCoordinatesNoOffset(me, {at.x, at.y, at.z + 1.0f});
 }
 
+// The phone is ringing or a call is on: teleporting now cuts the call off and the contact rings again.
+bool phone_busy() {
+  for (const auto& t : script::threads()) {
+    const std::string name = lower(t.name);
+    if (name == "spcellphonemain" || name == "spcellphonecalling") return true;
+  }
+  return false;
+}
+
 void visit_next_contact() {
   if (item().at && g_target_visits < 3) {
     ++g_target_visits;
@@ -269,6 +278,7 @@ void tick() {
       break;
     case Phase::Waiting:
       if (now - g_phase_ms > kNoMissionMs) next("-", "no mission started");
+      else if (phone_busy()) g_contact_ms = now; // let the call finish first
       else if (now - g_contact_ms > kContactEveryMs) g_contact_ms = now, visit_next_contact();
       break;
     case Phase::Running:
