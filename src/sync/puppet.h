@@ -35,6 +35,7 @@ class Puppet {
   // Ragdoll and fire follow the owner: a copy is ragdoll-locked (hits don't knock it over here) and
   // falls / burns only while its owner does. Call every frame while it's on foot and not downed.
   void mirror_body(bool ragdoll, bool on_fire, std::uint32_t now_ms);
+  void mirror_fire(bool on_fire, std::uint32_t now_ms);
   // A scripted animation / scenario is playing on the copy (story npc_anims): while held, a standing target
   // doesn't get re-tasked (that would cancel it). Released by hold_scripted_anim(false), or by itself once
   // the target has been moving for a moment.
@@ -117,6 +118,9 @@ class Puppet {
   bool adopted_ = false; // an extra player slot (player hit reactions) vs an ordinary ped
   bool ragdoll_locked_ = false, mirroring_ragdoll_ = false;
   std::uint32_t ragdoll_since_ = 0;
+  bool fire_started_ = false;         // we lit the copy (mirror_fire)
+  std::uint32_t fire_try_ms_ = 0, fire_fx_ = 0; // last START_CHAR_FIRE; the fallback particle effect, if shown
+  int fire_failed_ = 0;               // starts that didn't leave it burning
   std::uint32_t shown_health_ = 2000; // the copy's health as last set (take_hits_from refills to it)
   bool targetable_ = true, blip_visible_ = true; // apply_settings, as last applied to this ped/blip
   bool settings_applied_ = false;

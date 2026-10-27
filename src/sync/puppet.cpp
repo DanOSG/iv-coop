@@ -11,7 +11,8 @@ namespace n = natives;
 namespace {
 constexpr std::uint32_t kUnlockRagdoll = 0x2F2F51E9, kIsPedRagdoll = 0x3E251ADE, kSwitchPedToRagdoll = 0x1A0F56C5,
                         kAllowReactionAnims = 0x0FEA6230,
-                        kClearCharTasksImmediately = 0x3C116620, kIsCharGettingUp = 0x4A906237, kIsCharOnFire = 0x358E21C5, kStartCharFire = 0x5FB31295, kExtinguishCharFire = 0x5D786EEE;
+                        kClearCharTasksImmediately = 0x3C116620, kIsCharGettingUp = 0x4A906237, kIsCharOnFire = 0x358E21C5, kStartCharFire = 0x5FB31295, kExtinguishCharFire = 0x5D786EEE,
+                        kStartPtfxOnPed = 0x381C1F1C, kRemovePtfxFromPed = 0x2FC9782A;
 
 // Tuning for animated mode.
 constexpr float kSnapDist = 5.0f;       // m of horizontal error before we teleport
@@ -157,9 +158,35 @@ void Puppet::mirror_body(bool ragdoll, bool on_fire, std::uint32_t now_ms) {
       mirroring_ragdoll_ = false;
     }
   }
+  mirror_fire(on_fire, now_ms);
+}
+
+// Flames on the copy while its owner burns. START_CHAR_FIRE is the real thing; if the engine refuses it for
+// a player ped or puts it out again straight away (we see that as not burning shortly after a start), we draw
+// the burning-prop particle effect from the game's scripts on the ped instead. Only fire we started is put out:
+// a copy lit by our own molotov is left to burn (team_fire reports that to the owner). Fire damage on the copy
+// is undone like any other (take_hits_from refills it; downed.cpp floors copies above 100).
+void Puppet::mirror_fire(bool on_fire, std::uint32_t now_ms) {
   const bool burning = n::invoke<bool>(kIsCharOnFire, ped_);
-  if (on_fire && !burning) n::invoke(kStartCharFire, ped_);
-  else if (!on_fire && burning) n::invoke(kExtinguishCharFire, ped_);
+  if (on_fire) {
+    if (burning) {
+      fire_failed_ = 0; // lit (by us or the engine): the real effect works
+    } else if (now_ms - fire_try_ms_ > 400) {
+      if (fire_started_ && ++fire_failed_ >= 2 && !fire_fx_) {
+        // START_PTFX_ON_PED: name, ped, offset xyz, rotation xyz, flags (the scripts pass 1.0f as bits here)
+        fire_fx_ = n::invoke<std::uint32_t>(kStartPtfxOnPed, "fire_hotdog_blaze", ped_, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                            0.0f, 1065353216u);
+        log::info("Puppet: START_CHAR_FIRE didn't hold on the copy; using the fire particle effect");
+      }
+      fire_try_ms_ = now_ms;
+      n::invoke(kStartCharFire, ped_);
+      fire_started_ = true;
+    }
+  } else {
+    if (fire_started_ && burning) n::invoke(kExtinguishCharFire, ped_);
+    fire_started_ = false, fire_failed_ = 0;
+    if (fire_fx_) n::invoke(kRemovePtfxFromPed, ped_), fire_fx_ = 0;
+  }
 }
 
 void Puppet::unlock_ragdoll() {

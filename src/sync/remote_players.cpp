@@ -724,8 +724,10 @@ void tick() {
   team_fire::tick(); // rounds we fired this frame (hits on player-ped partners)
   for (auto& [id, r] : g_remotes) {
     float dist = 0;
+    bool owner_burning = false;
     if (auto smp = r.interp.sample(now)) { // once per frame: sampling advances the timeline
       const n::Vector3 at{smp->x, smp->y, smp->z};
+      owner_burning = (smp->flags & sync::PlayerState::kOnFire) != 0;
       positions.push_back({id, at});
       r.puppet.set_model(smp->model); // their real model (host: Niko); 0 -> configured fallback
       if (r.puppet.ensure(at)) {
@@ -775,6 +777,8 @@ void tick() {
         const team_fire::Hit hit = team_fire::hits_on(r.puppet.ped());
         if (hit.amount) dmg = static_cast<std::uint16_t>(dmg + hit.amount), weapon = hit.weapon;
       }
+      if (!dmg && r.puppet.is_player_ped() && team_fire::fire_hit(r.puppet.ped(), owner_burning))
+        dmg = team_fire::fire_damage(), weapon = team_fire::kWeaponFire;
       if (dmg && session_settings::damage_allowed()) {
         net.send_game(sync::encode_damage({sync::DamageTarget::Player, id, dmg, weapon}), true);
         log::info("Hit player #{} '{}' for {} (weapon {})", id, r.name, dmg, weapon);
@@ -861,6 +865,8 @@ void tick() {
             const auto attacker = g_remotes.find(m.from);
             melee_sync::react_to_melee(attacker != g_remotes.end() ? attacker->second.puppet.ped() : 0);
           }
+          if (d.weapon == team_fire::kWeaponFire && !n::invoke<bool>(0x358E21C5, me)) // IS_CHAR_ON_FIRE
+            n::invoke(0x5FB31295, me); // START_CHAR_FIRE: we burn from here on (the engine does the rest)
           if (d.weapon == team_fire::kWeaponVehicle || d.weapon == team_fire::kWeaponExplosion)
             n::invoke(0x1A0F56C5, me, 0, 2000, 1, 1, 1, 0); // knocked over (SWITCH_PED_TO_RAGDOLL)
           log::info("Took {} damage from player #{} (weapon {}), health {} -> {}", d.amount, m.from, d.weapon, h,

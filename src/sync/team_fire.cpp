@@ -19,7 +19,7 @@ using n::invoke;
 
 constexpr std::uint32_t kIsTargettingChar = 0x58A6457C, kIsFreeAimingAtChar = 0x30D427B4,
                         kIsCharTouchingVehicle = 0x307A4B8E, kIsExplosionInSphere = 0x47A77D2E,
-                        kGetCarSpeed = 0x16DD2D00;
+                        kGetCarSpeed = 0x16DD2D00, kIsCharOnFire = 0x358E21C5;
 
 struct Weapon {
   float damage = 0; // per round, player vs player (base x networkplayermod)
@@ -54,15 +54,18 @@ std::uint32_t g_weapon = 0, g_ammo = 0;
 std::uint32_t g_rounds = 0; // fired this frame
 n::Vehicle g_car = 0;
 float g_car_speed = 0;
-DWORD g_last_explosive = 0;
+DWORD g_last_explosive = 0, g_last_fire_weapon = 0; // explosives; molotovs thrown / flamethrower fired
 
 struct Cooldowns {
-  DWORD car = 0, explosion = 0;
+  DWORD car = 0, explosion = 0, fire = 0;
 };
 std::map<n::Ped, Cooldowns> g_cooldowns;
 
 constexpr float kCarHitSpeed = 4.0f; // m/s
 constexpr DWORD kExplosiveWindowMs = 8000;
+constexpr DWORD kFireWindowMs = 25000; // fire near a partner is ours this long after we threw/sprayed fire
+constexpr DWORD kFireReportMs = 2500;  // between fire reports per partner
+constexpr std::uint16_t kFireHit = 12; // each report; the victim then burns on their own, taking native damage
 // Explosion damage by distance (IS_EXPLOSION_IN_SPHERE, tightest first).
 struct Ring {
   float radius;
@@ -115,6 +118,9 @@ void tick() {
   // Explosive weapons fired (rockets) or thrown (grenades, which use up the weapon).
   if (g_rounds && (weapon == 4 || weapon == 18)) g_last_explosive = GetTickCount();
   if (g_weapon == 4 && (weapon != 4 || ammo < g_ammo)) g_last_explosive = GetTickCount();
+  // Fire we started: a molotov thrown (it uses up the weapon, like a grenade) or the flamethrower firing.
+  if (g_rounds && weapon == 19) g_last_fire_weapon = GetTickCount();
+  if (g_weapon == 5 && (weapon != 5 || ammo < g_ammo)) g_last_fire_weapon = GetTickCount();
   g_weapon = weapon, g_ammo = ammo;
 
   // Our car, if we're driving one.
@@ -165,5 +171,19 @@ Hit hits_on(n::Ped target) {
   }
   return hit;
 }
+
+bool fire_hit(n::Ped target, bool owner_burning) {
+  if (!target || !n::DoesCharExist(target) || owner_burning) return false;
+  const DWORD now = GetTickCount();
+  Cooldowns& cd = g_cooldowns[target];
+  // The copy is alight here and the owner isn't: our fire lit it (their game has no fire). Tell them; they
+  // catch fire themselves and take the burn damage natively (their on-fire flag then stops these reports).
+  if (!g_last_fire_weapon || now - g_last_fire_weapon > kFireWindowMs || now - cd.fire < kFireReportMs) return false;
+  if (!invoke<bool>(kIsCharOnFire, target)) return false;
+  cd.fire = now;
+  return true;
+}
+
+std::uint16_t fire_damage() { return kFireHit; }
 
 } // namespace ivc::team_fire
