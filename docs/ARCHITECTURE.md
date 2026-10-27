@@ -232,6 +232,25 @@ docs/
   entities (sim owner = nearest player), so everyone sees the same people and cars, including the same ped
   getting hit, fleeing or fighting. Ambient entities near only one player stay local (cheap). Builds on M4's
   ownership/migration.
+  - First slice built (`sync/ambient_sync`, 2026-10-27; compiled, not yet tested in game; session setting
+    "Ambient sync", default Off):
+    - Host: every 0.7 s, per partner within 130 m, samples the overlap zone with
+      `GET_RANDOM_CHAR_IN_AREA_OFFSET_NO_SAVE` / `GET_RANDOM_CAR_IN_SPHERE_NO_SAVE` and registers ordinary city
+      peds and driven cars within 60 m of the host and a partner (not missions, players, in-car peds, parked
+      cars, or already-networked ones). Caps 16 peds (drivers included) and 12 cars, 3 new per scan. A car's
+      driver is registered with it and always follows the car's sim owner (`evaluate_ownership`). Entities
+      are released (`EntitySync::host_release`: clients delete copies, the host copy wakes up, then
+      `MARK_*_AS_NO_LONGER_NEEDED`) when fewer than two players are within 90 m or the entity vanished.
+    - Ambient ids carry bit 23 (`EntitySync::is_ambient`), so every machine knows which entities are ambient
+      without a protocol change: they stream at `ambient_send_hz` (10) with a 50 ms deeper jitter buffer.
+    - Joiner: while the host is within 100 m (off at 130 m, no wanted level) density multipliers drop to 0.3
+      and off-screen unowned peds/cars in the overlap zone are deleted (3 per scan; never mission entities,
+      networked copies or player-occupied cars). Density is restored when apart, off, or the session ends.
+    - A migrated ambient driver resumes with `TASK_CAR_DRIVE_WANDER`, a ped on foot with `TASK_WANDER_STANDARD`.
+    - Left: verify in game (the area native's extents, density effect); copies lack the ambient ped's
+      outfit variation; ambient AI on followers is a placeholder (no flee/fight task forwarding); parked cars
+      and passengers are not shared; thinning only deletes off-screen duplicates so a few doubles remain in
+      sight; no streaming radius per client (copies spawn on every machine).
 - **M6:** story layer: client script suppression, progression-state sync on join, and replication of blips, HUD,
   subtitles and dialogue.
   - Done (verified on Roman 2 via record/replay, 2026-10-20): capture of story calls, mission entity

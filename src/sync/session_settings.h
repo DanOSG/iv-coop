@@ -27,6 +27,7 @@ struct Settings {
   bool radio_sync = true;
   bool world_sync = true;     // clock and weather follow the host
   bool partner_blips = true;
+  bool ambient_sync = false;  // city peds and traffic near several players are shared (off until proven in play)
   bool operator==(const Settings&) const = default;
 };
 
