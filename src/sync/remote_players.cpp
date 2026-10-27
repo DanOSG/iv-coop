@@ -22,6 +22,7 @@
 #include "sync/puppet.h"
 #include "story/cutscene.h"
 #include "sync/downed.h"
+#include "sync/drunk_sync.h"
 #include "sync/radio_sync.h"
 #include "sync/session_settings.h"
 #include "sync/wallet.h"
@@ -592,6 +593,15 @@ void tick() {
     }
     radio_sync::tick(rf, session());
     scream::tick(f.in_session, session());
+    {
+      drunk_sync::Frame df;
+      df.in_session = session_live, df.hosting = f.hosting, df.my_id = f.my_id;
+      for (const auto& [id, r] : g_remotes)
+        if (id != f.my_id) df.mates.push_back({id, r.puppet.ped()});
+      if (const auto it = g_remotes.find(net::kHostId); it != g_remotes.end() && !f.hosting)
+        df.host_puppet = it->second.puppet.ped();
+      drunk_sync::tick(df, session());
+    }
     melee_sync::tick(f.in_session, f.in_session && session_settings::damage_allowed(), session());
   }
   net::Session& net = session();
@@ -788,6 +798,10 @@ void tick() {
       }
       if (scream::is_msg(m.data)) {
         if (auto it = g_remotes.find(m.from); it != g_remotes.end()) scream::on_message(m, it->second.puppet.ped());
+        continue;
+      }
+      if (drunk_sync::is_msg(m.data)) {
+        drunk_sync::on_message(m);
         continue;
       }
       if (session_settings::is_msg(m.data)) {
