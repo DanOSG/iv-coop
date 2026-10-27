@@ -87,6 +87,11 @@ n::Handle EntitySync::handle_for_id(std::uint32_t id) const {
   return it != ents_.end() && exists(it->second.type, it->second.handle) ? it->second.handle : 0;
 }
 
+Puppet* EntitySync::driver_for_id(std::uint32_t id) {
+  const auto it = ents_.find(id);
+  return it != ents_.end() && !it->second.live ? it->second.driver.get() : nullptr;
+}
+
 void EntitySync::on_player_joined(std::uint8_t player, net::Session& net) {
   // Broadcast is fine: creates are idempotent on clients that already have the entity.
   for (const auto& [id, e] : ents_) {

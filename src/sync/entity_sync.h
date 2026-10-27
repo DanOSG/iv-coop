@@ -65,6 +65,8 @@ class EntitySync {
   std::optional<std::uint32_t> id_for_handle(natives::Handle handle) const;
   // Our local copy of a networked entity (0 if unknown or not spawned yet).
   natives::Handle handle_for_id(std::uint32_t id) const;
+  // The ped driver of a follower copy (null for other entities, or before it exists).
+  Puppet* driver_for_id(std::uint32_t id);
   void host_delete_all(net::Session& net); // removes every networked entity everywhere
   void on_player_joined(std::uint8_t id, net::Session& net); // late joiner: resend creates/owners
   void on_player_left(std::uint8_t id);                       // its entities get reassigned next evaluation

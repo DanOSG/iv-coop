@@ -16,6 +16,7 @@
 #include "story/dialogue.h"
 #include "story/environment.h"
 #include "story/hud.h"
+#include "story/npc_anims.h"
 #include "story/world_state.h"
 #include "sync/session_settings.h"
 
@@ -224,6 +225,7 @@ void register_hooks() {
   dialogue::register_hooks();
   cutscene::register_hooks();
   hud::register_hooks();
+  npc_anims::register_hooks();
   // Text: (key, [key2 | number], time, flag) per native.
   on(0x73B01573, "PRINT_NOW", [](const Call& c) { text(c, TextKind::PrintNow, 0, -1, -1, 1, 2); });
   on(0x0A491CFF, "PRINT", [](const Call& c) { text(c, TextKind::Print, 0, -1, -1, 1, 2); });
@@ -298,6 +300,7 @@ void host_tick(bool hosting, net::Session& net, sync::EntitySync& ents) {
     g_ops.clear();
     g_host_blips.clear();
     g_host_text_blocks.clear();
+    npc_anims::host_tick(false, net, ents);
     return;
   }
   while (!g_ops.empty()) {
@@ -324,6 +327,7 @@ void host_tick(bool hosting, net::Session& net, sync::EntitySync& ents) {
       }
     }
   }
+  npc_anims::host_tick(true, net, ents); // after this frame's creates: their ids are known now
 }
 
 void host_on_player_joined(std::uint8_t player, net::Session& net) {
@@ -345,6 +349,7 @@ void host_on_player_joined(std::uint8_t player, net::Session& net) {
     for (const auto& [kind, p] : hb.props) net.send_game(encode(p), true);
     ++blips;
   }
+  npc_anims::host_on_player_joined(net);
   log::info("Story: sent {} world entries, {} text blocks and {} blips to late joiner #{}", ledger.size(),
             g_host_text_blocks.size(), blips, player);
 }
@@ -428,6 +433,7 @@ bool client_on_message(const net::GameMessage& m, sync::EntitySync& ents) {
 
 void client_tick(sync::EntitySync& ents) {
   hud::client_tick();
+  npc_anims::client_tick(ents);
   environment::client_tick();
   std::erase_if(g_loading_slots, [](std::uint8_t slot) { return n::HasAdditionalTextLoaded(slot); });
   while (g_loading_slots.empty() && !g_held_texts.empty()) {
@@ -465,6 +471,7 @@ void clear() {
   dialogue::clear();
   cutscene::clear();
   hud::clear();
+  npc_anims::clear();
   environment::clear();
   for (auto& [id, cb] : g_client_blips)
     if (cb.local) n::RemoveBlip(cb.local);
