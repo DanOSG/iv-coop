@@ -35,6 +35,7 @@
 #include "sync/melee_sync.h"
 #include "story/dialogue.h"
 #include "story/sounds.h"
+#include "story/npc_anims.h"
 #include "story/story_sync.h"
 #include "sync/entity_sync.h"
 #include "sync/vehicle_sync.h"
@@ -866,6 +867,8 @@ void tick() {
       }
       if (story::fx::is_msg(m.data)) {
         story::fx::client_on_message(m);
+      if (story::npc_anims::is_msg(m.data)) {
+        if (m.from == net::kHostId) story::npc_anims::client_apply(m.data, g_entities);
         continue;
       }
       if (story::client_on_message(m, g_entities)) continue; // story text/blips from the host

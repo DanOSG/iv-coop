@@ -17,6 +17,7 @@ constexpr std::uint32_t kUnlockRagdoll = 0x2F2F51E9, kIsPedRagdoll = 0x3E251ADE,
 constexpr float kSnapDist = 5.0f;       // m of horizontal error before we teleport
 constexpr float kSnapDz = 4.0f;         // m of vertical error before we teleport (floors, falls)
 constexpr float kStillSpeed = 0.5f;     // m/s: below this the remote player is standing
+constexpr std::uint32_t kAnimReleaseMs = 700; // target walking this long ends a held scripted animation
 constexpr float kSettleDist = 0.6f;     // m: standing remote, but we're not on the spot yet
 constexpr float kWalkMax = 2.5f;        // m/s: walk below, run above
 constexpr float kRunMax = 5.5f;         // m/s: run below, sprint above
@@ -135,6 +136,11 @@ void Puppet::snap_to(const PlayerState& t) {
   ++snaps_;
 }
 
+void Puppet::hold_scripted_anim(bool on) {
+  anim_hold_ = on, anim_move_since_ = 0;
+  action_ = Action::None; // whatever comes next (stand, walk) is issued afresh
+}
+
 void Puppet::mirror_body(bool ragdoll, bool on_fire, std::uint32_t now_ms) {
   if (!ped_ || dead_ || !n::DoesCharExist(ped_)) return;
   const bool is_ragdoll = n::invoke<bool>(kIsPedRagdoll, ped_);
@@ -190,6 +196,18 @@ void Puppet::drive_animated(const PlayerState& t, std::uint32_t now_ms) {
   }
 
   const float speed = std::hypot(t.vx, t.vy);
+
+  // A scripted animation owns the ped until the target really walks off.
+  if (anim_hold_) {
+    if (speed < kStillSpeed) anim_move_since_ = 0;
+    else if (!anim_move_since_) anim_move_since_ = now_ms ? now_ms : 1;
+    if (anim_move_since_ && now_ms - anim_move_since_ >= kAnimReleaseMs) {
+      hold_scripted_anim(false);
+    } else {
+      phase_ = "scripted anim";
+      return;
+    }
+  }
 
   // Standing with a gun up: the aim task (apply_combat) owns the ped; don't fight it.
   if ((t.flags & PlayerState::kAiming) && t.weapon && speed < kStillSpeed && error_m_ < kSettleDist) {
