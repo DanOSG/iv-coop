@@ -13,6 +13,7 @@
 #include "game/natives.h"
 #include "story/story_protocol.h"
 #include "story/cutscene.h"
+#include "story/scene_cam.h"
 #include "story/dialogue.h"
 #include "story/fx.h"
 #include "story/sounds.h"
@@ -237,6 +238,7 @@ void register_hooks() {
   dialogue::register_hooks();
   sounds::register_hooks();
   cutscene::register_hooks();
+  scene_cam::register_hooks();
   attach_sync::register_hooks();
   hud::register_hooks();
   fx::register_hooks();
@@ -320,6 +322,7 @@ void host_tick(bool hosting, net::Session& net, sync::EntitySync& ents) {
   dialogue::host_tick(hosting, net, ents);
   sounds::host_tick(hosting, net, ents);
   cutscene::host_tick(hosting, net);
+  scene_cam::host_tick(hosting, net);
   hud::host_tick(hosting, net);
   pickups::tick(hosting, net);
   environment::host_tick(hosting, net);
@@ -502,6 +505,7 @@ void clear() {
   dialogue::clear();
   sounds::clear();
   cutscene::clear();
+  scene_cam::clear();
   hud::clear();
   npc_anims::clear();
   environment::clear();
