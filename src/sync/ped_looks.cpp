@@ -262,7 +262,9 @@ void host_tick(bool hosting, net::Session& net, sync::EntitySync& ents) {
       r.anim = op.anim;
       net.send_game(encode_anim(*id, op.anim), true);
     } else {
-      r.state[static_cast<int>(op.field)] = static_cast<std::int8_t>(op.value);
+      std::int8_t& last = r.state[static_cast<int>(op.field)];
+      if (last == static_cast<std::int8_t>(op.value)) continue; // a script repeating it every frame
+      last = static_cast<std::int8_t>(op.value);
       net.send_game(encode_state(*id, op.field, op.value), true);
     }
   }

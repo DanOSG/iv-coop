@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <deque>
 #include <map>
+#include <tuple>
 #include <optional>
 #include <vector>
 
@@ -94,6 +95,16 @@ struct Pending {
   WireOp op;
 };
 std::deque<Pending> g_pending; // host: script calls waiting for the next tick
+// Scripts often repeat a call every frame (LOCK_CAR_DOORS, CONTROL_CAR_DOOR while animating a door): an op
+// identical to the last one sent for that slot is dropped, and a changing one goes out at most every
+// kOpMinMs, its latest value kept until then.
+constexpr DWORD kOpMinMs = 200;
+struct Throttle {
+  WireOp sent{};
+  DWORD sent_at = 0;
+  std::optional<WireOp> waiting;
+};
+std::map<std::tuple<std::uint32_t, std::uint8_t, std::int32_t>, Throttle> g_throttle; // (id, op, a)
 DWORD g_last_poll = 0;
 
 void remember(Entry& e, const WireOp& o) {
@@ -307,9 +318,27 @@ void tick(bool in_session, bool hosting, sync::EntitySync& ents, net::Session& n
     if (!hosting) continue;
     const auto id = ents.id_for_handle(p.h);
     if (!id) continue;
+    Throttle& t = g_throttle[{*id, p.op.op, p.op.a}];
+    if (t.sent_at && t.sent.b == p.op.b && t.sent.f == p.op.f) {
+      t.waiting.reset();
+      continue;
+    }
+    if (t.sent_at && now - t.sent_at < kOpMinMs) {
+      t.waiting = p.op;
+      continue;
+    }
+    t.sent = p.op, t.sent_at = now, t.waiting.reset();
     remember(g_entries[*id], p.op);
     net.send_game(encode(*id, p.op), true);
   }
+  if (hosting)
+    for (auto& [key, t] : g_throttle)
+      if (t.waiting && now - t.sent_at >= kOpMinMs) {
+        const std::uint32_t id = std::get<0>(key);
+        t.sent = *t.waiting, t.sent_at = now, t.waiting.reset();
+        remember(g_entries[id], t.sent);
+        net.send_game(encode(id, t.sent), true);
+      }
 
   // Poll at 4 Hz: appearance (host: it is the one who knows) and damage (whoever runs the live copy).
   const bool poll = now - g_last_poll >= 250;
@@ -416,6 +445,7 @@ void host_on_player_joined(net::Session& net) {
 
 void clear() {
   g_entries.clear();
+  g_throttle.clear();
   g_pending.clear();
   g_hosting = false;
 }

@@ -1,5 +1,6 @@
 #include "story/sounds.h"
 
+#include <cctype>
 #include <algorithm>
 #include <array>
 #include <cstring>
@@ -60,12 +61,23 @@ bool g_hosting = false;
 std::deque<Pending> g_out;
 std::string g_last_preload; // scripts poll PRELOAD_STREAM every frame; send it once
 
-bool capture(const Call& c) { return g_hosting && is_story_script(c.script); }
+// The host's phone, wardrobe, internet and other UI scripts play their own feedback sounds (dial tones,
+// ring, hang-up); those stay on the host.
+bool ui_script(const std::string& script) {
+  static const char* kPrefix[] = {"spcellphone", "ambwardrobe", "ambinternetcafe", "policecomputer", "ambtv"};
+  std::string lower;
+  for (const char ch : script) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  for (const char* p : kPrefix)
+    if (lower.rfind(p, 0) == 0) return true;
+  return false;
+}
+
+bool capture(const Call& c) { return g_hosting && is_story_script(c.script) && !ui_script(c.script); }
 
 // UI feedback of the host's own menus; kept on the host.
 bool ui_sound(const std::string& name) {
   static const char* kPrefix[] = {"POLICE_COMPUTER", "PC_", "PHONE_", "MOBILE_PHONE", "WEB_", "FRONTEND_MENU",
-                                  "WARDROBE", "MENU_"};
+                                  "WARDROBE", "MENU_", "FRONTEND_GAME_PHONE"};
   for (const char* p : kPrefix)
     if (name.rfind(p, 0) == 0) return true;
   return false;
