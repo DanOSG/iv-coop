@@ -33,6 +33,7 @@
 #include "sync/team_fire.h"
 #include "sync/melee_sync.h"
 #include "story/dialogue.h"
+#include "story/sounds.h"
 #include "story/story_sync.h"
 #include "sync/entity_sync.h"
 #include "sync/vehicle_sync.h"
@@ -554,6 +555,10 @@ void configure(const Settings& s) {
     const auto it = g_remotes.find(net::kHostId);
     return it != g_remotes.end() ? it->second.puppet.ped() : 0;
   });
+  story::sounds::set_host_ped_provider([] {
+    const auto it = g_remotes.find(net::kHostId);
+    return it != g_remotes.end() ? it->second.puppet.ped() : 0;
+  });
   g_vehicles.interp_delay_ms = s.interp_delay_ms;
   g_vehicles.physics_follow = s.physics_follow;
   g_vehicles.force_type = s.vehicle_force_type;
@@ -562,6 +567,7 @@ void configure(const Settings& s) {
 void tick() {
   handle_hotkeys();
   handle_phone();
+  story::sounds::client_tick();
   story::cutscene::client_tick(); // also after leaving, to finish a restore
   hide_puppets_in_cutscenes();
   {
@@ -809,6 +815,8 @@ void tick() {
       }
       if (drunk_sync::is_msg(m.data)) {
         drunk_sync::on_message(m);
+      if (story::sounds::is_msg(m.data)) {
+        if (m.from == net::kHostId) story::sounds::client_apply(m.data, g_entities);
         continue;
       }
       if (session_settings::is_msg(m.data)) {
