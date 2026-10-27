@@ -26,8 +26,10 @@ namespace n = natives;
 using native_hooks::Call;
 
 constexpr std::uint32_t kStartNewScript = 0x4E2260B9, kAddBlipForContact = 0x7C671162,
-                        kLoadScene = 0x39F62BFB, kIsButtonPressed = 0x7FF21081, kIsButtonJustPressed = 0x016C37CD;
-constexpr std::int32_t kButtonDpadUp = 8; // answers an incoming call
+                        kLoadScene = 0x39F62BFB, kIsButtonPressed = 0x7FF21081, kIsButtonJustPressed = 0x016C37CD,
+                        kIsControlPressed = 0x0E635761, kIsKeyboardNavUp = 0x14AB75AE;
+// "Up" answers an incoming call; the phone reads it as pad button 8, control (2, 21) or keyboard nav-up.
+constexpr std::int32_t kButtonDpadUp = 8, kControlPadUp = 21;
 constexpr std::uint32_t kContactEveryMs = 20000; // time at each contact point for its mission to trigger
 constexpr std::uint32_t kSettleMs = 10000;       // after a load: let the story flow set the world up
 constexpr std::uint32_t kLoadTimeoutMs = 120000;
@@ -221,8 +223,11 @@ bool call_ringing() {
 }
 
 void answer_calls(const Call& c) {
-  if (g_phase != Phase::Waiting || c.arg<std::int32_t>(1) != kButtonDpadUp || !lower(c.script).starts_with("spcellphone"))
-    return;
+  if (g_phase != Phase::Waiting || !lower(c.script).starts_with("spcellphone")) return;
+  const bool up = c.hash == kIsKeyboardNavUp ||
+                  (c.hash == kIsControlPressed ? c.arg<std::int32_t>(0) == 2 && c.arg<std::int32_t>(1) == kControlPadUp
+                                               : c.arg<std::int32_t>(1) == kButtonDpadUp);
+  if (!up) return;
   static std::uint32_t pressed_at = 0;
   const std::uint32_t now = GetTickCount();
   if (now - pressed_at > 3000) {
@@ -239,6 +244,8 @@ void register_hooks() {
   if (g_phase == Phase::Off) return;
   native_hooks::on(kIsButtonPressed, "IS_BUTTON_PRESSED", answer_calls);
   native_hooks::on(kIsButtonJustPressed, "IS_BUTTON_JUST_PRESSED", answer_calls);
+  native_hooks::on(kIsControlPressed, "IS_CONTROL_PRESSED", answer_calls);
+  native_hooks::on(kIsKeyboardNavUp, "IS_GAME_KEYBOARD_NAV_UP_PRESSED", answer_calls);
   native_hooks::on(kStartNewScript, "START_NEW_SCRIPT", [](const Call& c) {
     if (g_phase != Phase::Waiting && !(g_phase == Phase::Loading && g_load_seen)) return;
     const std::string name = lower(c.str(0));
