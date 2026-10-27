@@ -32,6 +32,7 @@
 #include "sync/session_settings.h"
 #include "sync/wallet.h"
 #include "sync/scream.h"
+#include "sync/vehicle_props.h"
 #include "sync/team_fire.h"
 #include "sync/melee_sync.h"
 #include "sync/remote_players.h"
@@ -65,6 +66,7 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
   if (cfg.story_log_calls) story::register_call_logging();
   story::configure(cfg.story);
   story::register_hooks();
+  vehicle_props::register_hooks();
   phone::install();
   downed::install();
   story::audit::configure(cfg.audit);

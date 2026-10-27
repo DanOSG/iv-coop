@@ -26,6 +26,7 @@
 #include "sync/session_settings.h"
 #include "sync/wallet.h"
 #include "sync/scream.h"
+#include "sync/vehicle_props.h"
 #include "sync/team_fire.h"
 #include "sync/melee_sync.h"
 #include "story/dialogue.h"
@@ -605,6 +606,7 @@ void tick() {
         if (net.status().mode == net::Mode::Hosting) {
           g_entities.on_player_joined(e.id, net);
           story::host_on_player_joined(e.id, net);
+          vehicle_props::host_on_player_joined(net);
         }
         break;
       case K::Left:
@@ -623,6 +625,7 @@ void tick() {
         g_vehicles.clear();
         g_entities.clear(g_was_host);
         story::clear();
+        vehicle_props::clear();
         g_mission_cars.clear();
         steam_relay::stop();
         steam::leave_lobby();
@@ -794,6 +797,10 @@ void tick() {
         session_settings::on_message(m);
         continue;
       }
+      if (vehicle_props::is_msg(m.data)) {
+        vehicle_props::on_message(m);
+        continue;
+      }
       if (radio_sync::is_msg(m.data)) {
         radio_sync::on_message(m);
         continue;
@@ -838,12 +845,14 @@ void tick() {
       return it != g_remotes.end() ? it->second.puppet.ped() : 0;
     };
     g_entities.tick(now, ss.my_id, g_was_host, positions, net);
+    vehicle_props::tick(true, g_was_host, g_entities, net);
     for (const auto& hit : g_entities.collect_hits(me)) {
       net.send_game(sync::encode_damage({hit.kind, hit.target, hit.amount, local ? local->weapon : 0}), true);
       log::info("Hit entity {} for {}", hit.target, hit.amount);
     }
   }
   if (!active) story::host_tick(false, net, g_entities); // no session: capture stays off
+  if (!active) vehicle_props::tick(false, false, g_entities, net);
   if (me) g_my_last_health = n::GetCharHealth(me);
   const auto entities = g_entities.status();
   static std::uint32_t last_elog = now;
