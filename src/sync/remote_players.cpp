@@ -29,6 +29,7 @@
 #include "sync/radio_sync.h"
 #include "sync/session_settings.h"
 #include "sync/wallet.h"
+#include "sync/character.h"
 #include "sync/scream.h"
 #include "sync/ped_looks.h"
 #include "sync/vehicle_props.h"
@@ -79,7 +80,9 @@ bool swap_player_model(std::uint32_t model) {
   if (!n::HasModelLoaded(model)) return false;
   const n::Player player = n::GetPlayerId();
   n::ChangePlayerModel(player, model);
-  n::SetCharDefaultComponentVariation(n::GetPlayerChar(player));
+  const n::Ped ped = n::GetPlayerChar(player);
+  n::SetCharDefaultComponentVariation(ped);
+  if (character::is_own_model(model)) character::apply_own(ped); // the joiner's saved character (M9)
   n::MarkModelAsNoLongerNeeded(model);
   return true;
 }
@@ -125,7 +128,7 @@ void restore_own_blips() {
 void update_client_mode(n::Ped me) {
   if (!me) return;
   if (g_want_client_mode && !g_client_mode) {
-    const std::uint32_t model = n::GetHashKey(g_cfg.joiner_model.c_str());
+    const std::uint32_t model = character::joiner_model(n::GetHashKey(g_cfg.joiner_model.c_str()));
     const std::uint32_t original = n::GetCharModel(me);
     if (swap_player_model(model)) {
       g_original_model = original;
@@ -170,11 +173,12 @@ void drop_remote(std::uint8_t id) {
   if (auto it = g_remotes.find(id); it != g_remotes.end()) {
     it->second.puppet.despawn();
     g_remotes.erase(it);
+    character::forget(id);
   }
 }
 
 void drop_all() {
-  for (auto& [id, r] : g_remotes) r.puppet.despawn();
+  for (auto& [id, r] : g_remotes) r.puppet.despawn(), character::forget(id);
   g_remotes.clear();
 }
 
@@ -438,8 +442,9 @@ bool cutscene_begin() {
   return true;
 }
 bool cutscene_end() {
-  const std::uint32_t model = g_client_mode && !g_restore_pending ? n::GetHashKey(g_cfg.joiner_model.c_str())
-                                                                    : g_original_model;
+  const std::uint32_t model = g_client_mode && !g_restore_pending
+                                  ? character::joiner_model(n::GetHashKey(g_cfg.joiner_model.c_str()))
+                                  : g_original_model;
   if (model && !swap_player_model(model)) return false;
   if (const n::Ped me = n::GetPlayerChar(n::GetPlayerId()); me && (g_cutscene_return.x || g_cutscene_return.y))
     n::SetCharCoordinatesNoOffset(me, g_cutscene_return);
@@ -589,6 +594,14 @@ void tick() {
         if (p.id == net::kHostId) host_name = p.name;
       wallet::tick(st.mode == net::Mode::Joined, host_name);
     }
+    {
+      character::Frame cf;
+      cf.in_session = f.in_session;
+      cf.joiner_active = st.mode == net::Mode::Joined && g_client_mode && !g_restore_pending;
+      cf.my_id = st.my_id;
+      for (const auto& p : st.players) cf.players.push_back(p.id);
+      character::tick(cf, session());
+    }
     const session_settings::Settings& settings = session_settings::current();
     const bool session_live = f.in_session;
     f.in_session = f.in_session && settings.downed; // off: deaths are normal
@@ -730,6 +743,7 @@ void tick() {
       r.puppet.set_model(smp->model); // their real model (host: Niko); 0 -> configured fallback
       if (r.puppet.ensure(at)) {
         r.puppet.apply_outfit(*smp);
+        character::on_puppet(id, r.puppet.ped());
         const bool down = (smp->flags & sync::PlayerState::kDowned) != 0;
         const n::Vehicle veh = g_vehicles.handle_for(smp->vehicle_id);
         if (veh) {
@@ -824,6 +838,10 @@ void tick() {
       }
       if (story::sounds::is_msg(m.data)) {
         if (m.from == net::kHostId) story::sounds::client_apply(m.data, g_entities);
+        continue;
+      }
+      if (character::is_msg(m.data)) {
+        character::on_message(m);
         continue;
       }
       if (session_settings::is_msg(m.data)) {

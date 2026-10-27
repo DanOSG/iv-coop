@@ -16,6 +16,7 @@
 #include "core/log.h"
 #include "game/natives.h"
 #include "game/script.h"
+#include "sync/character.h"
 #include "sync/session_settings.h"
 
 namespace ivc::phone {
@@ -60,6 +61,8 @@ constexpr int kG91Rows = 500, kG91Style = 40, kG91Speed = 492; // g_U91 byte off
 constexpr std::int32_t kIdMultiplayer = 2000, kIdHost = 2001, kIdJoin = 2002, kIdLeave = 2003, kIdGoToHost = 2004;
 // Co-op Settings (session_settings): the submenu, one item per setting (2011 + index), Back.
 constexpr std::int32_t kIdSettings = 2010, kIdFirstSetting = 2011, kIdBack = 2029;
+// Character creator (sync/character): the submenu is one row per editable value (2100 + row), Save, Back.
+constexpr std::int32_t kIdCharacter = 2005, kIdCharSave = 2030, kIdCharFirst = 2100, kMaxCharRows = 60;
 // Keypad state (spcellphonemain statics): l_U1090 digits typed (no more are taken at 10),
 // l_U1088 the cursor (0 = Call). When a number is full the game moves the cursor to Call.
 constexpr int kSlotKeypadCursor = 1088, kSlotDigits = 1090, kKeypadFull = 10;
@@ -142,7 +145,7 @@ const wchar_t* __fastcall text_get_detour(void* self, void* /*edx*/, const char*
 
 Role g_role = Role::None;
 // What the main menu list currently shows: the phone's own items (+ Multiplayer), ours, or settings.
-enum class Menu { Phone, Coop, Settings } g_menu = Menu::Phone;
+enum class Menu { Phone, Coop, Settings, Character } g_menu = Menu::Phone;
 bool g_menu_dirty = false; // a setting changed: rewrite the labels
 std::int32_t g_menu_cursor = 0;
 std::optional<Action> g_awaiting;         // Host/Join chosen; waiting for the password
@@ -173,7 +176,8 @@ bool has_item(const std::int32_t* st, std::int32_t id) {
 // Redo sub_10177's bookkeeping for the current items (cursor on the first item), after we
 // changed the list behind the script's back. Without it the window/rows describe the old
 // list and scrolling walks off the end (the phone script crashed and restarted).
-void rebuild_display(std::int32_t* st, std::int32_t cursor = 0) {
+// `select_item` >= 0: put the cursor on that item (absolute), scrolling the window to show it.
+void rebuild_display(std::int32_t* st, std::int32_t cursor = 0, std::int32_t select_item = -1) {
   std::uint8_t* g = global_ptr(kPhoneGlobal);
   if (!g) return;
   const std::int32_t count = st[kSlotCount];
@@ -184,7 +188,9 @@ void rebuild_display(std::int32_t* st, std::int32_t cursor = 0) {
   if (st[kSlotMenuType] == 2) rows /= 2;
   st[kSlotMemory] = 0;
   st[kSlotMemoryFlag] = 0;
-  for (std::int32_t i = 0; i < rows; ++i) st[kSlotWindow + i] = i;
+  const std::int32_t first = select_item >= 0 && count > rows ? std::clamp(select_item - 1, 0, count - rows) : 0;
+  if (select_item >= 0) cursor = select_item - first;
+  for (std::int32_t i = 0; i < rows; ++i) st[kSlotWindow + i] = first + i;
   if (count < rows) {
     st[kSlotVisible] = count;
     st[kSlotScrolls] = 0;
@@ -195,7 +201,7 @@ void rebuild_display(std::int32_t* st, std::int32_t cursor = 0) {
     const float size = (g_int(kG91Style) == 2 ? 0.72f : 0.75f) / static_cast<float>(count);
     std::memcpy(&st[kSlotScrollSize], &size, 4);
   }
-  st[kSlotCursor] = std::clamp<std::int32_t>(cursor, 0, rows - 1); // the window starts at item 0
+  st[kSlotCursor] = std::clamp<std::int32_t>(cursor, 0, rows - 1);
   for (int r = 0; r < kMaxRows; ++r) st[kSlotRows + 1 + r * kRowSlots] = 0; // sub_10952: row invalid
   for (int r = 0; r < rows; ++r) {
     const std::int32_t* item = st + kSlotArray + 1 + st[kSlotWindow + r] * kItemSlots;
@@ -208,6 +214,17 @@ void rebuild_display(std::int32_t* st, std::int32_t cursor = 0) {
     row[0] = 1;
   }
   st[kSlotSelected] = st[kSlotRows + 1 + st[kSlotCursor] * kRowSlots + 1];
+}
+
+// A game-text key for a label made at run time (the character editor's "Torso: 3/12"). Labels are never
+// replaced (see rehash_labels), so one key per distinct text; it must resolve right away.
+std::string dynamic_key(const std::string& text) {
+  static std::map<std::string, std::string> keys;
+  if (auto it = keys.find(text); it != keys.end()) return it->second;
+  const std::string key = std::format("IVC_D{}", keys.size());
+  set_label(key, text);
+  rehash_labels();
+  return keys.emplace(text, key).first->second;
 }
 
 // Main menu (1011): the normal list plus "Multiplayer", or our co-op items.
@@ -227,11 +244,28 @@ void fix_main_menu(std::int32_t* st) {
     g_menu_dirty = false;
     return;
   }
+  if (g_menu == Menu::Character) {
+    if (character::editor_take_dirty()) g_menu_dirty = true;
+    std::vector<std::string> rows = character::editor_rows();
+    if (rows.size() > kMaxCharRows) rows.resize(kMaxCharRows);
+    if (static_cast<std::int32_t>(rows.size()) + 2 > cap) rows.resize(std::max<std::int32_t>(cap - 2, 1)); // list capacity
+    const std::int32_t n = static_cast<std::int32_t>(rows.size()) + 2;
+    if (!g_menu_dirty && count == n && st[kSlotArray + 1] == kIdCharFirst) return;
+    for (std::int32_t i = 0; i + 2 < n; ++i) write_item(st, i, kIdCharFirst + i, dynamic_key(rows[i]).c_str());
+    write_item(st, n - 2, kIdCharSave, "IVC_SAVE");
+    write_item(st, n - 1, kIdBack, "IVC_BACK");
+    st[kSlotCount] = n;
+    rebuild_display(st, 0, g_menu_dirty ? g_menu_cursor : 0);
+    g_menu_dirty = false;
+    return;
+  }
   if (g_menu == Menu::Coop) {
     struct Item { std::int32_t id; const char* key; };
-    static const Item kIdle[] = {{kIdHost, "IVC_HOST"}, {kIdJoin, "IVC_JOIN"}, {kIdSettings, "IVC_SETTINGS"}};
+    static const Item kIdle[] = {{kIdHost, "IVC_HOST"}, {kIdJoin, "IVC_JOIN"}, {kIdCharacter, "IVC_CHARACTER"},
+                                {kIdSettings, "IVC_SETTINGS"}};
     static const Item kHosting[] = {{kIdSettings, "IVC_SETTINGS"}, {kIdLeave, "IVC_LEAVE"}};
-    static const Item kJoined[] = {{kIdGoToHost, "IVC_GOTOHOST"}, {kIdLeave, "IVC_LEAVE"}};
+    static const Item kJoined[] = {{kIdGoToHost, "IVC_GOTOHOST"}, {kIdCharacter, "IVC_CHARACTER"},
+                                 {kIdLeave, "IVC_LEAVE"}};
     const std::span<const Item> items = g_role == Role::Joiner ? std::span<const Item>(kJoined)
                                         : g_role == Role::Host ? std::span<const Item>(kHosting)
                                                                : std::span<const Item>(kIdle);
@@ -272,6 +306,8 @@ bool install() {
   set_label("IVC_GOTOHOST", "Go to Host");
   set_label("IVC_SETTINGS", "Co-op Settings");
   set_label("IVC_BACK", "Back");
+  set_label("IVC_CHARACTER", "Character");
+  set_label("IVC_SAVE", "Save");
   session_settings::all_labels(&set_label);
   if (!hook(kTextGet, reinterpret_cast<void*>(&text_get_detour), reinterpret_cast<void**>(&g_text_get_orig),
             "CText::Get") ||
@@ -331,11 +367,26 @@ void tick() {
       break;
     case kIdMultiplayer: // "Multiplayer" picked: show our items in the same list
     case kIdBack:
+      if (g_menu == Menu::Character) character::editor_close(false); // Back: discard the edits
       g_menu = Menu::Coop;
       switch_screen(kScreenMainMenu);
       break;
     case kIdSettings:
       g_menu = Menu::Settings;
+      switch_screen(kScreenMainMenu);
+      break;
+    case kIdCharacter:
+      if (character::editor_open()) {
+        g_menu = Menu::Character, g_menu_dirty = true, g_menu_cursor = 0;
+      } else {
+        g_menu = Menu::Coop;
+        show_help("The character editor needs your player to be in the world.", false);
+      }
+      switch_screen(kScreenMainMenu);
+      break;
+    case kIdCharSave:
+      character::editor_close(true);
+      g_menu = Menu::Coop;
       switch_screen(kScreenMainMenu);
       break;
     case kIdHost:
@@ -378,8 +429,17 @@ void tick() {
         switch_screen(kScreenMainMenu);
         break;
       }
+      if (s >= kIdCharFirst && s < kIdCharFirst + kMaxCharRows) { // a character row: next value
+        character::editor_activate(s - kIdCharFirst);
+        g_menu = Menu::Character, g_menu_dirty = true, g_menu_cursor = s - kIdCharFirst;
+        switch_screen(kScreenMainMenu);
+        break;
+      }
       // Left the main menu (back/close): the next visit shows the normal list again.
-      if (s != kScreenMainMenu) g_menu = Menu::Phone;
+      if (s != kScreenMainMenu) {
+        if (g_menu == Menu::Character) character::editor_close(false); // the phone closed mid-edit
+        g_menu = Menu::Phone;
+      }
       // Closed the phone without calling: forget the half-made choice.
       if (s == 1000 && g_awaiting) {
         g_awaiting.reset();
