@@ -330,6 +330,38 @@ docs/
   game for every player present, not just the host and their friend: turns rotate between players, each
   bowls on their own machine with the lane's pins synced, and the scorecard shows everyone. Darts and pool
   (`darts`, `pool_game`) can follow the same pattern.
+  - **First slice (`sync/bowling_sync`, message 59, 2026-10-27, untested in game):** option (a). The host's
+    `tenpinbowl` stays authoritative for the lane (ball, pins, physics, cameras, anims); a partner's turn is
+    played by *answering the script's input reads* with the partner's. The script's throw is a stick gesture
+    (`sub_50770`/`sub_51642`: pull back then push forward, read with `GET_POSITION_OF_ANALOGUE_STICKS` or
+    `GET_MOUSE_INPUT`, steering while the ball rolls in `sub_58290`), with buttons `IS_CONTROL_PRESSED/JUST_PRESSED`
+    (2,4) (2/0,77) (2,87) (2/0,78) (2,3) and `IS_USING_CONTROLLER` choosing the branch. The partner samples those
+    natives on their machine (our own tick, so our hooks don't see them) and sends sticks, mouse, a pressed mask and
+    latched just-pressed bits (reliable when an edge is in it) at ~30 Hz; the host's `native_hooks::on` hooks on
+    those natives overwrite the results (and out pointers) when the caller is `tenpinbowl` and it is a partner's
+    turn (stale input >0.5 s is neutral; the host's own input is ignored for the turn, control 23 = quit stays the
+    host's). The host's character does the run-up and throw, the partner aims and releases it.
+  - **Turns and score:** the host plus partners within 20 m of the host's player at the first throw (none: vanilla
+    for the rest of the script). Rotation per frame (strike or second ball; the 10th frame has fill balls), absent
+    players are skipped. The script's single card can't hold them, so the mod scores itself: it hooks
+    `CREATE_OBJECT_NO_OFFSET` in `tenpinbowl` for the pin (-190707996) and ball (-1862626618) models,
+    `SET_OBJECT_INITIAL_VELOCITY` on the ball as the release, then tracks the rack with the script's own "down" test
+    (`sub_65157`: moved >0.2 m or `IS_OBJECT_UPRIGHT` 15 deg) until the pins are quiet (>=2.5 s, 1.2 s still, max
+    14 s) and applies standard scoring per player. The host sends the whole view (names, frames, current player)
+    reliably on change and every 2 s; every machine draws it as an overlay (`DRAW_RECT` +
+    `DISPLAY_TEXT_WITH_LITERAL_STRING`, left of screen), partner gets a "Your turn" line.
+  - **Limits of the slice (what remains):** (1) The game is the script's 10 frames shared by everyone (2 players: 5
+    frames each). A full 10 each needs the script's frame counter held: `phone.cpp` shows statics are reachable
+    (`find_thread(..)` + 0x58 -> statics, slot N = `l_U<N>`); `tenpinbowl`'s card is `l_U617[player]` with a
+    452-byte stride (`_fU388` frame index, `_fU444` finished, `_fU4[]` rolls, `_fU344[]` frame scores) and the turn
+    in `l_U264`, player count `l_U263` (= the player's group size). Swapping the slot-0 card per turn, and clearing
+    `_fU444`/`l_U1353`, is the way, but the layout isn't verified against CE and the timing against the script's
+    own frame transition needs a live look. (2) Partners have no camera: the lane cams are scripted on the host
+    (stream `GET_SCRIPT_CAM` pos/rot/fov to the partner as a spectator cam), and their character isn't frozen
+    while they aim. (3) A friend in the party (AI bowler, `l_U263 > 1`) isn't detected: its throws would be
+    scored as the current player's. (4) Whether the lane's pins/ball reach partners as networked objects is
+    unchecked; they only matter once (2) exists. (5) All of the input mapping (control ids, the stick gesture
+    with a partner's pad) is from the decompile and needs an in-game run.
 - **M9:** MP character creator (built 2026-10-27, `sync/character`; untested in game). It doesn't depend on the other
   milestones.
   - **Data:** a character = model (`M_Y_MULTIPLAYER` / `F_Y_MULTIPLAYER`) + drawable and texture for components 0..8 +

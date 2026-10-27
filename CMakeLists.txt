@@ -119,6 +119,7 @@ add_library(iv-coop SHARED
   src/sync/vehicle_sync.cpp
   src/sync/downed.cpp
   src/sync/drunk_sync.cpp
+  src/sync/bowling_sync.cpp
   src/sync/radio_sync.cpp
   src/sync/session_settings.cpp
   src/sync/ambient_sync.cpp
