@@ -19,7 +19,7 @@ namespace {
 
 using Handler = void(__cdecl*)(natives::CallContext*);
 
-constexpr int kMaxHooks = 360; // story sync + call log + sync coverage (~260)
+constexpr int kMaxHooks = 512; // story sync + call log + coverage + the sync features (~400)
 
 struct Slot {
   std::uint32_t hash = 0;
