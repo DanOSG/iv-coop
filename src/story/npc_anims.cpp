@@ -194,7 +194,7 @@ bool try_play(Entry& e, sync::EntitySync& ents) {
       if (!n::invoke<bool>(kHaveAnimsLoaded, dict.c_str())) return false;
     }
   }
-  std::uint32_t slots[kMaxArgs + 1] = {ped};
+  std::uint32_t slots[kMaxArgs + 1] = {static_cast<std::uint32_t>(ped)};
   int i = 1;
   for (const Arg& a : e.start.args) {
     if (a.tag == Tag::String) {
@@ -202,7 +202,7 @@ bool try_play(Entry& e, sync::EntitySync& ents) {
     } else if (a.tag == Tag::Entity) {
       const n::Handle h = ents.handle_for_id(a.value);
       if (!h) return false;
-      slots[i++] = h;
+      slots[i++] = static_cast<std::uint32_t>(h);
     } else {
       slots[i++] = a.value;
     }
