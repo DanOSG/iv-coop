@@ -26,6 +26,7 @@
 #include "sync/session_settings.h"
 #include "sync/wallet.h"
 #include "sync/scream.h"
+#include "sync/ped_looks.h"
 #include "sync/team_fire.h"
 #include "sync/melee_sync.h"
 #include "story/dialogue.h"
@@ -605,6 +606,7 @@ void tick() {
         if (net.status().mode == net::Mode::Hosting) {
           g_entities.on_player_joined(e.id, net);
           story::host_on_player_joined(e.id, net);
+          ped_looks::host_on_player_joined(net);
         }
         break;
       case K::Left:
@@ -623,6 +625,7 @@ void tick() {
         g_vehicles.clear();
         g_entities.clear(g_was_host);
         story::clear();
+        ped_looks::clear();
         g_mission_cars.clear();
         steam_relay::stop();
         steam::leave_lobby();
@@ -798,6 +801,10 @@ void tick() {
         radio_sync::on_message(m);
         continue;
       }
+      if (ped_looks::is_msg(m.data)) {
+        ped_looks::on_message(m);
+        continue;
+      }
       if (downed::is_msg(m.data)) {
         downed::on_message(m, ss.my_id);
         continue;
@@ -828,8 +835,10 @@ void tick() {
     // Story (M6): the host sends what its story scripts did this frame; clients retry
     // blips whose entity copy wasn't there yet.
     story::host_tick(g_was_host, net, g_entities);
+    ped_looks::host_tick(g_was_host, net, g_entities);
     if (!g_was_host) {
       story::client_tick(g_entities);
+      ped_looks::client_tick(g_entities);
       handle_mission_cars(ss.my_id);
     }
     g_entities.player_ped = [my_id = ss.my_id](std::uint8_t id) -> n::Ped {
@@ -843,7 +852,7 @@ void tick() {
       log::info("Hit entity {} for {}", hit.target, hit.amount);
     }
   }
-  if (!active) story::host_tick(false, net, g_entities); // no session: capture stays off
+  if (!active) story::host_tick(false, net, g_entities), ped_looks::host_tick(false, net, g_entities); // no session: capture stays off
   if (me) g_my_last_health = n::GetCharHealth(me);
   const auto entities = g_entities.status();
   static std::uint32_t last_elog = now;
