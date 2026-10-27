@@ -104,7 +104,7 @@ void visit_next_contact() {
     return;
   }
   std::erase_if(g_contacts, [](const Contact& c) { return !n::DoesBlipExist(c.blip); });
-  if (g_contacts.empty()) return;
+  if (g_contacts.empty() || g_next_contact >= 6) return; // then just wait: it may start with a phone call
   const Contact& c = g_contacts[g_next_contact++ % g_contacts.size()];
   teleport(c.at);
   log::info("Runner: walking into contact blip at {:.0f} {:.0f} {:.0f}", c.at.x, c.at.y, c.at.z);

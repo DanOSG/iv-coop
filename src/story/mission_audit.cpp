@@ -86,7 +86,12 @@ unsigned g_skipped = 0;
 Report g_rep;
 n::Vector3 g_home{};
 
+// Notable calls so far: if nudging doesn't move this, the mission is waiting on something else.
+unsigned g_progress = 0, g_progress_at_nudge = 0, g_stuck = 0;
+constexpr unsigned kStuckUseCar = 2, kStuckGiveUp = 8; // nudges without progress
+
 void note(const Call& c, std::string detail) {
+  ++g_progress;
   if (g_rep.notes.size() < 400) g_rep.notes.push_back(std::format("{:<14} {}({})", c.script, c.name, detail));
 }
 
@@ -250,6 +255,19 @@ bool nudge(const Report::Blip& b) {
   n::Vector3 at{};
   invoke(kGetBlipCoords, b.blip, &at);
   if (at.x == 0 && at.y == 0) return false;
+  // Going there on foot didn't do it: many objectives are "take <car> to X". Get into the car the mission
+  // made most recently (teleport() then takes it along).
+  if (b.kind == 'x' && g_stuck >= kStuckUseCar && !n::IsCharInAnyCar(p)) {
+    for (auto it = g_rep.entities.rbegin(); it != g_rep.entities.rend(); ++it) {
+      const auto [kind, car] = *it;
+      if (kind != 'c' || !car || !n::DoesVehicleExist(car) || invoke<bool>(kIsCarDead, car)) continue;
+      if (!n::GetDriverOfCar(car)) n::WarpCharIntoCar(p, car);
+      else if (n::IsCarPassengerSeatFree(car, 0)) n::WarpCharIntoCarAsPassenger(p, car, 0);
+      else continue;
+      g_rep.notes.push_back(std::format("[audit] got into the mission's car {} first", car));
+      break;
+    }
+  }
   teleport({at.x + 2.0f, at.y + 2.0f, at.z + 1.0f});
   return true;
 }
@@ -317,6 +335,7 @@ void watch(const std::string& script, unsigned seconds, std::function<void(const
   g_home = n::GetCharCoordinates(me());
   g_watch_done = std::move(done), g_watch_seconds = seconds;
   g_active = true, g_phase = Phase::Running, g_skipped = 0, g_cutscene_ms = 0;
+  g_stuck = 0, g_progress_at_nudge = g_progress;
   const std::uint32_t now = GetTickCount();
   g_phase_ms = g_last_nudge_ms = g_last_call_ms = now;
   invoke(kSetInvincible, n::GetPlayerId(), true);
@@ -368,6 +387,7 @@ void tick() {
         return;
       }
       g_rep = Report{};
+      g_stuck = 0, g_progress_at_nudge = g_progress;
       g_rep.name = g_list[g_index];
       g_rep.family = {lower(g_rep.name)};
       log::warn("Audit: [{}/{}] {}", g_index + 1, g_list.size(), g_rep.name);
@@ -412,8 +432,12 @@ void tick() {
         finish("timed out (stopped by the audit)", now);
       } else if (const unsigned idle = g_watch_done ? kWatchIdleEnd : kIdleEnd; now - g_last_call_ms > idle * 1000) {
         finish(std::format("idle for {} s (stopped by the audit)", idle), now);
+      } else if (g_stuck >= kStuckGiveUp) {
+        finish(std::format("stuck: {} nudges without progress (stopped by the audit)", g_stuck), now);
       } else if (now - g_last_nudge_ms > kNudgeEvery * 1000 && !g_rep.blips.empty()) {
         g_last_nudge_ms = now;
+        g_stuck = g_progress == g_progress_at_nudge ? g_stuck + 1 : 0;
+        g_progress_at_nudge = g_progress;
         // Newest blip first; if it needs nothing (e.g. we're already in that car), an older one.
         for (auto it = g_rep.blips.rbegin(); it != g_rep.blips.rend(); ++it)
           if (nudge(*it)) {
