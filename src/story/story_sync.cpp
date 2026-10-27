@@ -18,6 +18,7 @@
 #include "story/sounds.h"
 #include "story/environment.h"
 #include "story/hud.h"
+#include "story/pickups.h"
 #include "story/world_state.h"
 #include "sync/attach_sync.h"
 #include "sync/session_settings.h"
@@ -175,6 +176,12 @@ bool try_create(ClientBlip& cb, sync::EntitySync& ents) {
     cb.local = n::AddBlipForCoord({a.x, a.y, a.z});
   } else if (a.kind == BlipKind::Contact) {
     cb.local = n::AddBlipForContact({a.x, a.y, a.z});
+  } else if (a.kind == BlipKind::Pickup) {
+    const n::Handle h = pickups::local_handle(a.entity);
+    if (!h) return false; // pickup copy not created yet: retry next frame
+    n::Handle blip = 0;
+    n::invoke(0x4F567FB, h, &blip); // ADD_BLIP_FOR_PICKUP
+    cb.local = blip;
   } else {
     const n::Handle h = ents.handle_for_id(a.entity);
     if (!h) return false; // entity copy not spawned yet: retry next frame
@@ -232,6 +239,7 @@ void register_hooks() {
   attach_sync::register_hooks();
   hud::register_hooks();
   fx::register_hooks();
+  pickups::register_hooks();
   // Text: (key, [key2 | number], time, flag) per native.
   on(0x73B01573, "PRINT_NOW", [](const Call& c) { text(c, TextKind::PrintNow, 0, -1, -1, 1, 2); });
   on(0x0A491CFF, "PRINT", [](const Call& c) { text(c, TextKind::Print, 0, -1, -1, 1, 2); });
@@ -259,6 +267,15 @@ void register_hooks() {
   };
   on(0x19A64C5D, "ADD_BLIP_FOR_CHAR", entity_blip);
   on(0x6D21564D, "ADD_BLIP_FOR_CAR", entity_blip);
+  on(0x4F567FB, "ADD_BLIP_FOR_PICKUP", [](const Call& c) {
+    if (!capture(c)) return;
+    BlipAdd b;
+    b.id = static_cast<std::uint32_t>(c.out<std::int32_t>(1));
+    b.kind = BlipKind::Pickup, b.entity = c.arg<std::uint32_t>(0);
+    if (!b.id) return;
+    g_host_blips[b.id] = HostBlip{b, true, {}};
+    send(encode(b));
+  });
   on(0x7BBF3625, "REMOVE_BLIP", [](const Call& c) {
     if (!capture(c)) return;
     const auto id = c.arg<std::uint32_t>(0);
@@ -302,6 +319,7 @@ void host_tick(bool hosting, net::Session& net, sync::EntitySync& ents) {
   sounds::host_tick(hosting, net, ents);
   cutscene::host_tick(hosting, net);
   hud::host_tick(hosting, net);
+  pickups::tick(hosting, net);
   environment::host_tick(hosting, net);
   fx::host_tick(hosting, net, ents);
   if (!hosting) {
@@ -349,6 +367,7 @@ void host_on_player_joined(std::uint8_t player, net::Session& net) {
     net.send_game(encode(b), true);
   }
   fx::host_on_player_joined(player, net);
+  pickups::host_on_player_joined(player, net);
   unsigned blips = 0;
   for (const auto& [id, hb] : g_host_blips) {
     if (!hb.resolved) continue; // host_tick sends it when it resolves
@@ -480,6 +499,7 @@ void clear() {
   hud::clear();
   environment::clear();
   fx::clear();
+  pickups::clear();
   for (auto& [id, cb] : g_client_blips)
     if (cb.local) n::RemoveBlip(cb.local);
   g_client_blips.clear();

@@ -105,6 +105,7 @@ add_library(iv-coop SHARED
   src/story/cutscene.cpp
   src/story/hud.cpp
   src/story/fx.cpp
+  src/story/pickups.cpp
   src/story/environment.cpp
   src/story/mission_audit.cpp
   src/story/coverage.cpp

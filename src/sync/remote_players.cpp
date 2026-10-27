@@ -25,6 +25,7 @@
 #include "story/fx.h"
 #include "sync/attach_sync.h"
 #include "sync/drunk_sync.h"
+#include "story/pickups.h"
 #include "sync/radio_sync.h"
 #include "sync/session_settings.h"
 #include "sync/wallet.h"
@@ -821,6 +822,10 @@ void tick() {
       }
       if (session_settings::is_msg(m.data)) {
         session_settings::on_message(m);
+        continue;
+      }
+      if (story::pickups::is_msg(m.data)) {
+        story::pickups::on_message(m, ss.mode == net::Mode::Hosting);
         continue;
       }
       if (radio_sync::is_msg(m.data)) {

@@ -53,12 +53,12 @@ struct Text {
   std::uint8_t flag = 0;
 };
 
-enum class BlipKind : std::uint8_t { Coord, Contact, Entity };
+enum class BlipKind : std::uint8_t { Coord, Contact, Entity, Pickup };
 struct BlipAdd {
   std::uint32_t id = 0; // host's blip handle (stable for the blip's life)
   BlipKind kind{};
   float x = 0, y = 0, z = 0;
-  std::uint32_t entity = 0; // networked entity id (BlipKind::Entity)
+  std::uint32_t entity = 0; // networked entity id (BlipKind::Entity); the host's pickup handle (BlipKind::Pickup)
 };
 
 enum class BlipPropKind : std::uint8_t { Colour, Sprite, Display, Route, Scale, Name };
