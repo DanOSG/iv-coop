@@ -15,6 +15,7 @@
 #include "core/log.h"
 #include "game/native_hooks.h"
 #include "game/natives.h"
+#include "game/script.h"
 #include "story/coverage.h"
 #include "story/mission_audit.h"
 #include "sync/remote_players.h"
@@ -25,7 +26,8 @@ namespace n = natives;
 using native_hooks::Call;
 
 constexpr std::uint32_t kStartNewScript = 0x4E2260B9, kAddBlipForContact = 0x7C671162,
-                        kLoadScene = 0x39F62BFB;
+                        kLoadScene = 0x39F62BFB, kIsButtonPressed = 0x7FF21081, kIsButtonJustPressed = 0x016C37CD;
+constexpr std::int32_t kButtonDpadUp = 8; // answers an incoming call
 constexpr std::uint32_t kContactEveryMs = 20000; // time at each contact point for its mission to trigger
 constexpr std::uint32_t kSettleMs = 10000;       // after a load: let the story flow set the world up
 constexpr std::uint32_t kLoadTimeoutMs = 120000;
@@ -194,8 +196,36 @@ void configure(const std::filesystem::path& plugin_dir) {
   log::warn("Runner: {} missions queued (up to {} s each)", g_queue.size(), g_seconds);
 }
 
+namespace {
+
+// Missions that start "now" (main's start type 1, e.g. after a contact phones) begin with an incoming call
+// someone has to answer: while waiting for the mission and the call script is up, the phone scripts' read of
+// d-pad up gets a short press every few seconds.
+bool call_ringing() {
+  for (const auto& t : script::threads())
+    if (lower(t.name) == "spcellphonecalling") return true;
+  return false;
+}
+
+void answer_calls(const Call& c) {
+  if (g_phase != Phase::Waiting || c.arg<std::int32_t>(1) != kButtonDpadUp || !lower(c.script).starts_with("spcellphone"))
+    return;
+  static std::uint32_t pressed_at = 0;
+  const std::uint32_t now = GetTickCount();
+  if (now - pressed_at > 3000) {
+    if (!call_ringing()) return;
+    pressed_at = now;
+    log::info("Runner: answering the phone");
+  }
+  if (now - pressed_at < 300) *reinterpret_cast<std::int32_t*>(c.ctx->result) = 1;
+}
+
+} // namespace
+
 void register_hooks() {
   if (g_phase == Phase::Off) return;
+  native_hooks::on(kIsButtonPressed, "IS_BUTTON_PRESSED", answer_calls);
+  native_hooks::on(kIsButtonJustPressed, "IS_BUTTON_JUST_PRESSED", answer_calls);
   native_hooks::on(kStartNewScript, "START_NEW_SCRIPT", [](const Call& c) {
     if (g_phase != Phase::Waiting && !(g_phase == Phase::Loading && g_load_seen)) return;
     const std::string name = lower(c.str(0));
