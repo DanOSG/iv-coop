@@ -100,7 +100,7 @@ void startup(HMODULE self) {
   const Config cfg = load_config(dir / "iv-coop.ini");
   session_settings::load(dir / "iv-coop.ini");
   wallet::configure(dir);
-  story::coverage::configure(dir, cfg.audit.stack);
+  story::coverage::configure(dir);
   scream::configure(dir / "iv-coop.ini");
   team_fire::load(dir.parent_path()); // the game folder (plugins\..)
   melee_sync::load(dir.parent_path());

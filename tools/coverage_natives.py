@@ -6,9 +6,10 @@ One list of natives, grouped by what they change, used two ways:
     (story/coverage.cpp, from the generated src/story/coverage_natives.inc);
   - this script counts them in the decompiled mission scripts, ranks the missions by how
     many kinds of unsynced behaviour they use, and picks a short playlist that covers
-    every kind (docs/coverage.md, and playlist.txt for the Ctrl+Shift+M mission launcher).
+    every kind (docs/coverage.md; load each from a "save before every mission" pack, since
+    starting a mission script directly skips the story flow's state).
 
-    python tools/coverage_natives.py <natives.ixx from FusionFix> <GTAIVMissionScripts dir> [game plugins dir]
+    python tools/coverage_natives.py <natives.ixx from FusionFix> <GTAIVMissionScripts dir>
 
 Natives the mod already syncs (blips, text, conversations, cutscenes, world ledger, entity
 creation) are not in the list; when one of these categories gets synced, remove it here.
@@ -143,7 +144,6 @@ def playlist(res, names, min_gain=5):
 
 def main():
     ixx, scripts = sys.argv[1], sys.argv[2]
-    plugins = sys.argv[3] if len(sys.argv) > 3 else None
     hashes = read_hashes(ixx)
     missing = [n for ns in CATEGORIES.values() for n in ns if n not in hashes]
     if missing:
@@ -156,7 +156,7 @@ def main():
     cats = list(CATEGORIES)
     picked, rest = playlist(res, missions)
     pl = [n for n, _, _ in picked]
-    # One of each friend activity / minigame (they need a friend or a venue, so they may not start cold).
+    # One of each friend activity / minigame.
     pl_act = ["romantenpin", "jacobdarts", "packiepool", "romandrink", "romaneat", "romanshow", "romanstrip",
               "go_on_date"]
 
@@ -165,13 +165,15 @@ def main():
          "natives co-op doesn't sync yet, by category. The mod counts the same natives while you play "
          "(`plugins/iv-coop/coverage/`), which shows what really runs.\n",
          "## Playlist\n",
-         "The fewest missions that between them use every category at least twice (Ctrl+Shift+M starts them in "
-         "this order on a throwaway save):\n"]
-    for n in pl:
-        L.append(f"- **{n}**: " + ", ".join(f"{c} {res[n][1][c]}" for c in cats if res[n][1][c]))
-    L.append("\nFriend activities and minigames covering every category they use:\n")
-    for n in pl_act:
-        L.append(f"- **{n}**: " + ", ".join(f"{c} {res[n][1][c]}" for c in cats if res[n][1][c]))
+         "Missions picked so that between them they use (nearly) every world-changing native any IV mission uses: "
+         "each adds at least 5 that the ones above it don't. Load each from a save made just before it (a mission "
+         "save pack): starting a mission script directly skips the story flow (on-mission state, map unlocks). "
+         "The rarest natives each one adds come first (in brackets: how many missions use it).\n"]
+    for n, gain, freq in picked:
+        L.append(f"- **{n}** (+{len(gain)}): " + ", ".join(f"{c} ({freq[c]})" for c in gain[:10]))
+    L.append(f"\nLeft uncovered: {len(rest)} natives, each used by one or two other missions: "
+             + ", ".join(sorted(rest)) + "\n")
+    L.append("Then one of each friend activity and minigame: " + ", ".join(pl_act) + "\n")
     for title, names in (("Missions", missions), ("Friend activities, minigames, ambient", activities)):
         L.append(f"\n## {title}\n")
         L.append("| Script | " + " | ".join(cats) + " |")
@@ -186,14 +188,6 @@ def main():
     print("wrote", doc)
     print("playlist:", " ".join(pl))
     print("activities:", " ".join(pl_act))
-    if plugins:
-        path = os.path.join(plugins, "iv-coop", "playlist.txt")
-        with open(path, "w", newline="\n") as f:
-            f.write("# Ctrl+Shift+M starts the next of these (docs/coverage.md says why each is here).\n")
-            f.write("# Reorder or add any mission/activity script name; done ones go to playlist_done.txt.\n")
-            for n in pl + pl_act:
-                f.write(n + "\n")
-        print("wrote", path)
 
 
 if __name__ == "__main__":

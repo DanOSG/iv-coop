@@ -4,18 +4,14 @@
 // with a few sample text arguments (anim names, sound names, effects). Totals accumulate
 // across sessions in plugins/iv-coop/coverage/coverage.tsv, with a readable summary in
 // coverage.md; play anything (missions, friend activities) and the files say what's missing.
-//
-// Ctrl+Shift+M (mission launcher): starts the next script in plugins/iv-coop/playlist.txt
-// (generated alongside docs/coverage.md: the missions that between them use nearly every
-// unusual native), straight away, wherever the player is. Pressed while one runs, it ends
-// that one. Started scripts are listed in playlist_done.txt and skipped from then on.
-// Missions started out of order change story progress: use a throwaway save.
+// docs/coverage.md lists the missions worth playing first (load them from mission saves:
+// starting a mission script directly skips the story flow's state, so it isn't an option).
 
 #include <filesystem>
 
 namespace ivc::story::coverage {
 
-void configure(const std::filesystem::path& plugin_dir, unsigned script_stack);
+void configure(const std::filesystem::path& plugin_dir);
 // Before native_hooks::install().
 void register_hooks();
 // Game thread, script context, every frame.

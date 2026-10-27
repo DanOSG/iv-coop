@@ -261,9 +261,10 @@ docs/
     vehicle state, ped looks, object state, pickups, drunk effects, minigames, area clears). The mod counts every
     call to them per script while you play (`story/coverage`, `plugins/iv-coop/coverage/coverage.md`, with
     sample anim/sound/effect names), and the tool ranks the decompiled missions in `docs/coverage.md`.
-  - **Mission launcher** (Ctrl+Shift+M): starts the next script in `plugins/iv-coop/playlist.txt` directly. The
-    playlist is the ~26 missions that between them use nearly every world-changing native any IV mission uses
-    (greedy cover, each adds 5+ new ones), then one of each friend activity. For a throwaway save only.
+  - **Playlist:** `docs/coverage.md` lists the ~26 missions that between them use nearly every world-changing
+    native any IV mission uses (greedy cover, each adds 5+ new ones), then one of each friend activity. They're
+    played from a "save before every mission" pack. Starting a mission script directly (tried 2026-10-27) skips the
+    story flow: no on-mission state (non-scripted calls still arrive) and the map isn't unlocked.
 - **Friend activities** (added 2026-10-27): drinking, eating, shows, strip clubs, darts, pool and bowling with
   Roman, Jacob, Brucie, Dwayne and Packie (`<friend><activity>` scripts), and dates. The host's friend comes
   along as a networked entity; partners join the outing as extra company. Being **drunk** is synced to everyone
