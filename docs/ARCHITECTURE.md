@@ -271,6 +271,41 @@ docs/
   along as a networked entity; partners join the outing as extra company. Being **drunk** is synced to everyone
   who drank (`SET_PED_IS_DRUNK`, `SET_DRUNK_CAM`: each player's own wobble and camera), and the drive home works
   with drunk partners as passengers.
+  - **Drunk sync (phase 1, `sync/drunk_sync`, message 51):** hooks `SET_PED_IS_DRUNK` (on the host's player ped
+    only) and `SET_DRUNK_CAM` (any script; the drink scripts and `go_on_date` set it with `GET_ROOT_CAM`, 0.2 to
+    0.7 over 180-300 s, and 0 to end). The host sends `{seq, drunk, mask, cam intensity, cam ms}` reliably on each
+    change and every 4 s while drunk. *Present for the outing* = within 30 m of the host's player (3D) when it
+    becomes drunk; the host checks its partners' copies and sends a bitmask of player ids. A partner in the mask
+    gets `SET_PED_IS_DRUNK` on their own player ped and the same `SET_DRUNK_CAM` on their root cam, both undone
+    when the host's end (or when they leave the session). Everyone's copy of the host also gets
+    `SET_PED_IS_DRUNK` (re-applied every 2 s in case the copy was recreated). Not synced yet: `SET_PED_IS_DRUNK`
+    on other peds (the date in `go_on_date`), partners' own copies on other machines, and `SHAKE_PAD` /
+    `SET_TIME_SCALE` (the drink scripts don't call them; they're local feel only).
+  - **Findings (activity scripts):** the friend/date peds are made by `CREATE_CHAR` inside the activity
+    scripts (`<friend><activity>` use a wrapper `sub(model, &ped, x, y, z, heading)`; `date_food` has
+    `CREATE_GIRLFRIEND_ON_FOOT`, a script function over `CREATE_CHAR`), none of the names match the default
+    `LocalScripts` (`amb*, vendor*, foodserver*, binco*, *help, carfood*`), so the existing story_sync hooks
+    already register them as networked entities for joiners. `go_on_date` and `date_activity` create no
+    peds themselves (the date comes from the `dating_*` scripts / `date_food`). The friend's car and the
+    pickup walk are not created by these scripts (no `CREATE_CAR`), so they come from the engine or a ped
+    that already exists; if a joiner doesn't see the friend arrive, look there first (in-game test).
+  - **Tenpin bowling, how it works:** `bowl_trigger` is the lane-side ambient script: it creates the lane's
+    objects (ball, 10 pins, tracks; `CREATE_OBJECT`, collision toggled with `SET_OBJECT_COLLISION`, pins
+    held with `FREEZE_OBJECT_POSITION`), the bowlers on neighbouring lanes (`CREATE_CHAR`), and starts
+    `TENPINBOWL` with `START_NEW_SCRIPT_WITH_ARGS`. `tenpinbowl` (9160 lines) is the game itself: the player's
+    and friend's run-up, throw and celebration anims (`TASK_PLAY_ANIM*`, `ATTACH_OBJECT_TO_PED` for the ball),
+    cameras, the throw as `APPLY_FORCE_TO_OBJECT` on the ball, the pins as dynamic objects
+    (`SET_OBJECT_DYNAMIC`), scoring, and `INCREMENT_INT_STAT_NO_MESSAGE`. `bowling_lane` runs the NPC bowler
+    on an occupied lane. `<friend>tenpin` only does the outing around it (drive there, walk in, hand over).
+    The pins' physics is run by the engine on whoever owns the objects, scoring reads pin positions locally.
+    Multiplayer bowling would need: (1) a turn owner: only the player whose turn it is runs the throw anim and
+    ball force on their machine (the host's script stays authoritative for the score, so it needs the
+    thrower's input: release angle, power and spin sent to the host, which applies the force to the
+    host's ball); (2) lane objects (ball and pins) as networked objects with positions streamed from the host,
+    with pins' `FREEZE_OBJECT_POSITION` mirrored; (3) partners' puppets teleported to the lane and given the
+    run-up anim by message (not through the frozen script); (4) the scorecard HUD (from `tenpinbowl`'s
+    own drawing) with a player-per-frame list; (5) the camera for the thrower, a spectator camera for the rest.
+    Darts and pool follow the same split.
 - **Multiplayer bowling** (added 2026-10-27): the tenpin minigame (`tenpinbowl`, `bowling_lane`) becomes a
   game for every player present, not just the host and their friend: turns rotate between players, each
   bowls on their own machine with the lane's pins synced, and the scorecard shows everyone. Darts and pool

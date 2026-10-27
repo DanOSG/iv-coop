@@ -113,6 +113,7 @@ add_library(iv-coop SHARED
   src/sync/remote_players.cpp
   src/sync/vehicle_sync.cpp
   src/sync/downed.cpp
+  src/sync/drunk_sync.cpp
   src/sync/radio_sync.cpp
   src/sync/session_settings.cpp
   src/sync/wallet.cpp
