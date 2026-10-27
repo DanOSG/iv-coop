@@ -124,6 +124,7 @@ add_library(iv-coop SHARED
   src/sync/scream.cpp
   src/sync/attach_sync.cpp
   src/sync/ped_looks.cpp
+  src/sync/vehicle_props.cpp
   src/sync/team_fire.cpp
   src/sync/melee_sync.cpp
   src/sync/car_follower.cpp
