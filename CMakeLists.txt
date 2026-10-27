@@ -96,6 +96,7 @@ add_library(iv-coop SHARED
   src/game/phone.cpp
   src/net/steam.cpp
   src/net/steam_relay.cpp
+  src/net/upnp.cpp
   src/game/native_hooks.cpp
   src/story/call_log.cpp
   src/story/story_sync.cpp
@@ -139,7 +140,7 @@ add_library(iv-coop SHARED
 target_include_directories(iv-coop PRIVATE src)
 target_compile_definitions(iv-coop PRIVATE UNICODE _UNICODE)
 target_compile_options(iv-coop PRIVATE ${IVCOOP_WARNINGS})
-target_link_libraries(iv-coop PRIVATE ivc_net minhook imgui d3d9 version)
+target_link_libraries(iv-coop PRIVATE ivc_net minhook imgui d3d9 version ole32 oleaut32 uuid)
 set_target_properties(iv-coop PROPERTIES SUFFIX ".asi" OUTPUT_NAME "iv-coop")
 # Linker map, so crash-logger offsets (iv-coop.asi+0x...) can be resolved to functions.
 target_link_options(iv-coop PRIVATE /MAP:$<TARGET_FILE_DIR:iv-coop>/iv-coop.map)

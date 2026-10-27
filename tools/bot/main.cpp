@@ -4,7 +4,14 @@
 //
 //   iv-coop-bot [--host 127.0.0.1] [--port 41300] [--name Bot] [--radius 4] [--speed 1.6]
 //               [--phase 0] [--skew 123456] [--fixed] [--serve] [--seconds N] [--retry]
-//               [--drive MODEL] [--ride [--seat N]] [--replay FILE.ivcrec]
+//               [--drive MODEL] [--ride [--seat N]] [--replay FILE.ivcrec] [--chaos [LEVEL]]
+//
+// --chaos [1-3]: fault injection on everything this bot sends (default level 2): random
+// drops (unreliable only), delays/reordering, duplicates, truncated and bit-flipped game
+// packets, plus every 15-45 s a random disconnect: a clean leave and re-join, or a dead
+// link (all packets dropped for 10 s, so both sides time out) and re-join. Use it against
+// a running host to check it neither crashes nor desyncs; the host logs flood/malformed
+// counters and a per-peer traffic summary every 10 s.
 //
 // --drive sultan: circle the host in that car (sends VehicleState as the car's owner).
 // --ride: sit in the host's car (passenger seat --seat, default 0) whenever they drive one.
@@ -15,6 +22,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -66,6 +74,7 @@ struct Args {
   int shoot_host = 0;       // fire at the host every N seconds (10 damage per hit); implies armed
   int health = 200;         // starting (and respawn) health
   std::string replay;       // --serve: replay a recorded host session (.ivcrec) to the first client
+  int chaos = 0;            // --chaos level 1-3 (0 = off)
   std::string model;        // appear as this model (e.g. PLAYER = Niko); empty = receivers' fallback
 };
 
@@ -139,6 +148,10 @@ Args parse(int argc, char** argv) {
     else if (k == "--health") a.health = std::atoi(next());
     else if (k == "--replay") a.replay = next(), a.serve = true;
     else if (k == "--model") a.model = next();
+    else if (k == "--chaos") {
+      a.chaos = 2;
+      if (i + 1 < argc && std::isdigit(static_cast<unsigned char>(argv[i + 1][0]))) a.chaos = std::clamp(std::atoi(argv[++i]), 1, 3);
+    }
     else if (k == "--shoot-host") a.shoot_host = std::atoi(next()), a.armed = true;
     else std::fprintf(stderr, "unknown argument %s\n", k.c_str());
   }
@@ -155,6 +168,18 @@ int main(int argc, char** argv) {
   std::setvbuf(stdout, nullptr, _IONBF, 0); // output may be redirected to a file; don't buffer it
 
   net::Session session;
+  session.set_logger([&a](int level, const std::string& text) {
+    std::printf("[%s] net%s: %s\n", a.name.c_str(), level ? " WARN" : "", text.c_str());
+  });
+  if (a.chaos) {
+    const float k = a.chaos == 1 ? 1.0f : a.chaos == 2 ? 3.0f : 6.0f;
+    net::Chaos c;
+    c.drop = 0.05f * k, c.delay = 0.05f * k, c.duplicate = 0.02f * k, c.truncate = 0.004f * k, c.corrupt = 0.004f * k;
+    c.max_delay_ms = 150 * static_cast<std::uint32_t>(k);
+    session.set_chaos(c);
+    std::printf("[%s] CHAOS level %d: drop %.0f%% delay %.0f%% dup %.0f%% truncate %.1f%% corrupt %.1f%%\n", a.name.c_str(),
+                a.chaos, c.drop * 100, c.delay * 100, c.duplicate * 100, c.truncate * 100, c.corrupt * 100);
+  }
   bool up = a.serve ? session.host(a.port, a.name, "127.0.0.1") : session.join(a.host, a.port, a.name);
   // --retry when serving: wait for the port (e.g. the game is still hosting on it).
   while (!up && a.serve && a.retry && !g_quit) {
@@ -177,7 +202,7 @@ int main(int argc, char** argv) {
   const std::uint32_t started = net::steady_ms();
   float cx = 0, cy = 0, cz = 0;
   std::uint16_t seq = 0;
-  std::uint32_t last_send = 0, last_report = net::steady_ms(), last_report_cost = 0;
+  std::uint32_t last_send = 0, last_report = net::steady_ms(), last_report_cost = 0, chaos_next = 0;
   std::map<std::uint8_t, unsigned> received;
   // Same interpolation the game runs per remote player, so its health can be checked
   // from the bot's report with no game involved.
@@ -267,7 +292,7 @@ int main(int argc, char** argv) {
       if (e.kind == K::Left) std::printf("[%s] player #%u '%s' left\n", a.name.c_str(), e.id, e.text.c_str());
       if (e.kind == K::Disconnected) {
         std::printf("[%s] disconnected: %s\n", a.name.c_str(), e.text.c_str());
-        if (a.retry && !a.serve) {
+        if ((a.retry || a.chaos) && !a.serve) {
           std::this_thread::sleep_for(std::chrono::seconds(3));
           std::printf("[%s] retrying...\n", a.name.c_str());
           have_center = false;
@@ -490,6 +515,21 @@ int main(int argc, char** argv) {
     if (active && joined_at && a.leave_after > 0 && now - joined_at >= static_cast<std::uint32_t>(a.leave_after) * 1000) {
       std::printf("[%s] leaving after %d s, as asked\n", a.name.c_str(), a.leave_after);
       break;
+    }
+    // Chaos: now and then drop the connection, cleanly or by going silent, and come back.
+    if (a.chaos && !a.serve && active) {
+      if (!chaos_next) chaos_next = now + 15000 + std::rand() % 30000;
+      if (static_cast<std::int32_t>(now - chaos_next) >= 0) {
+        chaos_next = now + 15000 + std::rand() % 30000;
+        if (std::rand() % 2) {
+          std::printf("[%s] CHAOS: leaving cleanly (will re-join)\n", a.name.c_str());
+          session.leave(); // raises a Disconnected event; the handler above re-joins
+        } else {
+          std::printf("[%s] CHAOS: link goes dead for 10 s (host must time us out, then we re-join)\n", a.name.c_str());
+          session.blackhole(10000);
+        }
+        continue;
+      }
     }
     if (!active || !have_center) continue;
 

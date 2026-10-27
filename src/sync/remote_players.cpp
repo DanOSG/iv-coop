@@ -15,6 +15,7 @@
 #include "game/phone.h"
 #include "net/steam.h"
 #include "net/steam_relay.h"
+#include "net/upnp.h"
 #include "core/log.h"
 #include "game/script.h"
 #include "sync/local_player.h"
@@ -160,7 +161,13 @@ std::mutex g_status_mutex;
 Status g_status;
 
 net::Session& session() {
-  if (!g_session) g_session = std::make_unique<net::Session>();
+  if (!g_session) {
+    g_session = std::make_unique<net::Session>();
+    g_session->set_logger([](int level, const std::string& text) {
+      if (level >= 1) log::warn("[Net] {}", text);
+      else log::info("[Net] {}", text);
+    });
+  }
   return *g_session;
 }
 
@@ -249,9 +256,10 @@ void handle_hotkeys() {
   handle_entity_keys(mode == net::Mode::Hosting);
   if (input::dev_pressed(g_cfg.host_key, g_host_was_down)) {
     if (mode == net::Mode::Idle) {
-      if (session().host(g_cfg.port, g_cfg.name, g_cfg.bind_address))
+      if (session().host(g_cfg.port, g_cfg.name, g_cfg.bind_address)) {
         log::info("Hosting on UDP {} as '{}'", g_cfg.port, g_cfg.name);
-      else
+        upnp::open(g_cfg.port);
+      } else
         log::error("Hosting failed: {}", session().status().last_error);
     } else {
       log::info("Leaving session ({})", net::to_string(mode));
@@ -356,7 +364,8 @@ void handle_phone() {
           steam_relay::start_host(g_cfg.port);
           phone::notify("Starting co-op...");
         } else {
-          phone::notify("Hosting co-op (Steam unavailable: friends join by address).");
+          upnp::open(g_cfg.port); // direct joins only: ask the router to forward the port
+          phone::notify("Hosting co-op (Steam unavailable: friends join by address). Opening the port on your router...");
         }
         break;
       case phone::Action::Join:
@@ -376,6 +385,7 @@ void handle_phone() {
         }
         steam_relay::stop();
         steam::leave_lobby();
+        upnp::close();
         phone::notify("Left co-op.");
         break;
       case phone::Action::GoToHost:
@@ -383,6 +393,8 @@ void handle_phone() {
         break;
     }
   }
+
+  if (const auto msg = upnp::poll()) phone::notify(*msg);
 
   if (!g_self_checks.empty() && GetTickCount() >= g_self_checks.front()) {
     g_self_checks.erase(g_self_checks.begin());
@@ -678,6 +690,10 @@ void tick() {
         break;
       case K::Disconnected:
         log::info("Disconnected: {}", e.text);
+        upnp::close();
+        // Tell the player why (version mismatch, session full, host gone, ...); a deliberate
+        // leave already said so.
+        if (e.text != "left the session") phone::notify("Disconnected: " + e.text);
         drop_all();
         g_vehicles.clear();
         g_entities.clear(g_was_host);

@@ -46,6 +46,39 @@ Free-roam is not a separate mode. It's simply the campaign between missions.
      per lobby member, P2P accepted for lobby members only; joiner: ENet connects to a local proxy port; ENet
      MTU 1200 to fit unreliable P2P). Joiner path untested until a second Steam account is available.
   3. Direct IP + manual port forward always remains as a fallback.
+- **Network hardening** (net/session, net/upnp, tools/bot --chaos):
+  - **UPnP** (net/upnp): when hosting by IP (phone Host with no Steam, the host hotkey), a worker thread asks the
+    router to forward the UDP port with Windows' built-in `IUPnPNAT` / `IStaticPortMappingCollection` COM API (no
+    third-party dependency; it can block for seconds, so it never runs on the game thread). The outcome reaches the
+    phone ("Port 41300 opened on your router" / "Couldn't open the port: ...; friends join via Steam") and the log.
+    The mapping is removed on Leave and on any disconnect; a stale mapping from a crash is replaced on the next
+    open. Not done: removal when the game process is killed or quits without leaving (COM can't be used safely at
+    process teardown), so the mapping then stays on the router until it is replaced or the router reboots.
+  - **Handshake / version**: the ENet connect data carries `kProtocolVersion` and Hello carries it again plus the mod
+    version text (informational, logged by the host). A mismatch is refused with `Reject::VersionMismatch`; the
+    disconnect data is `reason | host_protocol << 8`, so the joiner's phone shows "version mismatch: the host runs
+    protocol vN, you run vM; update iv-coop". Every remote disconnect (full, host left, kicked, timeout, version)
+    is also shown on the phone as "Disconnected: <reason>". A connection that never sends Hello is dropped after 5 s.
+  - **Timeouts / teardown**: ENet peer timeout is 8 s at most. A joiner that drops (clean or timed out) raises `Left`
+    on the host: its puppet, vehicles and networked entities are removed, and `EntitySync::evaluate_ownership`
+    hands its entities to the nearest remaining player. A joiner that loses the host gets `Disconnected`: puppets,
+    entities, story/looks/props state are cleared, the Steam relay and lobby are left, and the joiner's own game
+    state is restored (`g_restore_pending`). Packet queues are cleared on every session start/stop so stale packets
+    can't leak into the next session. There is no automatic re-join; the player re-joins from the phone.
+  - **Size and rate limits**: packets above `kMaxPacket` (16 KB) are refused by ENet (`maximumPacketSize`), dropped on
+    receive in both roles, and refused on send (`send_game`); queue overflows (game thread stalled) are counted.
+    The host drops packets above `kMaxPacketsPerSec` (1500) per joiner and kicks a joiner that stays above it for 5 s
+    in a row. Message decoders must go through the bounds-checked `Reader` (`get()` fails past the end; counts read
+    from the wire must be range-checked before sizing a container; `remaining()` is available); audited: all current
+    decoders do, Welcome's roster count is now capped at 4.
+  - **Traffic stats**: every 10 s the network thread logs, per peer, KB/s and packets/s sent and received, rtt, and the
+    five busiest message types each way (`[Net] net 10s: peer #1 'Name' ... top out: ... | top in: ...`), plus the
+    running dropped-packet total; `SessionStatus` carries `bytes_sent/received` and `dropped_in/out`.
+  - **Chaos test**: `iv-coop-bot --chaos [1-3]` (default 2) injects faults on everything the bot sends (`Session::set_chaos`):
+    drops (unreliable only), delay/reordering, duplicates, truncated and bit-flipped game packets, and every 15-45 s
+    either a clean leave + re-join or a dead link (ENet servicing stops for 10 s, so both sides time out) + re-join.
+    Example: `iv-coop-bot --host 127.0.0.1 --name Chaos --chaos 3 --seconds 120` against a running game host, or
+    against `iv-coop-bot --serve`.
 - **Menu: the phone** (working, 2026-10-22: game/phone, net/steam). CE removed the phone's Multiplayer item, so
   it is put back. The original design: the phone's **Multiplayer** item opens co-op instead of Rockstar's online modes
   (no public/private settings). Its screen (spcellphonenetwork, screen 1047) lists match types through game-text
