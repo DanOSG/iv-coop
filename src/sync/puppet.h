@@ -37,8 +37,9 @@ class Puppet {
   void mirror_body(bool ragdoll, bool on_fire, std::uint32_t now_ms);
   // A scripted animation / scenario is playing on the copy (story npc_anims): while held, a standing target
   // doesn't get re-tasked (that would cancel it). Released by hold_scripted_anim(false), or by itself once
-  // the target has been moving for a moment.
-  void hold_scripted_anim(bool on);
+  // the target has been moving for a moment (unless `ignore_motion`: a task sequence walks as part of the
+  // script, so only the caller releases it).
+  void hold_scripted_anim(bool on, bool ignore_motion = false);
   bool scripted_anim_held() const { return anim_hold_; }
   // Lets the engine ragdoll it (downed pose, death).
   void unlock_ragdoll();
@@ -107,7 +108,7 @@ class Puppet {
   std::uint32_t snaps_ = 0;
   natives::Vehicle vehicle_ = 0;
   std::int8_t seat_ = -1;
-  bool anim_hold_ = false;
+  bool anim_hold_ = false, anim_hold_ignores_motion_ = false;
   std::uint32_t anim_move_since_ = 0; // while held: when the target started moving (0 = standing)
 
   // Appearance state.

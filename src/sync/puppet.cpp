@@ -136,8 +136,8 @@ void Puppet::snap_to(const PlayerState& t) {
   ++snaps_;
 }
 
-void Puppet::hold_scripted_anim(bool on) {
-  anim_hold_ = on, anim_move_since_ = 0;
+void Puppet::hold_scripted_anim(bool on, bool ignore_motion) {
+  anim_hold_ = on, anim_hold_ignores_motion_ = on && ignore_motion, anim_move_since_ = 0;
   action_ = Action::None; // whatever comes next (stand, walk) is issued afresh
 }
 
@@ -201,7 +201,7 @@ void Puppet::drive_animated(const PlayerState& t, std::uint32_t now_ms) {
   if (anim_hold_) {
     if (speed < kStillSpeed) anim_move_since_ = 0;
     else if (!anim_move_since_) anim_move_since_ = now_ms ? now_ms : 1;
-    if (anim_move_since_ && now_ms - anim_move_since_ >= kAnimReleaseMs) {
+    if (!anim_hold_ignores_motion_ && anim_move_since_ && now_ms - anim_move_since_ >= kAnimReleaseMs) {
       hold_scripted_anim(false);
     } else {
       phase_ = "scripted anim";
