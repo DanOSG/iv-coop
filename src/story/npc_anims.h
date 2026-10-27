@@ -11,7 +11,10 @@
 // replays the same native on its copy once the animation dictionary is loaded. The host sends End when a
 // play-anim stops playing there, Clear when a script clears the ped's tasks. On the joiner the ped's
 // puppet leaves the ped alone (Puppet::hold_scripted_anim) until the call ends or the host's ped walks off.
-// Peds inside a task sequence (ped handle 0) are not captured.
+// Task sequences: while a story script has one open (OPEN_SEQUENCE_TASK .. CLOSE_SEQUENCE_TASK) the calls above
+// plus a few movement tasks (walk to, turn, stand still, pause) are recorded with ped handle 0 into its recipe;
+// TASK_PERFORM_SEQUENCE(_FROM_PROGRESS) on a networked ped sends the recipe (Op::Sequence) and joiners rebuild
+// and perform it on their copy. The host sends End when GET_SEQUENCE_PROGRESS on its ped returns -1.
 
 #include <cstdint>
 #include <span>
