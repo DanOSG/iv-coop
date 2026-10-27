@@ -13,6 +13,7 @@ recordings in runner-<script>.ivcrec, coverage in coverage/.
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -106,6 +107,7 @@ def run_all(items, cmd):
 
 
 def main():
+    signal.signal(signal.SIGINT, signal.SIG_IGN)  # a console Ctrl+C (e.g. switching accounts) mustn't end a long run
     if game_running():
         sys.exit("close the game first")
     index_path = mission_saves.INDEX
