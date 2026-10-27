@@ -38,6 +38,7 @@ class Reader {
     return true;
   }
   bool ok() const { return ok_; }
+  std::size_t remaining() const { return d_.size() - pos_; }
 
  private:
   std::span<const std::uint8_t> d_;

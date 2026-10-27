@@ -34,6 +34,18 @@ struct SessionStatus {
   std::vector<PeerStatus> players; // everyone in the session, including us
   std::string last_error;
   std::uint32_t states_sent = 0, states_received = 0;
+  std::uint64_t bytes_sent = 0, bytes_received = 0; // payload bytes, all peers, since the session began
+  std::uint32_t dropped_in = 0, dropped_out = 0;    // oversize / malformed / flood / queue overflow
+};
+
+// Test-rig fault injection on the send path (iv-coop-bot --chaos). Probabilities are per
+// packet, 0..1. Dropping applies to unreliable packets only (ENet's own reliability would
+// otherwise make a "lost" reliable packet a hang, not a test); delays reorder packets;
+// duplicates and truncation/corruption exercise the receiver's idempotency and bounds checks.
+struct Chaos {
+  float drop = 0, delay = 0, duplicate = 0, truncate = 0, corrupt = 0;
+  std::uint32_t max_delay_ms = 400;
+  bool any() const { return drop > 0 || delay > 0 || duplicate > 0 || truncate > 0 || corrupt > 0; }
 };
 
 struct StateUpdate {
@@ -73,6 +85,14 @@ class Session {
   ~Session();
   Session(const Session&) = delete;
   Session& operator=(const Session&) = delete;
+
+  // Where the network thread reports (level 0 = info, 1 = warn): rejects, floods, the
+  // 10 s traffic summary. Called from the network thread; must be thread-safe.
+  using LogFn = std::function<void(int level, const std::string& text)>;
+  void set_logger(LogFn fn);
+  void set_chaos(const Chaos& c);
+  // Chaos: silently drop everything we send for `ms` (a dead link: the peer times out).
+  void blackhole(std::uint32_t ms);
 
   bool host(std::uint16_t port, const std::string& name, const std::string& bind_address = "0.0.0.0");
   bool join(const std::string& address, std::uint16_t port, const std::string& name);

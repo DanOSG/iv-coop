@@ -36,11 +36,25 @@ inline constexpr std::uint8_t kNumChannels = 2;
 // ENet MTU: Steam's unreliable P2P packets (the relay path) are limited to 1200 bytes.
 inline constexpr std::uint32_t kMtu = 1200;
 
-// Disconnect reasons (ENet disconnect data).
-enum class Reject : std::uint32_t { None = 0, Full = 1, VersionMismatch = 2, HostLeft = 3, Kicked = 4 };
+// Largest packet we accept or send (bytes). ENet is told to refuse bigger ones, and the
+// session drops anything over it on both paths, so a corrupt or hostile length can't make
+// us buffer megabytes. The biggest real message (a conversation or a looks table) is well
+// under 1 KB.
+inline constexpr std::size_t kMaxPacket = 16384;
+// A joiner that hasn't sent a valid Hello this long after connecting is dropped.
+inline constexpr std::uint32_t kHelloTimeoutMs = 5000;
+// Per-peer flood limits (host side): packets per second above the soft limit are dropped;
+// staying above it for kFloodSeconds in a row kicks the peer. Real traffic is ~100/s.
+inline constexpr std::uint32_t kMaxPacketsPerSec = 1500;
+inline constexpr int kFloodSeconds = 5;
+
+// Disconnect reasons (ENet disconnect data). The low byte is the reason; the host puts its
+// protocol version in the bits above (see reject_data), so a mismatched joiner can say
+// which version the host runs.
+enum class Reject : std::uint32_t { None = 0, Full = 1, VersionMismatch = 2, HostLeft = 3, Kicked = 4, HelloTimeout = 5 };
 
 enum class MsgType : std::uint8_t {
-  Hello = 1,        // C->H: version, name
+  Hello = 1,        // C->H: protocol version, name, mod version text (optional, informational)
   Welcome = 2,      // H->C: your id, roster
   PlayerJoined = 3, // H->all: id, name
   PlayerLeft = 4,   // H->all: id
@@ -49,6 +63,11 @@ enum class MsgType : std::uint8_t {
 };
 
 using Name = std::array<char, kNameLen>;
+using ModVersion = std::array<char, 16>; // IVCOOP_VERSION text, appended to Hello (informational)
+
+inline std::uint32_t reject_data(Reject r) { return static_cast<std::uint32_t>(r) | (std::uint32_t{kProtocolVersion} << 8); }
+inline Reject reject_reason(std::uint32_t data) { return static_cast<Reject>(data & 0xFF); }
+inline std::uint16_t reject_host_version(std::uint32_t data) { return static_cast<std::uint16_t>(data >> 8); }
 
 inline Name make_name(const std::string& s) {
   Name n{};
@@ -64,7 +83,11 @@ struct RosterEntry {
 
 inline std::vector<std::uint8_t> encode_hello(const std::string& name) {
   Writer w;
-  w.put(MsgType::Hello).put(kProtocolVersion).put(make_name(name));
+  ModVersion mv{};
+#ifdef IVCOOP_VERSION
+  std::memcpy(mv.data(), IVCOOP_VERSION, std::min(sizeof(IVCOOP_VERSION) - 1, mv.size() - 1));
+#endif
+  w.put(MsgType::Hello).put(kProtocolVersion).put(make_name(name)).put(mv);
   return std::move(w.data());
 }
 
