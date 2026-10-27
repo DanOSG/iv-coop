@@ -9,7 +9,11 @@
 // game's common/data/WeaponInfo.xml. The victim's game applies it (victim-owner damage, as for all hits).
 // The same goes for our car hitting them at speed and our grenades/rockets going off near them; those knock
 // the victim down in their game too. Melee is sync/melee_sync (contact of the striking bones).
-// Not covered yet: molotov/fire damage.
+// Fire: fire exists only in the game that started it. When we've thrown a molotov / fired the flamethrower
+// recently and a partner's copy is burning here while its owner reports not burning, we send them a
+// kWeaponFire hit (small damage); their game applies it and sets them alight (START_CHAR_FIRE), after which
+// they burn natively and everyone sees the owner's on-fire flag (puppet mirror_fire). Burning cars and other
+// fires are the victim's own game's business (the engine burns them there).
 
 #include <cstdint>
 #include <filesystem>
@@ -22,7 +26,7 @@ namespace ivc::team_fire {
 void load(const std::filesystem::path& game_dir);
 // Game thread, once per frame before hits_on(): counts the rounds we fired this frame.
 void tick();
-constexpr std::uint8_t kWeaponExplosion = 253, kWeaponVehicle = 254; // Damage.weapon for non-weapon hits
+constexpr std::uint8_t kWeaponFire = 252, kWeaponExplosion = 253, kWeaponVehicle = 254; // Damage.weapon for non-weapon hits
 
 struct Hit {
   std::uint16_t amount = 0;
@@ -31,5 +35,9 @@ struct Hit {
 };
 // What we did to `target` this frame (amount 0: nothing).
 Hit hits_on(natives::Ped target);
+// True when our fire has set `target`'s copy alight and its owner isn't burning (rate limited): send them a
+// kWeaponFire hit of fire_damage(). Applies whether or not the copy is engine-damageable.
+bool fire_hit(natives::Ped target, bool owner_burning);
+std::uint16_t fire_damage();
 
 } // namespace ivc::team_fire
