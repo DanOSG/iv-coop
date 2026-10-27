@@ -103,6 +103,7 @@ add_library(iv-coop SHARED
   src/story/dialogue.cpp
   src/story/sounds.cpp
   src/story/cutscene.cpp
+  src/story/scene_cam.cpp
   src/story/hud.cpp
   src/story/fx.cpp
   src/story/pickups.cpp

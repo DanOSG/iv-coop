@@ -21,6 +21,7 @@
 #include "sync/player_state.h"
 #include "sync/puppet.h"
 #include "story/cutscene.h"
+#include "story/scene_cam.h"
 #include "sync/downed.h"
 #include "story/fx.h"
 #include "sync/attach_sync.h"
@@ -572,6 +573,7 @@ void tick() {
   handle_phone();
   story::sounds::client_tick();
   story::cutscene::client_tick(); // also after leaving, to finish a restore
+  story::scene_cam::client_tick(session_settings::current().scenes_watch); // likewise
   hide_puppets_in_cutscenes();
   {
     downed::Frame f;
@@ -878,6 +880,10 @@ void tick() {
       }
       if (attach_sync::is_msg(m.data)) {
         attach_sync::on_message(m, g_entities);
+        continue;
+      }
+      if (story::scene_cam::is_msg(m.data)) {
+        if (m.from == net::kHostId) story::scene_cam::client_apply(m.data);
         continue;
       }
       if (story::fx::is_msg(m.data)) {

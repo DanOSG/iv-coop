@@ -247,7 +247,7 @@ docs/
     joiner wallets per host campaign (sync/wallet; first visit $1000); lethal hits on missions held at the downed
     level by hooking the player's health setters (sync/downed).
   - Left: task forwarding for mission entities, objects, blips on non-networked entities, the free-cutscene
-    option, scripted-camera scenes, fire not visible on player-ped partners (START_CHAR_FIRE on an extra player
+    option, fire not visible on player-ped partners (START_CHAR_FIRE on an extra player
     ped: the ragdoll mirrors but no flames show; cosmetic), molotov/fire damage between players, matching the host's outfit in cutscenes.
 - **M7:** cutscenes and scripted cameras, mission teleport/"join host".
 - **M8:** mission audit: play IV start to finish with 4 players and fill in `docs/missions.md`, applying

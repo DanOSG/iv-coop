@@ -27,6 +27,7 @@ struct Settings {
   bool radio_sync = true;
   bool world_sync = true;     // clock and weather follow the host
   bool partner_blips = true;
+  bool scenes_watch = true;   // host's scripted-camera scenes: joiners watch them (off: keep their own control)
   bool operator==(const Settings&) const = default;
 };
 
