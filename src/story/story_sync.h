@@ -29,6 +29,8 @@ void configure(const Settings& s);
 // Registers the capture hooks; call before native_hooks::install().
 void register_hooks();
 bool is_story_script(const std::string& name);
+// True while hosting with replication on and `script` is a story script: its calls are captured.
+bool replicating(const std::string& script);
 
 // --- per frame, game thread, from the co-op tick ---
 // Host: send what story scripts did since last frame (nothing is captured unless hosting).
@@ -37,8 +39,9 @@ void host_tick(bool hosting, net::Session& net, sync::EntitySync& ents);
 void host_on_player_joined(std::uint8_t player, net::Session& net);
 // Client: apply a story message from the host (returns false if it wasn't one).
 bool client_on_message(const net::GameMessage& m, sync::EntitySync& ents);
-// Client: retry blips waiting for their entity's local copy to spawn.
-void client_tick(sync::EntitySync& ents);
+// Client: retry blips waiting for their entity's local copy to spawn; apply queued explosions/fires/effects
+// (`host_ped`: the character standing in for the host, 0 if none).
+void client_tick(sync::EntitySync& ents, natives::Ped host_ped);
 // Client: networked vehicles the host's mission hands the protagonist right now (blipped
 // in a non-hostile colour, nobody driving): partners get a duplicate of these.
 std::vector<std::uint32_t> mission_cars(sync::EntitySync& ents);
