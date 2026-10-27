@@ -5,8 +5,8 @@
 // the host sends its name, and later that it ended (played out or skipped). Each joiner
 // plays the same cutscene locally, wherever they are. IV casts the local player as the
 // protagonist in cutscenes, so for the duration the joiner's player is switched back to
-// the protagonist's model (and their position restored afterwards); other players'
-// puppets are hidden on every machine while a cutscene plays. If the host's cutscene ends
+// the protagonist's model while their own character stays behind as a steerable double
+// (sync/cutscene_double); the host's puppet is hidden on joiners while it plays. If the host's cutscene ends
 // first, the joiner's is stopped like a skip (STOP_CUTSCENE) and cleared once finished.
 
 #include <cstdint>

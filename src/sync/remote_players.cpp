@@ -21,6 +21,7 @@
 #include "sync/player_state.h"
 #include "sync/puppet.h"
 #include "story/cutscene.h"
+#include "sync/cutscene_double.h"
 #include "story/scene_cam.h"
 #include "sync/downed.h"
 #include "story/fx.h"
@@ -435,14 +436,13 @@ void handle_phone() {
 
 // Joiner during a replicated cutscene: IV casts the local player as the protagonist, so
 // switch to the protagonist's model for it, and put the player back where they were.
-n::Vector3 g_cutscene_return{};
 bool cutscene_begin() {
   const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
   if (!me) return true;
-  static bool saved = false;
-  if (!saved) g_cutscene_return = n::GetCharCoordinates(me), saved = true;
+  // Our own character stays behind as a separate ped the player keeps steering (and that
+  // the others see); the player ped becomes the cutscene's actor.
+  if (!sync::cutscene_double::begin()) return false;
   if (!swap_player_model(0x6F0783F5)) return false; // "player": streaming, try next frame
-  saved = false;
   return true;
 }
 bool cutscene_end() {
@@ -450,19 +450,28 @@ bool cutscene_end() {
                                   ? character::joiner_model(n::GetHashKey(g_cfg.joiner_model.c_str()))
                                   : g_original_model;
   if (model && !swap_player_model(model)) return false;
-  if (const n::Ped me = n::GetPlayerChar(n::GetPlayerId()); me && (g_cutscene_return.x || g_cutscene_return.y))
-    n::SetCharCoordinatesNoOffset(me, g_cutscene_return);
+  const n::Vector3 back = sync::cutscene_double::end(); // where our character walked to
+  if (const n::Ped me = n::GetPlayerChar(n::GetPlayerId()); me && (back.x || back.y))
+    n::SetCharCoordinatesNoOffset(me, back);
   return true;
 }
 
-// Other players' puppets stay out of shot while a cutscene plays here.
-bool g_puppets_hidden = false;
+// While a cutscene plays on a joiner, the host's puppet would double the protagonist (our player
+// ped is cast as him), so it is hidden. Partners stay visible where they really are: the
+// host's own cutscene has no stand-in for them, and each joiner's stream is their double's.
+std::map<std::uint8_t, std::pair<n::Ped, bool>> g_puppet_vis; // last visibility applied, per puppet
 void hide_puppets_in_cutscenes() {
-  const bool hide = story::cutscene::playing();
-  if (hide == g_puppets_hidden) return;
-  g_puppets_hidden = hide;
-  for (auto& [id, r] : g_remotes)
-    if (const n::Ped p = r.puppet.ped(); p && n::DoesCharExist(p)) n::SetCharVisible(p, !hide);
+  const bool in_cutscene = story::cutscene::playing() && session().status().mode == net::Mode::Joined;
+  for (auto& [id, r] : g_remotes) {
+    const n::Ped p = r.puppet.ped();
+    if (!p || !n::DoesCharExist(p)) continue;
+    const bool hide = in_cutscene && id == net::kHostId;
+    auto& [last_ped, last_hidden] = g_puppet_vis[id];
+    if (last_ped == p && last_hidden == hide) continue;
+    if (last_ped != p && !hide) { last_ped = p, last_hidden = false; continue; } // new puppet: visible by default
+    last_ped = p, last_hidden = hide;
+    n::SetCharVisible(p, !hide);
+  }
 }
 
 // Mission-provided vehicles (ARCHITECTURE): when the host's mission hands the protagonist
@@ -581,6 +590,7 @@ void tick() {
   handle_phone();
   story::sounds::client_tick();
   story::cutscene::client_tick(); // also after leaving, to finish a restore
+  sync::cutscene_double::tick();
   story::scene_cam::client_tick(session_settings::current().scenes_watch); // likewise
   hide_puppets_in_cutscenes();
   {
@@ -705,7 +715,7 @@ void tick() {
     update_client_mode(p && n::DoesCharExist(p) ? p : 0);
   }
   auto local = sync::capture_local(now);
-  const n::Ped me = local ? n::GetPlayerChar(n::GetPlayerId()) : 0;
+  const n::Ped me = local ? sync::capture_ped() : 0;
 
   // Which vehicle/seat we're in, and the state of the vehicle if we're its sim owner.
   std::optional<sync::VehicleState> owned;

@@ -5,6 +5,7 @@
 #include <numbers>
 
 #include "game/natives.h"
+#include "sync/cutscene_double.h"
 #include "sync/downed.h"
 
 namespace ivc::sync {
@@ -32,9 +33,16 @@ n::Vector3 aim_point(n::Ped me) {
 
 } // namespace
 
+n::Ped capture_ped() {
+  // During a replicated cutscene the player ped is the scripted protagonist; the joiner's own
+  // character is the cutscene double.
+  if (const n::Ped d = cutscene_double::ped()) return d;
+  return n::GetPlayerChar(n::GetPlayerId());
+}
+
 std::optional<PlayerState> capture_local(std::uint32_t now_ms) {
   const n::Player player = n::GetPlayerId();
-  const n::Ped me = n::GetPlayerChar(player);
+  const n::Ped me = capture_ped();
   if (!me || !n::DoesCharExist(me)) return std::nullopt;
 
   PlayerState s;
