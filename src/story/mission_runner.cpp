@@ -199,16 +199,16 @@ void configure(const std::filesystem::path& plugin_dir) {
 namespace {
 
 // Missions that start "now" (main's start type 1, e.g. after a contact phones) begin with an incoming call
-// someone has to answer: while waiting for the mission and the phone is ringing (the phone's UI script is up
-// but the call itself hasn't started), the phone scripts' read of d-pad up gets one short press. Pressing
-// again during the call skips its lines and the call never completes, so the flow never moves on.
+// someone has to answer: while waiting for the mission and the phone is ringing (the calling script is up but
+// the phone's UI script isn't: answering opens it), the phone scripts' read of d-pad up gets one short press.
+// Pressing again during the call hangs up or skips lines, and the flow re-rings forever.
 bool call_ringing() {
   bool ui = false, call = false;
   for (const auto& t : script::threads()) {
     const std::string name = lower(t.name);
     ui |= name == "spcellphonemain", call |= name == "spcellphonecalling";
   }
-  return ui && !call;
+  return call && !ui;
 }
 
 void answer_calls(const Call& c) {
