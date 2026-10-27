@@ -14,6 +14,7 @@
 #include "story/story_protocol.h"
 #include "story/cutscene.h"
 #include "story/dialogue.h"
+#include "story/sounds.h"
 #include "story/environment.h"
 #include "story/hud.h"
 #include "story/world_state.h"
@@ -222,6 +223,7 @@ void register_hooks() {
   on(0x537379A8, "ADD_SCORE", payout);
   world::register_hooks();
   dialogue::register_hooks();
+  sounds::register_hooks();
   cutscene::register_hooks();
   hud::register_hooks();
   // Text: (key, [key2 | number], time, flag) per native.
@@ -291,6 +293,7 @@ void host_tick(bool hosting, net::Session& net, sync::EntitySync& ents) {
   for (auto& msg : world::take_outbox())
     if (hosting) net.send_game(std::move(msg), true);
   dialogue::host_tick(hosting, net, ents);
+  sounds::host_tick(hosting, net, ents);
   cutscene::host_tick(hosting, net);
   hud::host_tick(hosting, net);
   environment::host_tick(hosting, net);
@@ -463,6 +466,7 @@ std::vector<std::uint32_t> mission_cars(sync::EntitySync& ents) {
 void clear() {
   world::client_restore();
   dialogue::clear();
+  sounds::clear();
   cutscene::clear();
   hud::clear();
   environment::clear();

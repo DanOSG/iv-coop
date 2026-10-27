@@ -101,6 +101,7 @@ add_library(iv-coop SHARED
   src/story/story_sync.cpp
   src/story/world_state.cpp
   src/story/dialogue.cpp
+  src/story/sounds.cpp
   src/story/cutscene.cpp
   src/story/hud.cpp
   src/story/environment.cpp
