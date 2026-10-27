@@ -21,7 +21,7 @@
 
 namespace ivc::phone {
 
-enum class Action { Host, Join, Leave, GoToHost };
+enum class Action { Host, Join, Leave, GoToHost, Invade };
 struct Request {
   Action action;
   std::string password; // 6 digits (Host/Join)
@@ -33,9 +33,9 @@ bool install();
 void tick();
 // The player's latest menu choice, once complete (password typed for Host/Join).
 std::optional<Request> poll();
-// The menu shows Host/Join when not in a session, Leave for the host, and Go to Host +
-// Leave for a joiner.
-enum class Role { None, Host, Joiner };
+// The menu shows Host/Join/Invade when not in a session, Leave for the host, Go to Host +
+// Leave for a joiner, and just Leave for an invader (M11: Invade finds a lobby open to invasion).
+enum class Role { None, Host, Joiner, Invader };
 void set_role(Role role);
 // A short message in the help box (e.g. "Hosting co-op, password 123456").
 void notify(const std::string& text);

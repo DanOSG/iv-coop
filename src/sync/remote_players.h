@@ -30,6 +30,7 @@ struct Settings {
   std::uint32_t vehicle_force_type = 1;
   int host_key = 0x79; // VK_F10: host / leave
   int join_key = 0x7A; // VK_F11: join / leave
+  int invade_key = 0x78; // VK_F9: join join_address as an invader / leave (dev path; the phone's Invade uses Steam)
 };
 
 struct RemoteStatus {

@@ -26,6 +26,10 @@ void host_lobby(const std::string& password, const std::string& address);
 // Join: search worldwide for a lobby with this password.
 void find_lobby(const std::string& password);
 void leave_lobby();
+// Invasions (M11). Host: advertise whether the session is open to invasion (lobby data "ivc_open"). Invader:
+// search worldwide for a lobby that is open (any password); the result is Found like find_lobby's.
+void set_lobby_open(bool open);
+void find_open_lobby();
 
 // Join: enter a found lobby (so its host accepts our P2P traffic); Joined carries the owner.
 void join_lobby(std::uint64_t lobby);

@@ -58,7 +58,8 @@ constexpr int kSlotMenuType = 1, kSlotMemory = 3, kSlotMemoryFlag = 4, kSlotWind
               kSlotVisible = 13, kSlotScrolls = 14, kSlotScrollSize = 15, kSlotSelected = 16, kSlotRows = 39,
               kRowSlots = 31, kMaxRows = 6;
 constexpr int kG91Rows = 500, kG91Style = 40, kG91Speed = 492; // g_U91 byte offsets used by sub_10177
-constexpr std::int32_t kIdMultiplayer = 2000, kIdHost = 2001, kIdJoin = 2002, kIdLeave = 2003, kIdGoToHost = 2004;
+constexpr std::int32_t kIdMultiplayer = 2000, kIdHost = 2001, kIdJoin = 2002, kIdLeave = 2003, kIdGoToHost = 2004,
+                         kIdInvade = 2006;
 // Co-op Settings (session_settings): the submenu, one item per setting (2011 + index), Back.
 constexpr std::int32_t kIdSettings = 2010, kIdFirstSetting = 2011, kIdBack = 2029;
 // Character creator (sync/character): the submenu is one row per editable value (2100 + row), Save, Back.
@@ -232,12 +233,13 @@ void fix_main_menu(std::int32_t* st) {
   const std::int32_t count = st[kSlotCount], cap = st[kSlotArray];
   if (count <= 0 || cap <= 0 || cap > 64) return;
   if (g_menu == Menu::Settings) {
-    const std::int32_t n = session_settings::count() + 1;
-    if (n > cap) return;
+    // The list's capacity is the script's array size: show as many settings as fit (plus Back).
+    const std::int32_t shown = std::min<std::int32_t>(session_settings::count(), cap - 1);
+    const std::int32_t n = shown + 1;
     if (!g_menu_dirty && count == n && st[kSlotArray + 1] == kIdFirstSetting) return;
     std::vector<std::string> keys;
-    for (int i = 0; i < session_settings::count(); ++i) keys.push_back(session_settings::label_key(i));
-    for (int i = 0; i < session_settings::count(); ++i) write_item(st, i, kIdFirstSetting + i, keys[i].c_str());
+    for (int i = 0; i < shown; ++i) keys.push_back(session_settings::label_key(i));
+    for (int i = 0; i < shown; ++i) write_item(st, i, kIdFirstSetting + i, keys[i].c_str());
     write_item(st, n - 1, kIdBack, "IVC_BACK");
     st[kSlotCount] = n;
     rebuild_display(st, g_menu_dirty ? g_menu_cursor : 0);
@@ -261,14 +263,17 @@ void fix_main_menu(std::int32_t* st) {
   }
   if (g_menu == Menu::Coop) {
     struct Item { std::int32_t id; const char* key; };
-    static const Item kIdle[] = {{kIdHost, "IVC_HOST"}, {kIdJoin, "IVC_JOIN"}, {kIdCharacter, "IVC_CHARACTER"},
-                                {kIdSettings, "IVC_SETTINGS"}};
+    static const Item kIdle[] = {{kIdHost, "IVC_HOST"},       {kIdJoin, "IVC_JOIN"},         {kIdInvade, "IVC_INVADE"},
+                                {kIdCharacter, "IVC_CHARACTER"}, {kIdSettings, "IVC_SETTINGS"}};
+    static const Item kInvading[] = {{kIdLeave, "IVC_LEAVE"}};
     static const Item kHosting[] = {{kIdSettings, "IVC_SETTINGS"}, {kIdLeave, "IVC_LEAVE"}};
     static const Item kJoined[] = {{kIdGoToHost, "IVC_GOTOHOST"}, {kIdCharacter, "IVC_CHARACTER"},
                                  {kIdLeave, "IVC_LEAVE"}};
-    const std::span<const Item> items = g_role == Role::Joiner ? std::span<const Item>(kJoined)
-                                        : g_role == Role::Host ? std::span<const Item>(kHosting)
-                                                               : std::span<const Item>(kIdle);
+    std::span<const Item> items = g_role == Role::Joiner    ? std::span<const Item>(kJoined)
+                                  : g_role == Role::Invader ? std::span<const Item>(kInvading)
+                                  : g_role == Role::Host    ? std::span<const Item>(kHosting)
+                                                            : std::span<const Item>(kIdle);
+    if (static_cast<std::int32_t>(items.size()) > cap) items = items.first(static_cast<std::size_t>(cap));
     if (count == static_cast<std::int32_t>(items.size()) && st[kSlotArray + 1] == items[0].id) return;
     for (std::size_t i = 0; i < items.size(); ++i) write_item(st, static_cast<std::int32_t>(i), items[i].id, items[i].key);
     st[kSlotCount] = static_cast<std::int32_t>(items.size());
@@ -302,6 +307,7 @@ bool install() {
   set_label("CP_OPT_NETWORK", "Multiplayer");
   set_label("IVC_HOST", "Host Co-op");
   set_label("IVC_JOIN", "Join Co-op");
+  set_label("IVC_INVADE", "Invade");
   set_label("IVC_LEAVE", "Leave Co-op");
   set_label("IVC_GOTOHOST", "Go to Host");
   set_label("IVC_SETTINGS", "Co-op Settings");
@@ -399,8 +405,9 @@ void tick() {
       break;
     case kIdLeave:
     case kIdGoToHost:
+    case kIdInvade:
       g_menu = Menu::Phone;
-      g_request = Request{s == kIdLeave ? Action::Leave : Action::GoToHost, {}};
+      g_request = Request{s == kIdLeave ? Action::Leave : s == kIdInvade ? Action::Invade : Action::GoToHost, {}};
       switch_screen(kScreenClose);
       break;
     case kScreenKeypad:

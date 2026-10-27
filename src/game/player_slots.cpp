@@ -43,7 +43,7 @@ constexpr std::uint32_t kSetEveryoneIgnorePlayer = 0x059901B9;
 constexpr std::uint32_t kConvertIntToPlayerIndex = 0x5996315E;
 constexpr std::uint32_t kPlayerHasChar = 0x22545844;
 
-constexpr std::uint32_t kFirstSlot = 1, kSlots = 3; // slots 1..3; 0 is the local player
+constexpr std::uint32_t kFirstSlot = 1, kSlots = 7; // slots 1..7 (3 co-op partners + 4 invaders); 0 is the local player. The engine has 32.
 
 template <class T> T at_static(std::uintptr_t va) {
   return reinterpret_cast<T>(va - 0x400000 + reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr)));

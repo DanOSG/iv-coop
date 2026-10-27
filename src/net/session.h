@@ -25,11 +25,13 @@ struct PeerStatus {
   std::uint8_t id;
   std::string name;
   std::uint32_t rtt_ms; // 0 for ourselves
+  Role role = Role::Coop;
 };
 
 struct SessionStatus {
   Mode mode = Mode::Idle;
   std::uint8_t my_id = 0;
+  Role my_role = Role::Coop;
   std::uint16_t port = 0;
   std::vector<PeerStatus> players; // everyone in the session, including us
   std::string last_error;
@@ -58,6 +60,7 @@ struct SessionEvent {
   enum class Kind { Joined, Left, Connected, Disconnected } kind;
   std::uint8_t id = 0; // Joined/Left
   std::string text;    // name, or disconnect reason
+  Role role = Role::Coop; // Joined/Connected
 };
 
 // Milliseconds on the steady clock; the timebase for all StateUpdate::arrival_ms.
@@ -75,8 +78,15 @@ class Session {
   Session& operator=(const Session&) = delete;
 
   bool host(std::uint16_t port, const std::string& name, const std::string& bind_address = "0.0.0.0");
-  bool join(const std::string& address, std::uint16_t port, const std::string& name);
+  // `role` Invader: join as an invader (the host admits them only while it is open to invasion).
+  bool join(const std::string& address, std::uint16_t port, const std::string& name, Role role = Role::Coop);
   void leave();
+
+  // Host: whether invaders are admitted (the invasion window, M11). Thread-safe. Closing it doesn't remove
+  // invaders already in; kick_invaders does.
+  void set_invasion_open(bool open);
+  // Host: disconnect every invader (the peer sees `why`).
+  void kick_invaders(Reject why = Reject::NotOpen);
 
   // Queue our latest player / owned-vehicle state; the network thread sends it at once
   // (unreliable).

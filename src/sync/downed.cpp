@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <utility>
 
 #include "core/input.h"
 #include "core/log.h"
@@ -42,6 +43,7 @@ bool g_downed = false;
 DWORD g_downed_since = 0;
 bool g_revived = false;        // a teammate finished reviving us
 bool g_all_down = false;       // host said everyone is down: die
+bool g_invader_killed = false; // invader mode: health reached the floor
 // Reviving someone.
 std::uint8_t g_reviving = 0xFF;
 DWORD g_revive_since = 0;
@@ -248,11 +250,17 @@ void tick(const Frame& f, net::Session& net) {
   if (!me || !n::DoesCharExist(me)) return;
   const DWORD now = GetTickCount();
   g_guard_ped = ped_object(me);
-  g_guard = f.in_session && g_on_mission;
+  g_guard = f.in_session && (g_on_mission || f.invader);
   if (!f.in_session) {
     g_guard = false;
     if (g_downed) get_up(me, kRevivedHealth);
     clear();
+    return;
+  }
+  if (f.invader) { // invaders aren't downed or revived: the floor is the end of the invasion (sync/invasion)
+    if (g_downed) get_up(me, kRevivedHealth);
+    if (g_lethal_hit || (!n::IsCharDead(me) && n::GetCharHealth(me) <= kDownAt)) g_invader_killed = true;
+    g_lethal_hit = false;
     return;
   }
   if (f.hosting && now - g_mission_poll > kMissionPollMs) { // the host decides what "on a mission" is
@@ -345,6 +353,8 @@ void tick(const Frame& f, net::Session& net) {
 }
 
 bool local_downed() { return g_downed; }
+
+bool take_invader_killed() { return std::exchange(g_invader_killed, false); }
 
 std::uint32_t floor_health(std::uint32_t health) {
   return g_on_mission && health < kDownedHealth ? kDownedHealth : health;

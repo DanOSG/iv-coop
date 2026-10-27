@@ -1,5 +1,5 @@
 #pragma once
-// Extra *player* peds (player slots 1..3) for remote players. Only player peds may wear the
+// Extra *player* peds (player slots 1..7) for remote players. Only player peds may wear the
 // protagonist model ("player": Niko, Johnny, Luis; CREATE_CHAR with it crashes), and player peds
 // react to hits like a player (no NPC knockdowns), so every remote player gets one while slots last. The script native CREATE_PLAYER only (re)creates the local
 // player, so this calls the engine function behind it with a slot of our own, the way the

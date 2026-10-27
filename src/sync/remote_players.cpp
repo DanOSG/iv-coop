@@ -23,6 +23,8 @@
 #include "story/cutscene.h"
 #include "story/scene_cam.h"
 #include "sync/downed.h"
+#include "sync/invasion.h"
+#include "story/story_protocol.h"
 #include "story/fx.h"
 #include "sync/attach_sync.h"
 #include "sync/bowling_sync.h"
@@ -71,6 +73,13 @@ sync::VehicleSync g_vehicles;
 sync::EntitySync g_entities;
 bool g_was_host = false;
 std::uint32_t g_my_last_health = 0; // our player's health at the end of last frame
+
+// Invasions (M11): our role in the session (Coop unless we joined as an invader), and the phone's Invade in progress.
+net::Role g_my_role = net::Role::Coop;
+bool g_invading = false;        // Invade chosen: the Steam search / join that follows is as an invader
+bool g_lobby_flag = false;      // host: the lobby's ivc_open as last set
+bool g_invasion_finish = false; // invader: the session ended; restore our own game once the model is back
+bool invader() { return g_my_role == net::Role::Invader; }
 
 // Client mode (M6d).
 bool g_want_client_mode = false; // joined: switch to the joiner character
@@ -129,10 +138,17 @@ void restore_own_blips() {
   g_hidden_blips.clear();
 }
 
+// The character a joiner plays: their own (character creator / ini), or an FBI agent for an invader.
+std::uint32_t joiner_model_hash() {
+  if (invader())
+    if (const std::uint32_t m = invasion::invader_model()) return m;
+  return character::joiner_model(n::GetHashKey(g_cfg.joiner_model.c_str()));
+}
+
 void update_client_mode(n::Ped me) {
   if (!me) return;
   if (g_want_client_mode && !g_client_mode) {
-    const std::uint32_t model = character::joiner_model(n::GetHashKey(g_cfg.joiner_model.c_str()));
+    const std::uint32_t model = joiner_model_hash();
     const std::uint32_t original = n::GetCharModel(me);
     if (swap_player_model(model)) {
       g_original_model = original;
@@ -149,10 +165,11 @@ void update_client_mode(n::Ped me) {
       g_client_mode = false;
       restore_own_blips();
       log::info("Client mode ended: back to model 0x{:08X}", g_original_model);
+      if (g_invasion_finish) g_invasion_finish = false, invasion::finish();
     }
   }
 }
-bool g_host_was_down = true, g_join_was_down = true;
+bool g_host_was_down = true, g_join_was_down = true, g_invade_was_down = true;
 std::uint32_t g_last_send = 0;
 std::uint16_t g_seq = 0;
 
@@ -258,6 +275,17 @@ void handle_hotkeys() {
       session().leave();
     }
   }
+  if (input::dev_pressed(g_cfg.invade_key, g_invade_was_down)) {
+    if (mode == net::Mode::Idle) {
+      if (session().join(g_cfg.join_address, g_cfg.port, g_cfg.name, net::Role::Invader))
+        log::info("Invading {}:{} as '{}'", g_cfg.join_address, g_cfg.port, g_cfg.name);
+      else
+        log::error("Invade failed: {}", session().status().last_error);
+    } else {
+      log::info("Leaving session ({})", net::to_string(mode));
+      session().leave();
+    }
+  }
   if (input::dev_pressed(g_cfg.join_key, g_join_was_down)) {
     if (mode == net::Mode::Idle) {
       if (session().join(g_cfg.join_address, g_cfg.port, g_cfg.name))
@@ -335,9 +363,10 @@ void handle_phone() {
   }
   net::Session& net = session();
   const net::Mode mode = net.status().mode;
-  phone::set_role(mode == net::Mode::Hosting  ? phone::Role::Host
-                  : mode == net::Mode::Idle   ? phone::Role::None
-                                              : phone::Role::Joiner);
+  phone::set_role(mode == net::Mode::Hosting ? phone::Role::Host
+                  : mode == net::Mode::Idle  ? phone::Role::None
+                  : invader()                ? phone::Role::Invader
+                                             : phone::Role::Joiner);
   steam::tick();
   steam_relay::tick();
 
@@ -370,6 +399,7 @@ void handle_phone() {
         phone::notify("Looking for a co-op game with password " + g_password + "...");
         break;
       case phone::Action::Leave:
+        g_invading = false;
         if (mode != net::Mode::Idle) {
           log::info("Leaving session ({}, phone)", net::to_string(mode));
           net.leave();
@@ -380,6 +410,16 @@ void handle_phone() {
         break;
       case phone::Action::GoToHost:
         go_to_host();
+        break;
+      case phone::Action::Invade:
+        if (mode != net::Mode::Idle) break;
+        if (!steam::available()) {
+          phone::notify("Invading needs Steam.");
+          break;
+        }
+        g_invading = true;
+        steam::find_open_lobby();
+        phone::notify("Looking for a game to invade...");
         break;
     }
   }
@@ -392,6 +432,7 @@ void handle_phone() {
   while (auto r = steam::poll()) {
     switch (r->kind) {
       case steam::LobbyResult::Created: {
+        g_lobby_flag = false; // new lobbies start closed to invasion
         phone::notify("Co-op ready. Friends join with password " + g_password + ".");
         const std::uint32_t now = GetTickCount();
         g_self_checks = {now + 5000, now + 15000};
@@ -407,12 +448,13 @@ void handle_phone() {
         }
         // Enter the host's lobby: it then accepts our P2P traffic (see steam_relay).
         steam::join_lobby(r->lobby);
-        phone::notify("Found " + r->host_name + "'s game. Connecting...");
+        phone::notify(g_invading ? "Found " + r->host_name + "'s game. Invading..." : "Found " + r->host_name + "'s game. Connecting...");
         break;
       case steam::LobbyResult::Joined: {
         const auto port = steam_relay::start_join(r->owner);
-        if (port && net.join("127.0.0.1", *port, g_cfg.name)) {
-          log::info("Joining host {} through the Steam relay (local port {})", r->owner, *port);
+        const bool as_invader = std::exchange(g_invading, false);
+        if (port && net.join("127.0.0.1", *port, g_cfg.name, as_invader ? net::Role::Invader : net::Role::Coop)) {
+          log::info("{} host {} through the Steam relay (local port {})", as_invader ? "Invading" : "Joining", r->owner, *port);
         } else {
           phone::notify("Couldn't connect: " + net.status().last_error);
           steam_relay::stop();
@@ -421,11 +463,14 @@ void handle_phone() {
         break;
       }
       case steam::LobbyResult::JoinFailed:
+        g_invading = false;
         phone::notify("Couldn't enter that game's lobby.");
         break;
       case steam::LobbyResult::NotFound:
         if (net.status().mode == net::Mode::Hosting)
           log::warn("Steam self-check: our own lobby wasn't found by its password");
+        else if (std::exchange(g_invading, false))
+          phone::notify("No game is open to invasion right now.");
         else
           phone::notify("No co-op game found with password " + g_password + ".");
         break;
@@ -446,9 +491,7 @@ bool cutscene_begin() {
   return true;
 }
 bool cutscene_end() {
-  const std::uint32_t model = g_client_mode && !g_restore_pending
-                                  ? character::joiner_model(n::GetHashKey(g_cfg.joiner_model.c_str()))
-                                  : g_original_model;
+  const std::uint32_t model = g_client_mode && !g_restore_pending ? joiner_model_hash() : g_original_model;
   if (model && !swap_player_model(model)) return false;
   if (const n::Ped me = n::GetPlayerChar(n::GetPlayerId()); me && (g_cutscene_return.x || g_cutscene_return.y))
     n::SetCharCoordinatesNoOffset(me, g_cutscene_return);
@@ -577,6 +620,10 @@ void configure(const Settings& s) {
 }
 
 void tick() {
+  {
+    const net::SessionStatus s0 = session().status();
+    g_my_role = s0.mode == net::Mode::Idle || s0.mode == net::Mode::Hosting ? net::Role::Coop : s0.my_role;
+  }
   handle_hotkeys();
   handle_phone();
   story::sounds::client_tick();
@@ -586,35 +633,37 @@ void tick() {
   {
     downed::Frame f;
     const net::SessionStatus st = session().status();
+    f.invader = st.mode != net::Mode::Idle && st.my_role == net::Role::Invader;
     f.in_session = st.mode == net::Mode::Hosting || st.mode == net::Mode::Joined;
     f.hosting = st.mode == net::Mode::Hosting;
     f.my_id = st.my_id;
     for (const auto& [id, r] : g_remotes)
       for (const auto& p : st.players)
-        if (p.id == id && id != st.my_id) f.teammates.push_back({id, r.name, r.puppet.ped(), r.downed});
+        if (p.id == id && id != st.my_id && p.role == st.my_role) // invaders and the invaded aren't teammates
+          f.teammates.push_back({id, r.name, r.puppet.ped(), r.downed});
     session_settings::tick(f.in_session, f.hosting, session());
     {
       std::string host_name;
       for (const auto& p : st.players)
         if (p.id == net::kHostId) host_name = p.name;
-      wallet::tick(st.mode == net::Mode::Joined, host_name);
+      wallet::tick(st.mode == net::Mode::Joined && !f.invader, host_name); // invaders keep their own money
     }
     {
       character::Frame cf;
       cf.in_session = f.in_session;
-      cf.joiner_active = st.mode == net::Mode::Joined && g_client_mode && !g_restore_pending;
+      cf.joiner_active = st.mode == net::Mode::Joined && g_client_mode && !g_restore_pending && !f.invader;
       cf.my_id = st.my_id;
       for (const auto& p : st.players) cf.players.push_back(p.id);
       character::tick(cf, session());
     }
     const session_settings::Settings& settings = session_settings::current();
     const bool session_live = f.in_session;
-    f.in_session = f.in_session && settings.downed; // off: deaths are normal
+    f.in_session = f.in_session && (settings.downed || f.invader); // off: deaths are normal (invaders: the floor ends the invasion)
     downed::tick(f, session());
     f.in_session = session_live;
 
     radio_sync::Frame rf;
-    rf.in_session = f.in_session && settings.radio_sync, rf.hosting = f.hosting, rf.my_id = f.my_id;
+    rf.in_session = f.in_session && settings.radio_sync && !f.invader, rf.hosting = f.hosting, rf.my_id = f.my_id;
     const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
     if (me && n::DoesCharExist(me) && n::IsCharInAnyCar(me)) {
       const n::Ped driver = n::GetDriverOfCar(n::StoreCarCharIsInNoSave(me));
@@ -625,14 +674,14 @@ void tick() {
     scream::tick(f.in_session, session());
     {
       regroup::Frame gf;
-      gf.in_session = session_live, gf.hosting = f.hosting, gf.my_id = f.my_id;
+      gf.in_session = session_live && !f.invader, gf.hosting = f.hosting, gf.my_id = f.my_id;
       if (const auto it = g_remotes.find(net::kHostId); it != g_remotes.end() && !f.hosting)
         gf.host_puppet = it->second.puppet.ped();
       regroup::tick(gf, session());
     }
     {
       drunk_sync::Frame df;
-      df.in_session = session_live, df.hosting = f.hosting, df.my_id = f.my_id;
+      df.in_session = session_live && !f.invader, df.hosting = f.hosting, df.my_id = f.my_id;
       for (const auto& [id, r] : g_remotes)
         if (id != f.my_id) df.mates.push_back({id, r.puppet.ped()});
       if (const auto it = g_remotes.find(net::kHostId); it != g_remotes.end() && !f.hosting)
@@ -641,14 +690,19 @@ void tick() {
     }
     {
       bowling_sync::Frame bf;
-      bf.in_session = session_live, bf.hosting = f.hosting, bf.my_id = f.my_id;
+      bf.in_session = session_live && !f.invader, bf.hosting = f.hosting, bf.my_id = f.my_id;
       for (const auto& p : st.players) {
         const auto it = g_remotes.find(p.id);
         bf.players.push_back({p.id, p.name, p.id != f.my_id && it != g_remotes.end() ? it->second.puppet.ped() : 0});
       }
       bowling_sync::tick(bf, session());
     }
-    melee_sync::tick(f.in_session, f.in_session && session_settings::damage_allowed(), session());
+    {
+      // Invaders and the invaded fight whatever the Team fire setting says (melee's switch is session-wide).
+      bool invaders = f.invader;
+      for (const auto& p : st.players) invaders |= p.role == net::Role::Invader;
+      melee_sync::tick(f.in_session, f.in_session && (session_settings::damage_allowed() || invaders), session());
+    }
   }
   net::Session& net = session();
 
@@ -673,8 +727,12 @@ void tick() {
         g_entities.on_player_left(e.id);
         break;
       case K::Connected:
-        log::info("Connected; we are player {}", e.id);
+        log::info("Connected; we are player {} ({})", e.id, e.role == net::Role::Invader ? "invader" : "co-op");
         g_want_client_mode = true;
+        if (e.role == net::Role::Invader) {
+          const n::Ped p = n::GetPlayerChar(n::GetPlayerId());
+          invasion::begin(p && n::DoesCharExist(p) ? p : 0); // where we were, to go back to
+        }
         break;
       case K::Disconnected:
         log::info("Disconnected: {}", e.text);
@@ -688,11 +746,17 @@ void tick() {
         g_mission_cars.clear();
         steam_relay::stop();
         steam::leave_lobby();
+        g_invading = false;
         if (g_want_client_mode || g_client_mode) {
           script::set_suppress_predicate(nullptr); // our story scripts resume where they were
           g_want_client_mode = false;
           g_restore_pending = g_client_mode;
         }
+        if (invasion::active()) {
+          if (g_restore_pending) g_invasion_finish = true; // put things back once our own model is
+          else invasion::finish();
+        }
+        if (e.text.find("invasion") != std::string::npos) phone::notify("That game isn't open to invasion (any more).");
         break;
     }
   }
@@ -736,6 +800,11 @@ void tick() {
       if (p.id == id) return true;
     return false;
   };
+  const auto role_of = [&ss](std::uint8_t id) {
+    for (const auto& p : ss.players)
+      if (p.id == id) return p.role;
+    return net::Role::Coop;
+  };
   for (auto it = g_remotes.begin(); it != g_remotes.end();) {
     if (!in_session(it->first)) {
       it->second.puppet.despawn();
@@ -755,20 +824,28 @@ void tick() {
   if (local) positions.push_back({ss.my_id, {local->x, local->y, local->z}});
 
   std::vector<RemoteStatus> remotes;
+  std::vector<invasion::Player> inv_players; // for sync/invasion
   team_fire::tick(); // rounds we fired this frame (hits on player-ped partners)
   for (auto& [id, r] : g_remotes) {
     float dist = 0;
     bool owner_burning = false;
+    // Invaders and the invaded are enemies: team fire is always on between them, whatever the setting says.
+    const net::Role their_role = role_of(id);
+    const bool enemy = invasion::hostile(ss.my_role, their_role);
+    invasion::Player ip{id, their_role};
+    ip.ped = r.puppet.ped();
     if (auto smp = r.interp.sample(now)) { // once per frame: sampling advances the timeline
       const n::Vector3 at{smp->x, smp->y, smp->z};
       owner_burning = (smp->flags & sync::PlayerState::kOnFire) != 0;
       positions.push_back({id, at});
+      ip.known_pos = true, ip.pos = at;
       r.puppet.set_model(smp->model); // their real model (host: Niko); 0 -> configured fallback
       if (r.puppet.ensure(at)) {
         r.puppet.apply_outfit(*smp);
         character::on_puppet(id, r.puppet.ped());
         const bool down = (smp->flags & sync::PlayerState::kDowned) != 0;
         const n::Vehicle veh = g_vehicles.handle_for(smp->vehicle_id);
+        ip.ped = r.puppet.ped(), ip.car = veh;
         if (veh) {
           r.pose.up(r.puppet.ped());
           r.puppet.sit_in(veh, smp->seat);
@@ -793,8 +870,15 @@ void tick() {
         r.vehicle_id = smp->vehicle_id;
         r.downed = down;
         r.puppet.set_downed_marker(r.downed);
-        r.puppet.apply_settings(session_settings::targeting_allowed(), session_settings::current().partner_blips,
-                                session_settings::damage_allowed());
+        {
+          // Blips: invaders see the target (the host) and their own team; the invaded group sees its partners
+          // (the setting) but not the invaders.
+          bool blip = session_settings::current().partner_blips;
+          if (ss.my_role == net::Role::Invader) blip = their_role == net::Role::Invader || id == net::kHostId;
+          else if (their_role == net::Role::Invader) blip = false;
+          r.puppet.apply_settings(enemy || session_settings::targeting_allowed(), blip,
+                                  enemy || session_settings::damage_allowed());
+        }
         {
           // ALLOW_LOCKON_TO_FRIENDLY_PLAYERS switched lock-on to players only (no NPCs) - IV multiplayer's
           // targeting. Keep it off; make sure it is off for anyone who ran the build that set it.
@@ -814,7 +898,7 @@ void tick() {
       }
       if (!dmg && r.puppet.is_player_ped() && team_fire::fire_hit(r.puppet.ped(), owner_burning))
         dmg = team_fire::fire_damage(), weapon = team_fire::kWeaponFire;
-      if (dmg && session_settings::damage_allowed()) {
+      if (dmg && (enemy || session_settings::damage_allowed())) {
         net.send_game(sync::encode_damage({sync::DamageTarget::Player, id, dmg, weapon}), true);
         log::info("Hit player #{} '{}' for {} (weapon {})", id, r.name, dmg, weapon);
       }
@@ -828,6 +912,8 @@ void tick() {
                        frames ? 100.0f * static_cast<float>(st.extrapolated) / static_cast<float>(frames) : 0.0f,
                        dist, r.puppet.phase(), r.puppet.error_m(), r.puppet.snaps(), r.health, r.weapon, r.dead,
                        r.wanted});
+    ip.dead = r.dead;
+    inv_players.push_back(ip);
   }
 
   // Combat: damage our player took from a puppet's local bullets is undone; the shooter
@@ -846,8 +932,20 @@ void tick() {
   if (active) {
     g_was_host = ss.mode == net::Mode::Hosting;
     process_pending_spawn(me);
+    const bool is_invader = ss.my_role == net::Role::Invader;
     for (const auto& m : net.drain_game()) {
       if (!in_session(m.from)) continue;
+      if (invasion::is_msg(m.data)) {
+        invasion::on_message(m);
+        continue;
+      }
+      // Invaders take no part in the host's story: its objectives, text, blips, payouts, cutscenes, scenes,
+      // sounds, radio and regroups are dropped. The world itself (entities, vehicles, players) still arrives.
+      if (is_invader && (story::is_story_msg(m.data) || story::sounds::is_msg(m.data) || story::pickups::is_msg(m.data) ||
+                         story::scene_cam::is_msg(m.data) || story::fx::is_msg(m.data) ||
+                         story::npc_anims::is_msg(m.data) || regroup::is_msg(m.data) || radio_sync::is_msg(m.data) ||
+                         drunk_sync::is_msg(m.data) || bowling_sync::is_msg(m.data)))
+        continue;
       if (melee_sync::is_msg(m.data)) {
         const auto it = g_remotes.find(m.from);
         melee_sync::on_message(m, ss.my_id, it != g_remotes.end() ? it->second.puppet.ped() : 0);
@@ -905,9 +1003,10 @@ void tick() {
       if (msg && msg->type == sync::GameMsg::Damage) {
         const auto& d = msg->damage;
         if (d.kind == sync::DamageTarget::Player && d.target == ss.my_id && me && !n::IsCharDead(me) &&
-            session_settings::damage_allowed()) {
+            (session_settings::damage_allowed() || invasion::hostile(ss.my_role, role_of(m.from)))) {
           const std::uint32_t h = n::GetCharHealth(me);
-          n::SetCharHealth(me, downed::floor_health(h > d.amount ? h - d.amount : 0));
+          const std::uint32_t left = h > d.amount ? h - d.amount : 0;
+          n::SetCharHealth(me, ss.my_role == net::Role::Invader ? left : downed::floor_health(left)); // invaders aren't downed
           if (d.weapon <= 3) { // a melee hit: stagger
             const auto attacker = g_remotes.find(m.from);
             melee_sync::react_to_melee(attacker != g_remotes.end() ? attacker->second.puppet.ped() : 0);
@@ -948,9 +1047,31 @@ void tick() {
     ped_looks::host_tick(g_was_host, net, g_entities);
     if (!g_was_host) {
       const auto host_remote = g_remotes.find(net::kHostId);
-      story::client_tick(g_entities, host_remote != g_remotes.end() ? host_remote->second.puppet.ped() : 0);
+      if (!is_invader) story::client_tick(g_entities, host_remote != g_remotes.end() ? host_remote->second.puppet.ped() : 0);
       ped_looks::client_tick(g_entities);
-      handle_mission_cars(ss.my_id);
+      if (!is_invader) handle_mission_cars(ss.my_id);
+    }
+    {
+      // Invasions: the host's window; an invader's spawn and hunt.
+      invasion::Frame inv;
+      inv.in_session = true, inv.hosting = g_was_host, inv.my_id = ss.my_id, inv.my_role = ss.my_role;
+      inv.ready = is_invader && g_client_mode && !g_restore_pending;
+      for (const auto& p : ss.players)
+        if (p.id == net::kHostId) inv.host_name = p.name;
+      inv.players = std::move(inv_players);
+      invasion::tick(inv, net);
+      if (auto why = invasion::take_leave()) {
+        log::info("Leaving the invasion: {}", *why);
+        net.leave();
+        steam_relay::stop();
+        steam::leave_lobby();
+        phone::notify(*why);
+      }
+      // The Steam lobby advertises the window (a lobby made after it opened is caught up here).
+      if (g_was_host && steam::available() && invasion::open() != g_lobby_flag) {
+        g_lobby_flag = invasion::open();
+        steam::set_lobby_open(g_lobby_flag);
+      }
     }
     g_entities.player_ped = [my_id = ss.my_id](std::uint8_t id) -> n::Ped {
       if (id == my_id) return n::GetPlayerChar(n::GetPlayerId());
@@ -966,6 +1087,11 @@ void tick() {
       net.send_game(sync::encode_damage({hit.kind, hit.target, hit.amount, local ? local->weapon : 0}), true);
       log::info("Hit entity {} for {}", hit.target, hit.amount);
     }
+  }
+  if (!active) {
+    invasion::Frame none;
+    invasion::tick(none, net); // closes the window
+    g_lobby_flag = false;
   }
   if (!active) story::host_tick(false, net, g_entities), ped_looks::host_tick(false, net, g_entities); // no session: capture stays off
   if (!active) vehicle_props::tick(false, false, g_entities, net);
