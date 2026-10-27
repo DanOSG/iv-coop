@@ -111,10 +111,8 @@ void begin_scene() {
   invoke(kSetCamActive, g_cam, true);
   invoke(kActivateScripted, true, true);
   g_cam_live = true;
-  if (!g_control_taken) {
-    invoke(kSetPlayerControl, n::GetPlayerId(), false);
-    g_control_taken = true;
-  }
+  // Partners keep control of their character through the scene: everyone sees the host's shot, and
+  // anyone but the host can walk around in it (only the host's scripts freeze the host).
   log::info("Scene: watching the host's camera");
 }
 

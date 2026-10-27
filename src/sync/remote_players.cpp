@@ -29,6 +29,7 @@
 #include "sync/drunk_sync.h"
 #include "story/pickups.h"
 #include "sync/radio_sync.h"
+#include "sync/regroup.h"
 #include "sync/session_settings.h"
 #include "sync/wallet.h"
 #include "sync/character.h"
@@ -623,6 +624,13 @@ void tick() {
     radio_sync::tick(rf, session());
     scream::tick(f.in_session, session());
     {
+      regroup::Frame gf;
+      gf.in_session = session_live, gf.hosting = f.hosting, gf.my_id = f.my_id;
+      if (const auto it = g_remotes.find(net::kHostId); it != g_remotes.end() && !f.hosting)
+        gf.host_puppet = it->second.puppet.ped();
+      regroup::tick(gf, session());
+    }
+    {
       drunk_sync::Frame df;
       df.in_session = session_live, df.hosting = f.hosting, df.my_id = f.my_id;
       for (const auto& [id, r] : g_remotes)
@@ -843,6 +851,10 @@ void tick() {
       if (melee_sync::is_msg(m.data)) {
         const auto it = g_remotes.find(m.from);
         melee_sync::on_message(m, ss.my_id, it != g_remotes.end() ? it->second.puppet.ped() : 0);
+        continue;
+      }
+      if (regroup::is_msg(m.data)) {
+        regroup::on_message(m);
         continue;
       }
       if (scream::is_msg(m.data)) {

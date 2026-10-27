@@ -88,7 +88,7 @@ void set_value(Settings& s, int i, int v) {
 
 std::string value_text(int i, int v) {
   if (i == 0) return ff_name(static_cast<FriendlyFire>(v));
-  if (i == 6) return v ? "Watch" : "Keep ctrl";
+  if (i == 6) return v ? "Host cam" : "Own cam";
   return v ? "On" : "Off";
 }
 

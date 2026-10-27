@@ -126,6 +126,7 @@ add_library(iv-coop SHARED
   src/sync/wallet.cpp
   src/sync/character.cpp
   src/sync/scream.cpp
+  src/sync/regroup.cpp
   src/sync/attach_sync.cpp
   src/sync/ped_looks.cpp
   src/sync/vehicle_props.cpp
