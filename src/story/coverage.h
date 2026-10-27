@@ -16,5 +16,7 @@ void configure(const std::filesystem::path& plugin_dir);
 void register_hooks();
 // Game thread, script context, every frame.
 void tick();
+// Writes coverage.tsv/coverage.md now (they are otherwise written every 30 s).
+void flush();
 
 } // namespace ivc::story::coverage

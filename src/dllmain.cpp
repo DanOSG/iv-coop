@@ -21,6 +21,7 @@
 #include "net/steam.h"
 #include "story/call_log.h"
 #include "story/coverage.h"
+#include "story/mission_runner.h"
 #include "story/mission_audit.h"
 #include "story/story_sync.h"
 #include "game/script.h"
@@ -69,6 +70,7 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
   story::audit::configure(cfg.audit);
   story::audit::register_hooks();
   story::coverage::register_hooks();
+  story::runner::register_hooks();
   native_hooks::set_trace(cfg.story_trace_calls);
   // Natives are registered by the time any script runs. Hook them before the scripts'
   // first update, not in our first tick (which runs after them): a game that loads a
@@ -87,6 +89,7 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
     radio_probe::tick();
     story::audit::tick();
     story::coverage::tick();
+    story::runner::tick();
   });
 }
 
@@ -101,6 +104,7 @@ void startup(HMODULE self) {
   session_settings::load(dir / "iv-coop.ini");
   wallet::configure(dir);
   story::coverage::configure(dir);
+  story::runner::configure(dir);
   scream::configure(dir / "iv-coop.ini");
   team_fire::load(dir.parent_path()); // the game folder (plugins\..)
   melee_sync::load(dir.parent_path());

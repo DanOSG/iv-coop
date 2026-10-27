@@ -9,6 +9,8 @@
 #include <fstream>
 #include <map>
 #include <set>
+#include <string_view>
+#include <utility>
 
 #include "core/focus.h"
 #include "core/input.h"
@@ -35,7 +37,8 @@ constexpr std::uint32_t kDoesScriptExist = 0x1D1B266B, kRequestScript = 0x6FFE0D
 constexpr std::int32_t kHostileColour = 1; // IV blip colour red: enemies/targets (the default for peds)
 
 constexpr unsigned kNudgeEvery = 5;   // s between teleports to the newest blip
-constexpr unsigned kIdleEnd = 20;     // s without a new call: the mission is waiting on us
+constexpr unsigned kIdleEnd = 20;      // s without a new call: the mission is waiting on us
+constexpr unsigned kWatchIdleEnd = 90; // same, for a mission the runner plays (driving parts are quiet)
 constexpr unsigned kGapSeconds = 5;   // between missions
 constexpr unsigned kLoadTimeout = 15; // s
 
@@ -71,6 +74,8 @@ struct Report {
 
 Settings g_cfg;
 bool g_down = true, g_active = false;
+std::function<void(const std::string&)> g_watch_done; // set: watching one mission for the runner
+unsigned g_watch_seconds = 0;
 std::vector<std::string> g_list;
 std::size_t g_index = 0;
 enum class Phase { Next, Loading, Running, Gap } g_phase = Phase::Next;
@@ -88,6 +93,7 @@ void note(const Call& c, std::string detail) {
 // Every hooked native, after it ran.
 void observe(const Call& c) {
   if (!g_active || g_phase != Phase::Running || !g_rep.family.contains(lower(c.script))) return;
+  if (std::string_view(c.name).starts_with("IS_")) return; // per-frame queries (control checks): not progress
   ++g_rep.counts[c.name];
   g_last_call_ms = GetTickCount();
   const std::string nm = c.name;
@@ -194,9 +200,16 @@ void write_report() {
 
 n::Ped me() { return n::GetPlayerChar(n::GetPlayerId()); }
 
+// In a car, the car goes too ("drive X to Y" objectives need it there).
 void teleport(const n::Vector3& to) {
   const n::Ped p = me();
-  if (n::IsCharInAnyCar(p)) n::WarpCharFromCarToCoord(p, to);
+  if (n::IsCharInAnyCar(p)) {
+    if (const n::Vehicle car = n::StoreCarCharIsInNoSave(p)) {
+      n::SetCarCoordinatesNoOffset(car, to);
+      return;
+    }
+    n::WarpCharFromCarToCoord(p, to);
+  }
   n::SetCharCoordinatesNoOffset(p, to);
 }
 
@@ -274,6 +287,12 @@ void finish(const std::string& outcome, std::uint32_t now) {
   cleanup();
   write_report();
   log::warn("Audit: {} done ({}), {} natives, {} notes", g_rep.name, outcome, g_rep.counts.size(), g_rep.notes.size());
+  if (g_watch_done) {
+    invoke(kSetInvincible, n::GetPlayerId(), false);
+    g_active = false;
+    std::exchange(g_watch_done, nullptr)(outcome);
+    return;
+  }
   g_phase = Phase::Gap, g_phase_ms = now;
   ++g_index;
 }
@@ -290,7 +309,40 @@ void stop(const char* why) {
 
 void configure(const Settings& s) { g_cfg = s; }
 
-void register_hooks() { native_hooks::observe(observe); }
+void watch(const std::string& script, unsigned seconds, std::function<void(const std::string&)> done) {
+  std::filesystem::create_directories(audit_dir());
+  g_rep = Report{};
+  g_rep.name = lower(script);
+  g_rep.family = {g_rep.name};
+  g_home = n::GetCharCoordinates(me());
+  g_watch_done = std::move(done), g_watch_seconds = seconds;
+  g_active = true, g_phase = Phase::Running, g_skipped = 0, g_cutscene_ms = 0;
+  const std::uint32_t now = GetTickCount();
+  g_phase_ms = g_last_nudge_ms = g_last_call_ms = now;
+  invoke(kSetInvincible, n::GetPlayerId(), true);
+  log::warn("Audit: watching {} for up to {} s", g_rep.name, seconds);
+}
+
+// A mission the runner plays waits on prompts ("Press ~INPUT_PICKUP~ to trigger the bomb"):
+// answer the mission's own control checks with a short press every few seconds, per control.
+void press_controls(const Call& c, int control_arg) {
+  if (!g_watch_done || g_phase != Phase::Running || !g_rep.family.contains(lower(c.script))) return;
+  static std::map<std::pair<std::uint32_t, std::int32_t>, std::uint32_t> pressed_at;
+  const auto key = std::pair{c.hash, c.arg<std::int32_t>(control_arg)};
+  const std::uint32_t now = GetTickCount();
+  std::uint32_t& at = pressed_at[key];
+  if (now - at > 4000) at = now;
+  if (now - at < 300) *reinterpret_cast<std::int32_t*>(c.ctx->result) = 1;
+}
+
+void register_hooks() {
+  native_hooks::observe(observe);
+  // (pad, control) and (pad, button): the control/button is argument 1.
+  native_hooks::on(0x0E635761, "IS_CONTROL_PRESSED", [](const Call& c) { press_controls(c, 1); });
+  native_hooks::on(0x4CB729F1, "IS_CONTROL_JUST_PRESSED", [](const Call& c) { press_controls(c, 1); });
+  native_hooks::on(0x7FF21081, "IS_BUTTON_PRESSED", [](const Call& c) { press_controls(c, 1); });
+  native_hooks::on(0x016C37CD, "IS_BUTTON_JUST_PRESSED", [](const Call& c) { press_controls(c, 1); });
+}
 
 void tick() {
   if (input::pressed_ctrl_shift('A', g_down)) {
@@ -356,13 +408,18 @@ void tick() {
         g_last_call_ms = now;
       if (now - g_phase_ms > 2000 && !family_running()) {
         finish("the mission's scripts ended by themselves", now);
-      } else if (now - g_phase_ms > g_cfg.seconds * 1000) {
+      } else if (now - g_phase_ms > (g_watch_done ? g_watch_seconds : g_cfg.seconds) * 1000) {
         finish("timed out (stopped by the audit)", now);
-      } else if (now - g_last_call_ms > kIdleEnd * 1000) {
-        finish(std::format("idle for {} s (stopped by the audit)", kIdleEnd), now);
+      } else if (const unsigned idle = g_watch_done ? kWatchIdleEnd : kIdleEnd; now - g_last_call_ms > idle * 1000) {
+        finish(std::format("idle for {} s (stopped by the audit)", idle), now);
       } else if (now - g_last_nudge_ms > kNudgeEvery * 1000 && !g_rep.blips.empty()) {
         g_last_nudge_ms = now;
-        if (nudge(g_rep.blips.back())) ++g_rep.nudges;
+        // Newest blip first; if it needs nothing (e.g. we're already in that car), an older one.
+        for (auto it = g_rep.blips.rbegin(); it != g_rep.blips.rend(); ++it)
+          if (nudge(*it)) {
+            ++g_rep.nudges;
+            break;
+          }
       }
       break;
     case Phase::Gap:

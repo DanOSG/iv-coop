@@ -11,6 +11,7 @@
 //
 // Use a throwaway save: missions started out of order can change story state.
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -28,5 +29,9 @@ void configure(const Settings& s);
 void register_hooks();
 // Game thread, script context, every frame.
 void tick();
+// Watches a mission the game started itself (the mission runner walks into its trigger), the
+// way the audit watches its own: nudges, cutscene skips, report in audit/<script>.md. `done`
+// gets the outcome when it ends or times out; the mission's scripts are terminated by then.
+void watch(const std::string& script, unsigned seconds, std::function<void(const std::string&)> done);
 
 } // namespace ivc::story::audit

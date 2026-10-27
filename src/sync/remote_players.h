@@ -64,4 +64,10 @@ void tick();
 // Any thread.
 Status status();
 
+// For the unattended mission runner (game thread): host on the configured port, as F10 does,
+// and record everything we send, as Ctrl+Shift+R does.
+bool host();
+bool start_recording(const std::string& path);
+void stop_recording();
+
 } // namespace ivc::coop

@@ -106,6 +106,7 @@ add_library(iv-coop SHARED
   src/story/environment.cpp
   src/story/mission_audit.cpp
   src/story/coverage.cpp
+  src/story/mission_runner.cpp
   src/sync/ghost.cpp
   src/sync/local_player.cpp
   src/sync/puppet.cpp

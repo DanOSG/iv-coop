@@ -890,4 +890,26 @@ Status status() {
   return g_status;
 }
 
+bool host() {
+  if (session().status().mode != net::Mode::Idle) return session().status().mode == net::Mode::Hosting;
+  if (!session().host(g_cfg.port, g_cfg.name, g_cfg.bind_address)) {
+    log::error("Hosting failed: {}", session().status().last_error);
+    return false;
+  }
+  log::info("Hosting on UDP {} as '{}' (mission runner)", g_cfg.port, g_cfg.name);
+  return true;
+}
+
+bool start_recording(const std::string& path) {
+  if (session().recording()) session().stop_recording();
+  if (!session().start_recording(path)) return false;
+  log::info("Recording session to {}", path);
+  g_record_started_ms = net::steady_ms();
+  return true;
+}
+
+void stop_recording() {
+  if (session().recording()) session().stop_recording(), log::info("Recording stopped");
+}
+
 } // namespace ivc::coop

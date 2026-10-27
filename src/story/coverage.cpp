@@ -86,7 +86,7 @@ void load() {
   }
 }
 
-void flush() {
+void write_files() {
   g_dirty = false;
   std::error_code ec;
   std::filesystem::create_directories(g_dir, ec);
@@ -159,8 +159,10 @@ void tick() {
   const std::uint32_t now = GetTickCount();
   if (g_dirty && now - g_last_flush_ms > kFlushEveryMs) {
     g_last_flush_ms = now;
-    flush();
+    write_files();
   }
 }
+
+void flush() { write_files(); }
 
 } // namespace ivc::story::coverage
