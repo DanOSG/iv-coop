@@ -114,6 +114,7 @@ add_library(iv-coop SHARED
   src/story/mission_runner.cpp
   src/sync/ghost.cpp
   src/sync/local_player.cpp
+  src/sync/cutscene_double.cpp
   src/sync/puppet.cpp
   src/sync/remote_players.cpp
   src/sync/vehicle_sync.cpp

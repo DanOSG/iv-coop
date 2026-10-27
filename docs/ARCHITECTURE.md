@@ -84,7 +84,7 @@ The original MP character models are still in the CE data: `M_Y_Multiplayer` and
 | **Mission-provided vehicles** | When a mission spawns a car *for the protagonist* (the host's player is warped or tasked into it, or the script blips it as "your car"), the mission's car is left exactly as the script expects: the host, plus any story characters the script seats in it. Co-op partners get a **duplicate**: same model and colours, spawned on the **nearest clean road node**, with all partners in it together (first joiner drives, others ride). It never touches the mission script's entity, so no mission logic can break. The duplicate is removed when the mission car is released. |
 | **Riding with story characters** | Seat occupancy is synced. Joiners can take any **free** seat in any vehicle, including NPC-driven mission cars. When a script tasks a ped into a specific seat, that seat is **reserved**. A joiner sitting in a seat the script needs is moved to another free seat or gently ejected. |
 | **Own vehicles** | Joiners drive whatever they like, anywhere. Driver is sim owner, passengers receive. |
-| **Cutscenes** (`.cut`) | Host start/skip/end are replicated. Every client plays the same cutscene locally **wherever they are**. Remote players are never inserted; their peds are hidden, frozen and invulnerable meanwhile. Afterwards each client goes back to where they were, and a "go to host" option is available. |
+| **Cutscenes** (`.cut`) | Host start/skip/end are replicated. Every client plays the same cutscene locally **wherever they are**, through the cutscene camera. IV casts the local player ped as the protagonist (see M7 findings), so on a joiner that ped is the scripted actor and the joiner's own character is a separate *cutscene double* ped that the player steers (pad stick or WASD, camera-relative) and that is what the others see and what gets streamed. Remote players are never inserted; partners' puppets stay visible where they really are, except the host's puppet on a joiner (it would double the protagonist). Afterwards the joiner's character is put where the double ended up, and a "go to host" option is available. |
 | **Scripted cameras / in-engine scenes** | The host's active script camera is streamed (`story/scene_cam`); everyone sees the host's shot and partners **keep control** of their character throughout (only the host's scripts freeze the host). Setting "Scenes": Host cam / Own cam. |
 | **Dialogue, phone calls, subtitles** | **Positional for joiners:** they hear the host's dialogue from where it is said in the world, not as flat 2D audio. The host's conversations (`NEW_SCRIPTED_CONVERSATION` / `ADD_NEW_CONVERSATION_SPEAKER` / `ADD_LINE_TO_CONVERSATION` / `START_SCRIPT_CONVERSATION`, and their phone variants) are replicated as the speaker table plus the lines. Each joiner rebuilds the conversation with every speaker mapped to their **local copy** of that character: the protagonist becomes the host's player puppet, and story characters become their networked entity copies, with the original voice names. The game then plays each line in 3D from that ped, with normal distance falloff. **Phone calls:** only the host's phone rings. For joiners, the caller's lines play from the host's puppet in the caller's voice through a phone-style filter (as if heard from Niko's handset), and Niko's own lines play from Niko. Subtitles follow the lines; beyond earshot they're optional (setting, default on during missions). Speakers with no local copy fall back to the host puppet. Mission scripts rarely call the conversation natives themselves: they post the line they want through globals and the shared **`speechcontrol`** script plays it (`NEW_SCRIPTED_CONVERSATION`, `ADD_NEW_CONVERSATION_SPEAKER`, `ADD_LINE_TO_CONVERSATION`, `START_SCRIPT_CONVERSATION`, `NEW_MOBILE_PHONE_CALL`, `ADD_LINE_TO_MOBILE_PHONE_CALL`), so capturing speechcontrol on the host covers almost all mission dialogue. |
 | **Objectives, HUD text, blips, GPS route** | Mirrored from host script state. Mission timers, counters and bars are **drawn by the script every frame** (`DISPLAY_TEXT*`, `DRAW_RECT`, `DRAW_SPRITE`; the engine's on-screen timer is almost unused), so they need their own replication: the drawing calls, or the values behind them. `docs/missions.md` flags the missions that do this. |
@@ -416,11 +416,22 @@ docs/
     session/world afterwards.
   - Friendly fire rules between invaders and the invaded host's police (police ignore FBI invaders or treat
     them as allies).
-- **Late: "free cutscenes" option** (host toggle, off by default). During cutscenes, joiners see the cutscene from
-  its camera as usual, but their characters stay visible and controllable in the scene instead of being hidden and
-  frozen. Needs: keep remote peds streamed and unfrozen during `.cut` playback, keep sending/applying their state, and
-  keep the local joiner's input live while the cutscene camera holds the view. The default stays as in the
-  cutscene row above.
+- **M7 cutscene findings and design (`story/cutscene`, `sync/cutscene_double`).** The native list has no way to keep the
+  local player out of a `.cut` or to substitute another ped: `START_CUTSCENE_NOW` / `INIT_CUTSCENE`+`START_CUTSCENE` take only the
+  name, and the player-related natives (`MAKE_PLAYER_SAFE_FOR_CUTSCENE`, `IS_PLAYER_READY_FOR_CUTSCENE`, `SET_CHAR_IN_CUTSCENE`,
+  `SET_CAR_IN_CUTSCENE`, `SET_CUTSCENE_EXTRA_ROOM_POS`, `GET_CUTSCENE_PED_POSITION`) only prepare the player or flag *other*
+  entities (scripts register mission peds/cars with `SET_*_IN_CUTSCENE`); they cannot re-cast the protagonist. Changing that
+  would mean patching the executable's cutscene code, which is off limits. So the player ped is always the actor, and the joiner
+  cutscene is: (1) a double of the joiner's character (same model, outfit, health, armour, weapon) is created where they stand, (2) the
+  player ped is switched to the protagonist model and the cutscene starts on it, the cutscene camera is the player's view,
+  (3) `sync::cutscene_double::tick` steers the double (left stick or WASD relative to the camera yaw, run when the stick is pushed
+  or while moving on keys, via `TASK_GO_STRAIGHT_TO_COORD`), (4) `sync::capture_ped`/`capture_local` stream the double instead
+  of the actor, so nobody ever sees the joiner's position as the protagonist's, (5) when the cutscene ends the player ped is
+  moved to where the double stands and the double is deleted. The double is invincible and, if it is >200 m from the actor
+  (scene streaming has moved away so the ground may be unloaded), frozen in place. The host's own machine needs nothing but not
+  hiding partners' puppets. Limits: the double is only visible if the cutscene's shot covers where the joiner stands (otherwise
+  they walk about off camera, in a world the cutscene may have cleared of peds); no sprint, jump, cover or combat input on the
+  double yet; interiors loaded only by the cutscene's own extra room are not available to it. Untested in game.
 - **Connectivity:** UPnP port mapping, then Steam invites/relay (see Shape). This can land any time after M2.
 - **Final: one-click installer.** It finds the Steam install, checks that `GTAIV.exe` is 1.2.0.59, and installs
   FusionFix, the radio downgrade and iv-coop (plus a default ini). It also offers to uninstall and restore.
