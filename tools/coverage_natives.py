@@ -71,6 +71,25 @@ CATEGORIES = {
     "area_clears": ["CLEAR_AREA", "CLEAR_AREA_OF_CARS", "CLEAR_AREA_OF_COPS", "CLEAR_AREA_OF_OBJECTS"],
 }
 
+# Natives a sync feature now handles (2026-10-27: npc_anims, attach_sync, fx, sounds, vehicle_props,
+# ped_looks, pickups, drunk_sync). Kept in CATEGORIES for the static ranking; left out of the mod's
+# coverage hooks, which count only what is still unsynced.
+SYNCED = {
+    *[n for n in CATEGORIES["npc_anims"] if n.startswith(("TASK_PLAY_ANIM", "TASK_SIT_DOWN", "TASK_START_SCENARIO",
+                                                          "TASK_USE_NEAREST_SCENARIO", "TASK_HANDS_UP", "TASK_COWER"))],
+    *[n for n in CATEGORIES["attachments"] if n != "ATTACH_PED_TO_WORLD_PHYSICALLY"],
+    *[n for n in CATEGORIES["explosions_fire"] if n not in ("FIRE_SINGLE_BULLET", "FIRE_PED_WEAPON")],
+    *[n for n in CATEGORIES["particles"] if n != "SMASH_GLASS_ON_OBJECT"],
+    *CATEGORIES["sounds"],
+    *[n for n in CATEGORIES["vehicle_state"] if n not in ("SET_CAR_HEALTH", "SET_ENGINE_HEALTH", "FREEZE_CAR_POSITION",
+                                                         "APPLY_FORCE_TO_CAR", "START_PLAYBACK_RECORDED_CAR",
+                                                         "START_PLAYBACK_RECORDED_CAR_USING_AI")],
+    *[n for n in CATEGORIES["ped_looks"] if n not in ("FREEZE_CHAR_POSITION", "APPLY_FORCE_TO_PED")],
+    "SET_OBJECT_VISIBLE", "SET_OBJECT_COLLISION", "SET_OBJECT_DYNAMIC", "PLAY_OBJECT_ANIM",
+    *CATEGORIES["pickups"],
+    "SET_PED_IS_DRUNK", "SET_DRUNK_CAM",
+}
+
 # Friend activities and minigames aren't missions (no REGISTER_MISSION_PASSED) but need the
 # same treatment; listed separately.
 ACTIVITY = re.compile(r"^(roman|jacob|brucie|dwayne|packie)(darts|drink|eat|pool|show|strip|tenpin)$|"
@@ -94,6 +113,8 @@ def write_inc(hashes):
         f.write("// {hash, native, category}: story natives co-op doesn't sync yet.\n")
         for cat, names in CATEGORIES.items():
             for n in names:
+                if n in SYNCED:
+                    continue
                 f.write(f'{{0x{hashes[n]:08X}, "{n}", "{cat}"}},\n')
     return path
 
