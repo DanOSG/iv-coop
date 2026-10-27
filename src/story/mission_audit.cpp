@@ -68,6 +68,7 @@ struct Report {
     std::int32_t entity;
   };
   std::vector<Blip> blips; // live blips, newest last
+  std::vector<std::int32_t> blipped_cars; // every car the mission has blipped, newest last
   bool cutscene = false;
   unsigned skipped = 0;
 };
@@ -123,6 +124,7 @@ void observe(const Call& c) {
   } else if (nm == "ADD_BLIP_FOR_CHAR" || nm == "ADD_BLIP_FOR_CAR" || nm == "ADD_BLIP_FOR_OBJECT") {
     g_rep.blips.push_back({c.out<std::int32_t>(1), nm == "ADD_BLIP_FOR_CHAR" ? 'p' : nm == "ADD_BLIP_FOR_CAR" ? 'c' : 'o',
                            c.arg<std::int32_t>(0)});
+    if (nm == "ADD_BLIP_FOR_CAR") g_rep.blipped_cars.push_back(c.arg<std::int32_t>(0));
     note(c, "");
   } else if (nm == "REMOVE_BLIP") {
     const auto gone = c.arg<std::int32_t>(0);
@@ -255,12 +257,16 @@ bool nudge(const Report::Blip& b) {
   n::Vector3 at{};
   invoke(kGetBlipCoords, b.blip, &at);
   if (at.x == 0 && at.y == 0) return false;
-  // Going there on foot didn't do it: many objectives are "take <car> to X". Get into the car the mission
-  // made most recently (teleport() then takes it along).
-  if (b.kind == 'x' && g_stuck >= kStuckUseCar && !n::IsCharInAnyCar(p)) {
-    for (auto it = g_rep.entities.rbegin(); it != g_rep.entities.rend(); ++it) {
-      const auto [kind, car] = *it;
-      if (kind != 'c' || !car || !n::DoesVehicleExist(car) || invoke<bool>(kIsCarDead, car)) continue;
+  // Going there didn't do it: many objectives are "take <car> to X". Get into the car the mission blipped most
+  // recently (the one it asked for), else the one it made most recently (teleport() then takes it along).
+  if (b.kind == 'x' && g_stuck >= kStuckUseCar) {
+    std::vector<std::int32_t> cars(g_rep.blipped_cars.rbegin(), g_rep.blipped_cars.rend());
+    for (auto it = g_rep.entities.rbegin(); it != g_rep.entities.rend(); ++it)
+      if (it->first == 'c') cars.push_back(it->second);
+    for (const std::int32_t car : cars) {
+      if (!car || !n::DoesVehicleExist(car) || invoke<bool>(kIsCarDead, car)) continue;
+      if (n::IsCharInCar(p, car)) break; // already in the best candidate
+      if (n::IsCharInAnyCar(p)) n::WarpCharFromCarToCoord(p, n::GetCharCoordinates(p));
       if (!n::GetDriverOfCar(car)) n::WarpCharIntoCar(p, car);
       else if (n::IsCarPassengerSeatFree(car, 0)) n::WarpCharIntoCarAsPassenger(p, car, 0);
       else continue;
