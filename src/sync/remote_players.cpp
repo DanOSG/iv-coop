@@ -24,6 +24,7 @@
 #include "sync/downed.h"
 #include "story/fx.h"
 #include "sync/attach_sync.h"
+#include "sync/bowling_sync.h"
 #include "sync/drunk_sync.h"
 #include "story/pickups.h"
 #include "sync/radio_sync.h"
@@ -614,6 +615,15 @@ void tick() {
         df.host_puppet = it->second.puppet.ped();
       drunk_sync::tick(df, session());
     }
+    {
+      bowling_sync::Frame bf;
+      bf.in_session = session_live, bf.hosting = f.hosting, bf.my_id = f.my_id;
+      for (const auto& p : st.players) {
+        const auto it = g_remotes.find(p.id);
+        bf.players.push_back({p.id, p.name, p.id != f.my_id && it != g_remotes.end() ? it->second.puppet.ped() : 0});
+      }
+      bowling_sync::tick(bf, session());
+    }
     melee_sync::tick(f.in_session, f.in_session && session_settings::damage_allowed(), session());
   }
   net::Session& net = session();
@@ -820,6 +830,10 @@ void tick() {
       }
       if (drunk_sync::is_msg(m.data)) {
         drunk_sync::on_message(m);
+        continue;
+      }
+      if (bowling_sync::is_msg(m.data)) {
+        bowling_sync::on_message(m);
         continue;
       }
       if (story::sounds::is_msg(m.data)) {

@@ -31,6 +31,7 @@
 #include "sync/downed.h"
 #include "sync/session_settings.h"
 #include "sync/wallet.h"
+#include "sync/bowling_sync.h"
 #include "sync/drunk_sync.h"
 #include "sync/scream.h"
 #include "sync/ped_looks.h"
@@ -69,6 +70,7 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
   story::configure(cfg.story);
   story::register_hooks();
   drunk_sync::register_hooks();
+  bowling_sync::register_hooks();
   ped_looks::register_hooks();
   vehicle_props::register_hooks();
   phone::install();
