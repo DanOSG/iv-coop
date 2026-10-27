@@ -42,11 +42,12 @@ void save() {
   put(L"WorldSync", g_own.world_sync);
   put(L"PartnerBlips", g_own.partner_blips);
   put(L"ScenesWatch", g_own.scenes_watch);
+  put(L"AmbientSync", g_own.ambient_sync);
 }
 
 std::uint8_t pack_flags(const Settings& s) {
   return static_cast<std::uint8_t>(int{s.downed} | int{s.shared_payouts} << 1 | int{s.radio_sync} << 2 |
-                                   int{s.world_sync} << 3 | int{s.partner_blips} << 4 | int{s.scenes_watch} << 5);
+                                   int{s.world_sync} << 3 | int{s.partner_blips} << 4 | int{s.scenes_watch} << 5 | int{s.ambient_sync} << 6);
 }
 
 // The menu's settings, in order: name and number of values.
@@ -56,7 +57,8 @@ struct Entry {
 };
 // Labels fit one phone line (about 19 characters with the value).
 constexpr Entry kEntries[] = {{"Team fire", 3},  {"Revive", 2},       {"Shared pay", 2},
-                              {"Radio sync", 2}, {"Weather sync", 2}, {"Partner blips", 2}, {"Scenes", 2}};
+                              {"Radio sync", 2}, {"Weather sync", 2}, {"Partner blips", 2}, {"Scenes", 2},
+                              {"Ambient sync", 2}};
 
 int value_of(const Settings& s, int i) {
   switch (i) {
@@ -66,7 +68,8 @@ int value_of(const Settings& s, int i) {
     case 3: return s.radio_sync;
     case 4: return s.world_sync;
     case 5: return s.partner_blips;
-    default: return s.scenes_watch;
+    case 6: return s.scenes_watch;
+    default: return s.ambient_sync;
   }
 }
 
@@ -78,7 +81,8 @@ void set_value(Settings& s, int i, int v) {
     case 3: s.radio_sync = v != 0; break;
     case 4: s.world_sync = v != 0; break;
     case 5: s.partner_blips = v != 0; break;
-    default: s.scenes_watch = v != 0; break;
+    case 6: s.scenes_watch = v != 0; break;
+    default: s.ambient_sync = v != 0; break;
   }
 }
 
@@ -106,6 +110,7 @@ void load(const std::filesystem::path& ini) {
   g_own.world_sync = get(L"WorldSync", d.world_sync) != 0;
   g_own.partner_blips = get(L"PartnerBlips", d.partner_blips) != 0;
   g_own.scenes_watch = get(L"ScenesWatch", d.scenes_watch) != 0;
+  g_own.ambient_sync = get(L"AmbientSync", d.ambient_sync) != 0;
   save(); // writes defaults so the section is there to edit
 }
 
@@ -153,7 +158,7 @@ void on_message(const net::GameMessage& m) {
   Settings s;
   s.friendly_fire = static_cast<FriendlyFire>(ff);
   s.downed = flags & 1, s.shared_payouts = flags & 2, s.radio_sync = flags & 4, s.world_sync = flags & 8,
-  s.partner_blips = flags & 16, s.scenes_watch = flags & 32;
+  s.partner_blips = flags & 16, s.scenes_watch = flags & 32, s.ambient_sync = flags & 64;
   if (!g_have_host || !(s == g_host)) log::info("Settings: the host's: friendly fire {}, flags {:#x}", ff_name(s.friendly_fire), flags);
   g_host = s, g_have_host = true;
 }

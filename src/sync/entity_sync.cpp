@@ -38,11 +38,13 @@ float dist(const EntityState& s, const n::Vector3& p) { return std::hypot(s.x - 
 // ---------------------------------------------------------------- host API
 
 std::optional<std::uint32_t> EntitySync::host_register(n::Handle handle, EntityType type, std::uint32_t model,
-                                                       net::Session& net, bool pinned) {
+                                                       net::Session& net, bool pinned, bool ambient) {
   if (!exists(type, handle)) return std::nullopt;
   if (auto existing = id_for_handle(handle)) return existing;
-  const std::uint32_t id = next_id_++ & 0xFFFFFF; // host-minted (top byte 0 = host)
+  // Host-minted (top byte 0 = host); ambient ids live in the upper half of the 24 bits.
+  const std::uint32_t id = ambient ? (kAmbientBit | (next_ambient_id_++ & (kAmbientBit - 1))) : (next_id_++ & (kAmbientBit - 1));
   Entity& e = ents_[id];
+  if (ambient) e.interp.delay_ms = interp_delay_ms + 50; // slower stream: a deeper jitter buffer
   e.id = id, e.type = type, e.model = model, e.sim_owner = net::kHostId, e.handle = handle, e.live = true;
   e.pinned = pinned;
   e.last = read_local(e, net::steady_ms());
@@ -54,6 +56,18 @@ std::optional<std::uint32_t> EntitySync::host_register(n::Handle handle, EntityT
   log::info("Entity {} registered: {} model 0x{:08X} handle {}", id, type_name(type), model,
             handle);
   return id;
+}
+
+n::Handle EntitySync::host_release(std::uint32_t id, net::Session& net) {
+  const auto it = ents_.find(id);
+  if (it == ents_.end()) return 0;
+  Entity& e = it->second;
+  const n::Handle h = exists(e.type, e.handle) ? e.handle : 0;
+  net.send_game(encode_delete(id), true);
+  if (h && !e.live) make_live(e); // the sim owner's copies go away; ours takes over from the last pose
+  e.driver.reset();
+  ents_.erase(it);
+  return h;
 }
 
 void EntitySync::host_delete_all(net::Session& net) {
@@ -131,7 +145,7 @@ void EntitySync::apply_create(const EntityCreate& c, std::uint8_t my_id) {
   Entity& e = it->second;
   if (inserted) {
     e.id = c.id, e.type = c.type, e.model = c.model, e.sim_owner = c.sim_owner;
-    e.interp.delay_ms = interp_delay_ms;
+    e.interp.delay_ms = interp_delay_ms + (is_ambient(c.id) ? 50 : 0);
     e.last.id = c.id, e.last.x = c.x, e.last.y = c.y, e.last.z = c.z;
     e.last.qx = c.qx, e.last.qy = c.qy, e.last.qz = c.qz, e.last.qw = c.qw;
     log::info("Entity {} created by host ({} model 0x{:08X}), sim owner #{}", c.id,
@@ -192,8 +206,17 @@ void EntitySync::set_owner(Entity& e, std::uint8_t owner, std::uint8_t my_id) {
 
 void EntitySync::evaluate_ownership(const std::vector<PlayerPos>& players, std::uint8_t my_id, net::Session& net) {
   if (players.empty()) return;
+  // Ambient drivers (and any ped seated in a networked car) are simulated by whoever simulates the car.
+  for (auto& [id, e] : ents_) {
+    if (e.pinned || e.type != EntityType::Ped || !e.last.vehicle) continue;
+    const auto car = ents_.find(e.last.vehicle);
+    if (car == ents_.end() || car->second.sim_owner == e.sim_owner) continue;
+    set_owner(e, car->second.sim_owner, my_id);
+    net.send_game(encode_owner(e.id, e.sim_owner), true);
+  }
   for (auto& [id, e] : ents_) {
     if (e.pinned) continue; // mission entities stay with the host (its script drives them)
+    if (e.type == EntityType::Ped && e.last.vehicle && ents_.contains(e.last.vehicle)) continue; // follows its car
     const PlayerPos* nearest = nullptr;
     float d_near = std::numeric_limits<float>::max();
     float d_cur = std::numeric_limits<float>::max();
@@ -251,12 +274,20 @@ void EntitySync::make_live(Entity& e) {
   if (e.type == EntityType::Ped) {
     n::FreezeCharPosition(e.handle, false);
     n::SetCharCollision(e.handle, true);
-    n::SetCharCoordinatesNoOffset(e.handle, {s.x, s.y, s.z});
-    n::SetCharHeading(e.handle, s.heading());
+    const bool seated = n::IsCharInAnyCar(e.handle); // a driver stays in its car
+    if (!seated) {
+      n::SetCharCoordinatesNoOffset(e.handle, {s.x, s.y, s.z});
+      n::SetCharHeading(e.handle, s.heading());
+    }
     // Real health again (followers sit on a buffer). A dead entity stays dead.
     n::SetCharMaxHealth(e.handle, std::max<std::uint32_t>(200, s.health));
     if (!n::IsCharDead(e.handle)) n::SetCharHealth(e.handle, s.health ? s.health : 1);
-    n::TaskWanderStandard(e.handle); // M4 test behaviour; M6 replays the host script's tasks
+    if (seated) {
+      const n::Vehicle car = n::StoreCarCharIsInNoSave(e.handle);
+      if (car && n::GetDriverOfCar(car) == e.handle) n::invoke(0x1E9635A9, e.handle, car, 12.0f, 2u); // TASK_CAR_DRIVE_WANDER
+    } else {
+      n::TaskWanderStandard(e.handle); // M4 test behaviour; M6 replays the host script's tasks
+    }
   } else {
     n::FreezeCarPosition(e.handle, false);
     n::SetCarCollision(e.handle, true);
@@ -471,12 +502,13 @@ void EntitySync::tick(std::uint32_t now_ms, std::uint8_t my_id, bool hosting, co
   }
 
   const std::uint32_t interval = 1000 / std::max<std::uint32_t>(send_hz, 1);
+  const std::uint32_t ambient_interval = 1000 / std::max<std::uint32_t>(ambient_send_hz, 1);
   for (auto& [id, e] : ents_) {
     if (!ensure_spawned(e, my_id)) continue;
     if (e.sim_owner == my_id) {
       if (!e.live) make_live(e);
       e.last = read_local(e, now_ms);
-      if (!e.attached && now_ms - e.last_send_ms >= interval) {
+      if (!e.attached && now_ms - e.last_send_ms >= (is_ambient(id) ? ambient_interval : interval)) {
         e.last_send_ms = now_ms;
         e.last.seq = ++e.seq;
         net.send_game(encode_entity_state(e.last), false);

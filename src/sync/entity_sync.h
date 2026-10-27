@@ -47,6 +47,7 @@ struct EntityStatus {
 class EntitySync {
  public:
   std::uint32_t send_hz = 15;
+  std::uint32_t ambient_send_hz = 10; // ambient (M5b) entities stream slower: there can be dozens
   // Our local ped for a player id (us or their copy), for copies aiming at the player a mission ped shoots.
   std::function<natives::Ped(std::uint8_t)> player_ped;
   std::uint32_t interp_delay_ms = 100;
@@ -57,7 +58,13 @@ class EntitySync {
   // `pinned`: the host always simulates it (mission entities, until script task
   // forwarding exists, since their AI is driven by the host's mission script).
   std::optional<std::uint32_t> host_register(natives::Handle handle, EntityType type, std::uint32_t model,
-                                             net::Session& net, bool pinned = false);
+                                             net::Session& net, bool pinned = false, bool ambient = false);
+  // Ambient ids carry kAmbientBit, so every machine knows which entities are ambient (lower send rate).
+  static constexpr std::uint32_t kAmbientBit = 0x800000;
+  static bool is_ambient(std::uint32_t id) { return (id & kAmbientBit) != 0; }
+  // Takes an entity off the network (clients delete their copies) and leaves the host with a plain,
+  // live local entity (woken up if a client was simulating it). Returns its host handle (0 if none).
+  natives::Handle host_release(std::uint32_t id, net::Session& net);
   // A script deleted/released one of our networked entities: remove it from the network
   // (clients delete their copies). The host's local entity is left to the script.
   void host_unregister_handle(natives::Handle handle, net::Session& net);
@@ -130,6 +137,7 @@ class EntitySync {
 
   std::map<std::uint32_t, Entity> ents_;
   std::uint32_t next_id_ = 1;
+  std::uint32_t next_ambient_id_ = 0;
   std::uint32_t last_eval_ms_ = 0;
   std::vector<PlayerPos> players_; // this frame's (for the target a mission ped is shooting at)
 };

@@ -39,6 +39,7 @@
 #include "story/sounds.h"
 #include "story/npc_anims.h"
 #include "story/story_sync.h"
+#include "sync/ambient_sync.h"
 #include "sync/entity_sync.h"
 #include "sync/vehicle_sync.h"
 
@@ -914,6 +915,7 @@ void tick() {
     };
     attach_sync::host_tick(g_was_host, net, g_entities);
     if (!g_was_host) attach_sync::client_tick(g_entities);
+    sync::ambient::tick(now, true, g_was_host, session_settings::current().ambient_sync, ss.my_id, positions, g_entities, net);
     g_entities.tick(now, ss.my_id, g_was_host, positions, net);
     vehicle_props::tick(true, g_was_host, g_entities, net);
     for (const auto& hit : g_entities.collect_hits(me)) {
@@ -923,6 +925,7 @@ void tick() {
   }
   if (!active) story::host_tick(false, net, g_entities), ped_looks::host_tick(false, net, g_entities); // no session: capture stays off
   if (!active) vehicle_props::tick(false, false, g_entities, net);
+  if (!active) sync::ambient::tick(now, false, false, false, 0, {}, g_entities, net); // restores density
   if (me) g_my_last_health = n::GetCharHealth(me);
   const auto entities = g_entities.status();
   static std::uint32_t last_elog = now;

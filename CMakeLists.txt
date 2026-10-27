@@ -121,6 +121,7 @@ add_library(iv-coop SHARED
   src/sync/drunk_sync.cpp
   src/sync/radio_sync.cpp
   src/sync/session_settings.cpp
+  src/sync/ambient_sync.cpp
   src/sync/wallet.cpp
   src/sync/scream.cpp
   src/sync/attach_sync.cpp
