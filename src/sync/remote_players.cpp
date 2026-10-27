@@ -817,6 +817,8 @@ void tick() {
       }
       if (drunk_sync::is_msg(m.data)) {
         drunk_sync::on_message(m);
+        continue;
+      }
       if (story::sounds::is_msg(m.data)) {
         if (m.from == net::kHostId) story::sounds::client_apply(m.data, g_entities);
         continue;
@@ -867,6 +869,8 @@ void tick() {
       }
       if (story::fx::is_msg(m.data)) {
         story::fx::client_on_message(m);
+        continue;
+      }
       if (story::npc_anims::is_msg(m.data)) {
         if (m.from == net::kHostId) story::npc_anims::client_apply(m.data, g_entities);
         continue;
