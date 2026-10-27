@@ -14,6 +14,7 @@
 #include "story/story_protocol.h"
 #include "story/cutscene.h"
 #include "story/dialogue.h"
+#include "story/fx.h"
 #include "story/environment.h"
 #include "story/hud.h"
 #include "story/world_state.h"
@@ -214,6 +215,8 @@ bool is_story_script(const std::string& name) {
   return true;
 }
 
+bool replicating(const std::string& script) { return g_hosting && g_cfg.replicate && is_story_script(script); }
+
 void register_hooks() {
   using native_hooks::on;
   using native_hooks::before;
@@ -224,6 +227,7 @@ void register_hooks() {
   dialogue::register_hooks();
   cutscene::register_hooks();
   hud::register_hooks();
+  fx::register_hooks();
   // Text: (key, [key2 | number], time, flag) per native.
   on(0x73B01573, "PRINT_NOW", [](const Call& c) { text(c, TextKind::PrintNow, 0, -1, -1, 1, 2); });
   on(0x0A491CFF, "PRINT", [](const Call& c) { text(c, TextKind::Print, 0, -1, -1, 1, 2); });
@@ -294,6 +298,7 @@ void host_tick(bool hosting, net::Session& net, sync::EntitySync& ents) {
   cutscene::host_tick(hosting, net);
   hud::host_tick(hosting, net);
   environment::host_tick(hosting, net);
+  fx::host_tick(hosting, net, ents);
   if (!hosting) {
     g_ops.clear();
     g_host_blips.clear();
@@ -338,6 +343,7 @@ void host_on_player_joined(std::uint8_t player, net::Session& net) {
     b.slot = slot, b.name = make_key(name);
     net.send_game(encode(b), true);
   }
+  fx::host_on_player_joined(player, net);
   unsigned blips = 0;
   for (const auto& [id, hb] : g_host_blips) {
     if (!hb.resolved) continue; // host_tick sends it when it resolves
@@ -426,7 +432,8 @@ bool client_on_message(const net::GameMessage& m, sync::EntitySync& ents) {
   return true;
 }
 
-void client_tick(sync::EntitySync& ents) {
+void client_tick(sync::EntitySync& ents, n::Ped host_ped) {
+  fx::client_tick(ents, host_ped);
   hud::client_tick();
   environment::client_tick();
   std::erase_if(g_loading_slots, [](std::uint8_t slot) { return n::HasAdditionalTextLoaded(slot); });
@@ -466,6 +473,7 @@ void clear() {
   cutscene::clear();
   hud::clear();
   environment::clear();
+  fx::clear();
   for (auto& [id, cb] : g_client_blips)
     if (cb.local) n::RemoveBlip(cb.local);
   g_client_blips.clear();

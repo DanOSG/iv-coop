@@ -22,6 +22,7 @@
 #include "sync/puppet.h"
 #include "story/cutscene.h"
 #include "sync/downed.h"
+#include "story/fx.h"
 #include "sync/radio_sync.h"
 #include "sync/session_settings.h"
 #include "sync/wallet.h"
@@ -822,6 +823,10 @@ void tick() {
         }
         continue;
       }
+      if (story::fx::is_msg(m.data)) {
+        story::fx::client_on_message(m);
+        continue;
+      }
       if (story::client_on_message(m, g_entities)) continue; // story text/blips from the host
       g_entities.on_message(m, ss.my_id);
     }
@@ -829,7 +834,8 @@ void tick() {
     // blips whose entity copy wasn't there yet.
     story::host_tick(g_was_host, net, g_entities);
     if (!g_was_host) {
-      story::client_tick(g_entities);
+      const auto host_remote = g_remotes.find(net::kHostId);
+      story::client_tick(g_entities, host_remote != g_remotes.end() ? host_remote->second.puppet.ped() : 0);
       handle_mission_cars(ss.my_id);
     }
     g_entities.player_ped = [my_id = ss.my_id](std::uint8_t id) -> n::Ped {
