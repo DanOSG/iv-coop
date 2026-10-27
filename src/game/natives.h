@@ -188,6 +188,23 @@ inline void SetCharComponentVariation(Ped ped, std::uint32_t comp, std::uint32_t
 inline std::uint32_t GetCharDrawableVariation(Ped ped, std::uint32_t comp) { return invoke<std::uint32_t>(0x1A1A6D83, ped, comp); }
 inline std::uint32_t GetCharTextureVariation(Ped ped, std::uint32_t comp) { return invoke<std::uint32_t>(0x3A7B78C5, ped, comp); }
 inline void SetCharDefaultComponentVariation(Ped ped) { invoke(0x4FB30DB6, ped); }
+inline std::uint32_t GetNumberOfCharDrawableVariations(Ped ped, std::uint32_t comp) {
+  return invoke<std::uint32_t>(0x3C293296, ped, comp);
+}
+inline std::uint32_t GetNumberOfCharTextureVariations(Ped ped, std::uint32_t comp, std::uint32_t drawable) {
+  return invoke<std::uint32_t>(0x6C4113E, ped, comp, drawable);
+}
+// Props: type 0 hat, 1 glasses. GET returns -1 (as unsigned) for none.
+inline void SetCharPropIndex(Ped ped, std::uint32_t type, std::uint32_t index) { invoke(0x5FE95249, ped, type, index); }
+inline void SetCharPropIndexTexture(Ped ped, std::uint32_t type, std::uint32_t index, std::uint32_t texture) {
+  invoke(0x57390041, ped, type, index, texture);
+}
+inline void ClearCharProp(Ped ped, std::uint32_t type) { invoke(0x51546112, ped, type); }
+inline std::int32_t GetCharPropIndex(Ped ped, std::uint32_t type) {
+  std::uint32_t v = 0xFFFFFFFF;
+  invoke(0x3AC85DB1, ped, type, &v);
+  return static_cast<std::int32_t>(v);
+}
 
 // Road nodes.
 inline bool GetClosestCarNodeWithHeading(Vector3 at, Vector3& out, float& heading) {

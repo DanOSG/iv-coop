@@ -123,6 +123,7 @@ add_library(iv-coop SHARED
   src/sync/session_settings.cpp
   src/sync/ambient_sync.cpp
   src/sync/wallet.cpp
+  src/sync/character.cpp
   src/sync/scream.cpp
   src/sync/attach_sync.cpp
   src/sync/ped_looks.cpp

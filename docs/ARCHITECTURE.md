@@ -330,8 +330,35 @@ docs/
   game for every player present, not just the host and their friend: turns rotate between players, each
   bowls on their own machine with the lane's pins synced, and the scorecard shows everyone. Darts and pool
   (`darts`, `pool_game`) can follow the same pattern.
-- **M9:** MP character creator. It doesn't depend on the other milestones, so it can be pulled earlier as a side
-  task.
+- **M9:** MP character creator (built 2026-10-27, `sync/character`; untested in game). It doesn't depend on the other
+  milestones.
+  - **Data:** a character = model (`M_Y_MULTIPLAYER` / `F_Y_MULTIPLAYER`) + drawable and texture for components 0..8 +
+    two props (hat, glasses; index and texture, -1 = none). Saved per user in `plugins/iv-coop/character.ini`
+    `[Character]` (`Configured`, `Female`, `Drawable0..8`, `Texture0..8`, `Hat`/`Glasses` as index+1 with 0 = none,
+    `HatTexture`, `GlassesTexture`); without a saved character the joiner plays as `joiner_model` as before.
+  - **UI:** phone > Multiplayer > **Character** (shown when idle or joined, not while hosting) opens a list in the same
+    phone menu: Model (Male/Female), then per component `Name: n/count` and `Name tex: n/count` (only where the model
+    has more than one), Hat / Glasses (+ their texture), Save, Back. The phone only reports "select" on a row, so
+    select steps that value to the next and wraps (no left/right). Labels are made at run time (`phone.cpp`
+    `dynamic_key`, one never-replaced game-text key per distinct text). The preview is on the player's own ped: idle,
+    the player is swapped to the model (CHANGE_PLAYER_MODEL) and put back when the editor closes (Back, Save, or the
+    phone closing; the original model and its 11 components are restored); joined, the ped already wears it. Save
+    writes the ini; Back discards.
+  - **Applying:** the joiner's own ped uses the saved character: `remote_players` `swap_player_model` (client mode
+    entry and the end of a cutscene) calls `character::apply_own` after CHANGE_PLAYER_MODEL, which sets each component
+    (checked against `GET_NUMBER_OF_CHAR_*_VARIATIONS`) and the props. `character::joiner_model` replaces
+    `joiner_model` when a character is saved.
+  - **Sync:** message 61 (reliable): `[61][sender][model hash u32][drawable x9][texture x9][prop index x2 (i8)][prop
+    texture x2]`. A joiner whose ped wears its character sends it when it joins, when it saves, whenever the set of
+    players changes (so late joiners learn everyone's within a frame) and every 5 s. Anyone relays through the host
+    (`send_game`). Receivers keep the latest per player and apply it to that player's puppet (player slot ped) when it
+    spawns or the character changes (`character::on_puppet`, only once the copy wears the right model). The per-frame
+    outfit sync (`apply_outfit`, components only) still runs; the message adds props and the exact selection.
+  - **Limits / to verify in game:** there is no native for prop counts, so cycling stops when `GET_CHAR_PROP_INDEX`
+    doesn't read back what was set (hard cap 24 indexes, 4 textures); the argument order of
+    `SET_CHAR_PROP_INDEX_TEXTURE` (ped, type, index, texture) is a guess; the phone list window is scrolled by
+    setting the visible-window slots (`rebuild_display` `select_item`) and its capacity is unknown (rows are cut to
+    fit); restoring single-player Niko after an idle preview restores his components, not other state.
 - **M10:** TLAD and TBoGT.
 - **Co-op settings** (phone: Multiplayer > Co-op Settings; done 2026-10-26, sync/session_settings): the host's
   settings are the session's, saved in `iv-coop.ini [Session]` and sent to joiners. Friendly fire: **Off** (no

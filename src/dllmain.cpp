@@ -31,6 +31,7 @@
 #include "sync/downed.h"
 #include "sync/session_settings.h"
 #include "sync/wallet.h"
+#include "sync/character.h"
 #include "sync/drunk_sync.h"
 #include "sync/scream.h"
 #include "sync/ped_looks.h"
@@ -109,6 +110,7 @@ void startup(HMODULE self) {
   const Config cfg = load_config(dir / "iv-coop.ini");
   session_settings::load(dir / "iv-coop.ini");
   wallet::configure(dir);
+  character::configure(dir);
   story::coverage::configure(dir);
   story::runner::configure(dir);
   scream::configure(dir / "iv-coop.ini");
