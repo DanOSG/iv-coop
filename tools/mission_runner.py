@@ -1,10 +1,10 @@
 """Runs the playlist missions unattended (story/mission_runner.cpp is the in-game half).
 
-For each installed mission save (tools/mission_saves.py), it marks that save as the newest so the
-game loads it on start, writes plugins/iv-coop/runner.txt, launches the game windowed (it stays
-behind other windows and keeps running unfocused), and waits: the mod hosts a session, the test
-bot joins, the mission is recorded and played through by the audit's auto-play, and the game
-closes itself. Results collect in plugins/iv-coop/runner_result.txt, reports in audit/<script>.md,
+It writes plugins/iv-coop/runner.txt listing the installed mission saves (tools/mission_saves.py)
+with their slots and contact points, launches the game once, windowed (it stays behind other
+windows and keeps running unfocused), and waits: the mod loads each save in place, hosts a
+session the test bot joins, records the mission while the audit's auto-play plays it, and closes
+the game after the last. Results collect in plugins/iv-coop/runner_result.txt, reports in audit/<script>.md,
 recordings in runner-<script>.ivcrec, coverage in coverage/.
 
     python tools/mission_runner.py [script ...]      (default: every installed mission save)
@@ -25,7 +25,7 @@ GAME = r"C:\Program Files (x86)\Steam\steamapps\common\Grand Theft Auto IV\GTAIV
 PLUGINS = os.path.join(GAME, "plugins", "iv-coop")
 BOT = os.path.join(ROOT, "build", "Debug", "iv-coop-bot.exe")
 SECONDS = 900          # per mission, in game
-LOAD_ALLOWANCE = 240   # launch + load + quit
+LOAD_ALLOWANCE = 240   # per mission: load + reaching the contact point
 
 
 def launch_args():
@@ -74,33 +74,35 @@ def results():
     return open(path, encoding="utf-8").read().splitlines() if os.path.exists(path) else []
 
 
-def run(script, save_file, cmd, at):
-    prof = mission_saves.profile_dir()
-    os.utime(os.path.join(prof, save_file))  # newest: the game loads it on start
+def run_all(items, cmd):
+    """items: (script, save file, contact point or None). One game launch for all of them."""
     with open(os.path.join(PLUGINS, "runner.txt"), "w") as f:
-        f.write(f"mission={script}\nseconds={SECONDS}\n")
-        if at:
-            f.write("at={:.2f},{:.2f},{:.2f}\n".format(*at))
+        f.write(f"seconds={SECONDS}\n")
+        for script, save_file, at in items:
+            slot = int(save_file[-2:])  # SGTA4<nn>
+            f.write(f"run={script},{slot}" + (",{:.2f},{:.2f},{:.2f}".format(*at) if at else "") + "\n")
     before = len(results())
     subprocess.Popen(cmd, cwd=GAME, creationflags=subprocess.CREATE_NO_WINDOW)
-    deadline = time.time() + SECONDS + LOAD_ALLOWANCE
-    started = False
+    deadline = time.time() + len(items) * (SECONDS + LOAD_ALLOWANCE)
+    started, shown = False, before
     while time.time() < deadline:
         time.sleep(5)
+        now = results()
+        for line in now[shown:]:
+            print(line, flush=True)
+        shown = len(now)
         running = game_running()
         started |= running
         if started and not running:
             break
     else:
         subprocess.run(["taskkill", "/F", "/IM", "GTAIV.exe"], capture_output=True)
-        print(f"{script}: timed out; game killed")
+        print("timed out; game killed", flush=True)
     for path in ("runner.txt", "runner.active"):
         p = os.path.join(PLUGINS, path)
         if os.path.exists(p):
             os.remove(p)
-    new = results()[before:]
-    print(f"{script}: " + (new[-1] if new else "no result (the game closed or crashed before finishing)"), flush=True)
-    time.sleep(10)  # let the launcher settle before the next launch
+    print(f"done: {len(results()) - before} of {len(items)} missions reported", flush=True)
 
 
 def main():
@@ -111,16 +113,15 @@ def main():
     by_script = {s: f for f, s in installed.items()}
     order = [s for s, *_ in mission_saves.SAVES if s in by_script]
     wanted = sys.argv[1:] or order
-    cmd = launch_args()
+    missing = [s for s in wanted if s not in by_script]
+    if missing:
+        print("no installed save for", ", ".join(missing), "(python tools/mission_saves.py install <batch>)")
     points = contact_points()
+    items = [(s, by_script[s], points.get(s)) for s in wanted if s in by_script]
     bot = subprocess.Popen([BOT, "--fixed", "--speed", "0", "--radius", "4", "--retry"],
                            creationflags=subprocess.CREATE_NO_WINDOW)
     try:
-        for script in wanted:
-            if script not in by_script:
-                print(f"{script}: no installed save (python tools/mission_saves.py install <batch>)")
-                continue
-            run(script, by_script[script], cmd, points.get(script))
+        run_all(items, launch_args())
     finally:
         bot.terminate()
 

@@ -7,6 +7,7 @@
 #include <format>
 #include <fstream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -25,29 +26,56 @@ using native_hooks::Call;
 
 constexpr std::uint32_t kStartNewScript = 0x4E2260B9, kAddBlipForContact = 0x7C671162,
                         kLoadScene = 0x39F62BFB;
-constexpr std::uint32_t kContactEveryMs = 20000; // time at each contact blip for its mission to trigger
-constexpr std::uint32_t kSettleMs = 10000;     // after the first frame with a player: the save has loaded
-constexpr std::uint32_t kNoMissionMs = 300000; // no mission started by then: give up
+constexpr std::uint32_t kContactEveryMs = 20000; // time at each contact point for its mission to trigger
+constexpr std::uint32_t kSettleMs = 10000;       // after a load: let the story flow set the world up
+constexpr std::uint32_t kLoadTimeoutMs = 120000;
+constexpr std::uint32_t kNoMissionMs = 300000;   // no mission started by then: give up on this save
 constexpr std::uint32_t kQuitDelayMs = 3000;     // let the log and files flush
 
-enum class Phase { Off, Loading, Waiting, Running, Quitting } g_phase = Phase::Off;
+// Loading a save in place, the way the pause menu's Load Game does (GTAIV.exe 1.2.0.59, static
+// analysis outside the protected region): the frontend action handler (0x5A3980, run every
+// frame from the main loop) acts on a pending action while the frontend mode is 1. Action 0x3F
+// waits until loading is safe, 0x40 follows, and 0x41 loads the selected slot (SGTA4<slot>)
+// through the save system (0x8C7670) and rebuilds the world from it.
+// Addresses are static VAs (image base 0x400000); the exe is relocated at run time.
+namespace engine {
+template <class T>
+T at_static(std::uintptr_t va) {
+  return reinterpret_cast<T>(va - 0x400000 + reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr)));
+}
+using SetInt = std::uint32_t(__cdecl*)(std::int32_t);
+void set_load_slot(std::int32_t slot) { at_static<SetInt>(0x8BECB0)(slot); }     // [0x1030BA0] = slot
+void set_frontend_mode(std::int32_t mode) { at_static<SetInt>(0x8BECC0)(mode); } // [0x1030B7C] = mode
+void set_action(std::int32_t a) { at_static<SetInt>(0x8BE0E0)(a); }              // [0x1160C24] = action
+std::int32_t action() { return *at_static<const volatile std::int32_t*>(0x1160C24); }
+constexpr std::int32_t kLoadPrepare = 0x3F, kLoadSlot = 0x41;
+} // namespace engine
+
+struct Item {
+  std::string script;
+  int slot = -1;
+  std::optional<n::Vector3> at; // its contact point (from main's tables), visited first
+};
+
+enum class Phase { Off, Booting, Loading, Waiting, Running, Done } g_phase = Phase::Off;
 std::filesystem::path g_dir;
-std::string g_target;
+std::vector<Item> g_queue;
+std::size_t g_index = 0;
 unsigned g_seconds = 900;
 std::string g_recording;
-std::uint32_t g_phase_ms = 0, g_contact_ms = 0;
+std::uint32_t g_phase_ms = 0, g_contact_ms = 0, g_loaded_ms = 0;
+bool g_load_seen = false; // the load action ran (so what follows is the new world)
+unsigned g_target_visits = 0;
 // Contact blips the story flow put up: early and mid-game missions start when the player walks
-// into one (the mission's own script doesn't exist until then), so the runner visits them in turn.
+// into one (the mission's own script doesn't exist until then).
 struct Contact {
   n::Blip blip;
   n::Vector3 at;
 };
 std::vector<Contact> g_contacts;
 std::size_t g_next_contact = 0;
-// Where the target's contact blip goes (from main's mission and location tables, via runner.txt
-// "at=x,y,z"); visited first. Missions with no location are started by main or a phone call.
-std::optional<n::Vector3> g_target_at;
-unsigned g_target_visits = 0;
+
+const Item& item() { return g_queue[g_index]; }
 
 std::string lower(std::string s) {
   for (char& ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
@@ -56,10 +84,9 @@ std::string lower(std::string s) {
 
 void result(const std::string& mission, const std::string& outcome) {
   std::ofstream(g_dir / "runner_result.txt", std::ios::app)
-      << g_target << '\t' << mission << '\t' << outcome << '\t' << g_recording << '\n';
+      << item().script << '\t' << mission << '\t' << outcome << '\t' << g_recording << '\n';
 }
 
-// Behind every other window, without taking focus (the game keeps running: focus::keep_running).
 void teleport(const n::Vector3& at) {
   const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
   if (n::IsCharInAnyCar(me)) n::WarpCharFromCarToCoord(me, at);
@@ -68,10 +95,10 @@ void teleport(const n::Vector3& at) {
 }
 
 void visit_next_contact() {
-  if (g_target_at && g_target_visits < 3) {
+  if (item().at && g_target_visits < 3) {
     ++g_target_visits;
-    teleport(*g_target_at);
-    log::info("Runner: walking into {}'s contact point", g_target);
+    teleport(*item().at);
+    log::info("Runner: walking into {}'s contact point", item().script);
     return;
   }
   std::erase_if(g_contacts, [](const Contact& c) { return !n::DoesBlipExist(c.blip); });
@@ -81,6 +108,7 @@ void visit_next_contact() {
   log::info("Runner: walking into contact blip at {:.0f} {:.0f} {:.0f}", c.at.x, c.at.y, c.at.z);
 }
 
+// Behind every other window, without taking focus (the game keeps running: focus::keep_running).
 void send_window_back() {
   struct Find {
     static BOOL CALLBACK cb(HWND w, LPARAM out) {
@@ -96,24 +124,40 @@ void send_window_back() {
   if (w) SetWindowPos(w, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
-void quit(const std::string& mission, const std::string& outcome) {
+void request_load() {
+  const Item& it = item();
+  g_contacts.clear(), g_next_contact = 0, g_target_visits = 0, g_load_seen = false, g_loaded_ms = 0, g_recording.clear();
+  engine::set_load_slot(it.slot);
+  engine::set_frontend_mode(1);
+  engine::set_action(engine::kLoadPrepare);
+  g_phase = Phase::Loading, g_phase_ms = GetTickCount();
+  log::warn("Runner: [{}/{}] loading slot {} for {}", g_index + 1, g_queue.size(), it.slot, it.script);
+}
+
+// This save is finished with (played, or nothing to play): on to the next, or close the game.
+void next(const std::string& mission, const std::string& outcome) {
   coop::stop_recording();
   coverage::flush();
   result(mission, outcome);
-  log::warn("Runner: {} -> {}; closing the game", mission, outcome);
-  g_phase = Phase::Quitting, g_phase_ms = GetTickCount();
+  log::warn("Runner: {} -> {}", mission, outcome);
+  if (++g_index < g_queue.size()) {
+    request_load();
+    return;
+  }
+  log::warn("Runner: queue done; closing the game");
+  g_phase = Phase::Done, g_phase_ms = GetTickCount();
 }
 
-// The first mission script the story flow starts is the one the save is waiting at (normally the
-// target). Taken over straight away, inside the START_NEW_SCRIPT hook, so the audit sees the blip
-// the mission makes next.
+// The first mission script the story flow starts in the loaded world is the one the save is
+// waiting at (normally the target). Taken over straight away, inside the START_NEW_SCRIPT hook,
+// so the audit sees the blip the mission makes next.
 void begin(const std::string& mission) {
-  if (mission != g_target) log::warn("Runner: main started {}, not {}; running it instead", mission, g_target);
+  if (mission != item().script) log::warn("Runner: main started {}, not {}; running it instead", mission, item().script);
   coop::host();
   const auto rec = g_dir / std::format("runner-{}.ivcrec", mission);
   g_recording = coop::start_recording(rec.string()) ? rec.filename().string() : "";
   g_phase = Phase::Running;
-  audit::watch(mission, g_seconds, [mission](const std::string& outcome) { quit(mission, outcome); });
+  audit::watch(mission, g_seconds, [mission](const std::string& outcome) { next(mission, outcome); });
 }
 
 } // namespace
@@ -123,33 +167,39 @@ void configure(const std::filesystem::path& plugin_dir) {
   const auto file = g_dir / "runner.txt";
   if (!std::filesystem::exists(file)) return;
   std::ifstream in(file);
+  // seconds=<per mission>; then one "run=<script>,<slot>[,x,y,z]" per mission, in order.
   for (std::string line; std::getline(in, line);) {
     while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back()))) line.pop_back();
     const auto eq = line.find('=');
     if (eq == std::string::npos) continue;
     const std::string key = line.substr(0, eq), value = line.substr(eq + 1);
-    if (key == "mission") g_target = lower(value);
-    else if (key == "seconds") g_seconds = static_cast<unsigned>(std::stoul(value));
-    else if (key == "at") {
+    if (key == "seconds") {
+      g_seconds = static_cast<unsigned>(std::stoul(value));
+    } else if (key == "run") {
+      Item it;
+      char name[64] = {};
       n::Vector3 v{};
-      if (std::sscanf(value.c_str(), "%f,%f,%f", &v.x, &v.y, &v.z) == 3) g_target_at = v;
+      const int got = std::sscanf(value.c_str(), "%63[^,],%d,%f,%f,%f", name, &it.slot, &v.x, &v.y, &v.z);
+      if (got < 2) continue;
+      it.script = lower(name);
+      if (got == 5) it.at = v;
+      g_queue.push_back(it);
     }
   }
   in.close();
   std::error_code ec;
   std::filesystem::rename(file, g_dir / "runner.active", ec);
-  if (g_target.empty()) return;
-  g_phase = Phase::Loading;
-  log::warn("Runner: will run {} (up to {} s) once the save has loaded", g_target, g_seconds);
+  if (g_queue.empty()) return;
+  g_phase = Phase::Booting;
+  log::warn("Runner: {} missions queued (up to {} s each)", g_queue.size(), g_seconds);
 }
 
 void register_hooks() {
   if (g_phase == Phase::Off) return;
-  // The story flow starts mission scripts itself once the save has loaded.
   native_hooks::on(kStartNewScript, "START_NEW_SCRIPT", [](const Call& c) {
-    if (g_phase != Phase::Loading && g_phase != Phase::Waiting) return;
+    if (g_phase != Phase::Waiting && !(g_phase == Phase::Loading && g_load_seen)) return;
     const std::string name = lower(c.str(0));
-    if (lower(c.script) == "main" || name == g_target) begin(name);
+    if (lower(c.script) == "main" || name == item().script) begin(name);
   });
   native_hooks::on(kAddBlipForContact, "ADD_BLIP_FOR_CONTACT", [](const Call& c) {
     if (lower(c.script) == "main") g_contacts.push_back({c.out<n::Blip>(3), {c.arg<float>(0), c.arg<float>(1), c.arg<float>(2)}});
@@ -166,20 +216,30 @@ void tick() {
     send_window_back();
   }
   switch (g_phase) {
-    case Phase::Loading:
+    case Phase::Booting: // whatever save the game loaded at start: settle, then load ours
       if (!n::GetPlayerChar(n::GetPlayerId())) return;
       if (!g_phase_ms) g_phase_ms = now;
-      if (now - g_phase_ms < kSettleMs) return;
-      g_phase = Phase::Waiting, g_phase_ms = now;
-      log::warn("Runner: save loaded; waiting for {}", g_target);
+      if (now - g_phase_ms > kSettleMs) coop::host(), request_load();
+      break;
+    case Phase::Loading:
+      if (engine::action() == engine::kLoadSlot) g_load_seen = true;
+      if (g_load_seen && engine::action() != engine::kLoadSlot && n::GetPlayerChar(n::GetPlayerId())) {
+        if (!g_loaded_ms) g_loaded_ms = now; // settle from here
+        if (now - g_loaded_ms > kSettleMs) {
+          g_phase = Phase::Waiting, g_phase_ms = now, g_contact_ms = 0;
+          log::warn("Runner: slot {} loaded; waiting for {}", item().slot, item().script);
+        }
+      } else if (now - g_phase_ms > kLoadTimeoutMs) {
+        next("-", "the save didn't load");
+      }
       break;
     case Phase::Waiting:
-      if (now - g_phase_ms > kNoMissionMs) quit("-", "no mission started");
+      if (now - g_phase_ms > kNoMissionMs) next("-", "no mission started");
       else if (now - g_contact_ms > kContactEveryMs) g_contact_ms = now, visit_next_contact();
       break;
     case Phase::Running:
       break;
-    case Phase::Quitting:
+    case Phase::Done:
       if (now - g_phase_ms > kQuitDelayMs) TerminateProcess(GetCurrentProcess(), 0);
       break;
     case Phase::Off:
