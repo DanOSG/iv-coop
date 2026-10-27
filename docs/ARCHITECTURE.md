@@ -256,6 +256,23 @@ docs/
     `docs/missions.md` (per mission: entities and models, cutscenes, text blocks, cameras, car recordings,
     stealth checks, script-drawn HUD, interiors, world changes, wanted, pass/fail, co-op notes). The runtime
     audit (Ctrl+Shift+A, `story/mission_audit`) spot-checks behaviour in game.
+  - **Sync coverage** (2026-10-27): `tools/coverage_natives.py` keeps one list of natives co-op doesn't sync yet,
+    by category (NPC anims, attachments, explosions/fire, particles, sounds, cameras/fades, player control,
+    vehicle state, ped looks, object state, pickups, drunk effects, minigames, area clears). The mod counts every
+    call to them per script while you play (`story/coverage`, `plugins/iv-coop/coverage/coverage.md`, with
+    sample anim/sound/effect names), and the tool ranks the decompiled missions in `docs/coverage.md`.
+  - **Mission launcher** (Ctrl+Shift+M): starts the next script in `plugins/iv-coop/playlist.txt` directly. The
+    playlist is the ~26 missions that between them use nearly every world-changing native any IV mission uses
+    (greedy cover, each adds 5+ new ones), then one of each friend activity. For a throwaway save only.
+- **Friend activities** (added 2026-10-27): drinking, eating, shows, strip clubs, darts, pool and bowling with
+  Roman, Jacob, Brucie, Dwayne and Packie (`<friend><activity>` scripts), and dates. The host's friend comes
+  along as a networked entity; partners join the outing as extra company. Being **drunk** is synced to everyone
+  who drank (`SET_PED_IS_DRUNK`, `SET_DRUNK_CAM`: each player's own wobble and camera), and the drive home works
+  with drunk partners as passengers.
+- **Multiplayer bowling** (added 2026-10-27): the tenpin minigame (`tenpinbowl`, `bowling_lane`) becomes a
+  game for every player present, not just the host and their friend: turns rotate between players, each
+  bowls on their own machine with the lane's pins synced, and the scorecard shows everyone. Darts and pool
+  (`darts`, `pool_game`) can follow the same pattern.
 - **M9:** MP character creator. It doesn't depend on the other milestones, so it can be pulled earlier as a side
   task.
 - **M10:** TLAD and TBoGT.
