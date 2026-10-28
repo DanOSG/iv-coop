@@ -10,6 +10,7 @@
 #include <map>
 
 #include "core/log.h"
+#include "game/episode.h"
 #include "game/native_hooks.h"
 #include "game/script.h"
 #include "net/bytes.h"
@@ -265,7 +266,10 @@ constexpr int kWRolls = 1, kWRoll0 = 2, kWScores = 86, kWFrame = 97, kWMarks = 1
 constexpr int kNumRolls = 21;
 constexpr std::int32_t kEmptyOld = 65437; // how the decompile prints -99
 
+// The layout above is IV's tenpinbowl; the episodes' copies lay their statics out differently (not mapped yet), so
+// there bowling falls back to shared frames (no script card swap).
 std::int32_t* script_statics() {
+  if (!episode::is_iv()) return nullptr;
   auto* t = static_cast<std::uint8_t*>(script::find_thread("tenpinbowl"));
   return t ? *reinterpret_cast<std::int32_t**>(t + 0x58) : nullptr;
 }
