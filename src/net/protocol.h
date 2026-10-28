@@ -18,15 +18,17 @@
 namespace ivc::net {
 
 // 2: vehicle id/seat in PlayerState, VehicleState. 3: game-message lane (entities).
-// 4: combat fields in PlayerState. 5: outfit in PlayerState.
-inline constexpr std::uint16_t kProtocolVersion = 5;
+// 4: combat fields in PlayerState. 5: outfit in PlayerState. 6: roles (co-op / invader) in Hello and the roster.
+inline constexpr std::uint16_t kProtocolVersion = 6;
 
 // Message types >= kFirstGameMsg are "game messages": [type][sender id][payload]. The
 // session layer doesn't interpret them; the host stamps the sender id and relays them to
 // every other client with the reliability they arrived with. Gameplay systems (entities,
 // combat, story events, ...) define their own types in this range.
 inline constexpr std::uint8_t kFirstGameMsg = 16;
-inline constexpr int kMaxPlayers = 4; // host + 3
+inline constexpr int kMaxCoop = 4;     // the co-op group: host + 3
+inline constexpr int kMaxInvaders = 4; // an invading group
+inline constexpr int kMaxPlayers = kMaxCoop + kMaxInvaders; // host + 7 while invaders are in
 inline constexpr std::uint8_t kHostId = 0;
 inline constexpr std::size_t kNameLen = 24;
 
@@ -51,7 +53,10 @@ inline constexpr int kFloodSeconds = 5;
 // Disconnect reasons (ENet disconnect data). The low byte is the reason; the host puts its
 // protocol version in the bits above (see reject_data), so a mismatched joiner can say
 // which version the host runs.
-enum class Reject : std::uint32_t { None = 0, Full = 1, VersionMismatch = 2, HostLeft = 3, Kicked = 4, HelloTimeout = 5 };
+enum class Reject : std::uint32_t { None = 0, Full = 1, VersionMismatch = 2, HostLeft = 3, Kicked = 4, HelloTimeout = 5, NotOpen = 6 };
+
+// What a player is in the session. Invaders (M11) join a co-op group's session to hunt its host's protagonist.
+enum class Role : std::uint8_t { Coop = 0, Invader = 1 };
 
 enum class MsgType : std::uint8_t {
   Hello = 1,        // C->H: protocol version, name, mod version text (optional, informational)
@@ -79,28 +84,29 @@ inline std::string to_string(const Name& n) { return std::string(n.data(), strnl
 struct RosterEntry {
   std::uint8_t id;
   Name name;
+  Role role = Role::Coop;
 };
 
-inline std::vector<std::uint8_t> encode_hello(const std::string& name) {
+inline std::vector<std::uint8_t> encode_hello(const std::string& name, Role role = Role::Coop) {
   Writer w;
   ModVersion mv{};
 #ifdef IVCOOP_VERSION
   std::memcpy(mv.data(), IVCOOP_VERSION, std::min(sizeof(IVCOOP_VERSION) - 1, mv.size() - 1));
 #endif
-  w.put(MsgType::Hello).put(kProtocolVersion).put(make_name(name)).put(mv);
+  w.put(MsgType::Hello).put(kProtocolVersion).put(make_name(name)).put(role).put(mv);
   return std::move(w.data());
 }
 
 inline std::vector<std::uint8_t> encode_welcome(std::uint8_t your_id, const std::vector<RosterEntry>& roster) {
   Writer w;
   w.put(MsgType::Welcome).put(your_id).put(static_cast<std::uint8_t>(roster.size()));
-  for (const auto& r : roster) w.put(r.id).put(r.name);
+  for (const auto& r : roster) w.put(r.id).put(r.name).put(r.role);
   return std::move(w.data());
 }
 
-inline std::vector<std::uint8_t> encode_joined(std::uint8_t id, const Name& name) {
+inline std::vector<std::uint8_t> encode_joined(std::uint8_t id, const Name& name, Role role = Role::Coop) {
   Writer w;
-  w.put(MsgType::PlayerJoined).put(id).put(name);
+  w.put(MsgType::PlayerJoined).put(id).put(name).put(role);
   return std::move(w.data());
 }
 

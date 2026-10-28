@@ -3,7 +3,7 @@
 // they move), sending PlayerState exactly like the in-game client does.
 //
 //   iv-coop-bot [--host 127.0.0.1] [--port 41300] [--name Bot] [--radius 4] [--speed 1.6]
-//               [--phase 0] [--skew 123456] [--fixed] [--serve] [--seconds N] [--retry]
+//               [--phase 0] [--skew 123456] [--fixed] [--invader] [--serve] [--seconds N] [--retry]
 //               [--drive MODEL] [--ride [--seat N]] [--replay FILE.ivcrec] [--chaos [LEVEL]]
 //
 // --chaos [1-3]: fault injection on everything this bot sends (default level 2): random
@@ -66,6 +66,7 @@ struct Args {
   std::string drive;      // vehicle model name: circle in this car instead of on foot
   bool ride = false;      // sit in the host's vehicle whenever they're in one
   int seat = 0;           // passenger seat for --ride
+  bool invader = false;     // join as an invader (the host must be open to invasion)
   bool test_entity = false; // --serve only: create entity 999, then hand it to player #1
   int leave_after = 0;      // leave the session N seconds after joining (0 = never)
   bool armed = false;       // hold a pistol (weapon type 7) and aim at the host
@@ -134,6 +135,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--skew") a.skew = std::atoi(next());
     else if (k == "--fixed") a.follow = false;
     else if (k == "--serve") a.serve = true;
+    else if (k == "--invader") a.invader = true;
     else if (k == "--seconds") a.seconds = std::atoi(next());
     else if (k == "--retry") a.retry = true;
     else if (k == "--pause-every") a.pause_every = std::atoi(next());
@@ -180,7 +182,7 @@ int main(int argc, char** argv) {
     std::printf("[%s] CHAOS level %d: drop %.0f%% delay %.0f%% dup %.0f%% truncate %.1f%% corrupt %.1f%%\n", a.name.c_str(),
                 a.chaos, c.drop * 100, c.delay * 100, c.duplicate * 100, c.truncate * 100, c.corrupt * 100);
   }
-  bool up = a.serve ? session.host(a.port, a.name, "127.0.0.1") : session.join(a.host, a.port, a.name);
+  bool up = a.serve ? session.host(a.port, a.name, "127.0.0.1") : session.join(a.host, a.port, a.name, a.invader ? net::Role::Invader : net::Role::Coop);
   // --retry when serving: wait for the port (e.g. the game is still hosting on it).
   while (!up && a.serve && a.retry && !g_quit) {
     std::printf("[%s] host failed (%s); retrying in 2 s\n", a.name.c_str(), session.status().last_error.c_str());
@@ -296,7 +298,7 @@ int main(int argc, char** argv) {
           std::this_thread::sleep_for(std::chrono::seconds(3));
           std::printf("[%s] retrying...\n", a.name.c_str());
           have_center = false;
-          if (!session.join(a.host, a.port, a.name)) g_quit = true;
+          if (!session.join(a.host, a.port, a.name, a.invader ? net::Role::Invader : net::Role::Coop)) g_quit = true;
         } else {
           g_quit = true;
         }

@@ -120,6 +120,7 @@ add_library(iv-coop SHARED
   src/sync/remote_players.cpp
   src/sync/vehicle_sync.cpp
   src/sync/downed.cpp
+  src/sync/invasion.cpp
   src/sync/drunk_sync.cpp
   src/sync/bowling_sync.cpp
   src/sync/radio_sync.cpp

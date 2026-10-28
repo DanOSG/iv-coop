@@ -101,6 +101,7 @@ Config load_config(const std::filesystem::path& ini) {
       static_cast<std::uint32_t>(read_int(p, L"Net", L"VehicleForceType", static_cast<int>(n.vehicle_force_type)));
   n.host_key = read_int(p, L"Net", L"HostKey", n.host_key);
   n.join_key = read_int(p, L"Net", L"JoinKey", n.join_key);
+  n.invade_key = read_int(p, L"Net", L"InvadeKey", n.invade_key);
   if (n.send_hz == 0) n.send_hz = 1;
 
   c.story_log_calls = read_int(p, L"Story", L"LogCalls", c.story_log_calls) != 0;

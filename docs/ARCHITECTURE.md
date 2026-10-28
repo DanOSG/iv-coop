@@ -29,7 +29,7 @@ Free-roam is not a separate mode. It's simply the campaign between missions.
 
 - **One `.asi` plugin** (`plugins/iv-coop.asi`), C++20, MSVC, Win32. The same build serves host and client; the
   role is chosen in the in-game menu.
-- **Listen server, 4 players max.** ENet over UDP (reliable + unreliable channels) behind a `Transport`
+- **Listen server, 4 co-op players max (8 with invaders, M11).** ENet over UDP (reliable + unreliable channels) behind a `Transport`
   interface. The first version connects by direct IP or port forward; Steam relay or NAT punch-through come later.
 - **Peer-hosted only: no dedicated servers, ever.** A session always lives inside the host player's game. To get
   through home routers without manual setup:
@@ -429,7 +429,7 @@ docs/
   settings are the session's, saved in `iv-coop.ini [Session]` and sent to joiners. Friendly fire: **Off** (no
   lock-on, no damage), **On** (lock-on and damage, with the engine's own melee between players: partners' copies are
   damageable player peds, docs/research-native-netcode.md 7c), **No aim** (no lock-on, damage; the default); downed and
-  revive; shared mission pay; radio sync; clock and weather sync; partner blips. Later: invasions allowed (M11),
+  revive; shared mission pay; radio sync; clock and weather sync; partner blips; invasions (M11, Off by default). Later:
   free cutscenes, max players.
 - **M11: invasions** (Dark Souls style, added 2026-10-26). A group (1-4 players) can invade another group's
   session while it is **on a mission** or at **3+ wanted stars** (the invaded group's host decides when the
@@ -465,6 +465,55 @@ docs/
   hiding partners' puppets. Limits: the double is only visible if the cutscene's shot covers where the joiner stands (otherwise
   they walk about off camera, in a world the cutscene may have cleared of peds); no sprint, jump, cover or combat input on the
   double yet; interiors loaded only by the cutscene's own extra room are not available to it. Untested in game.
+  - **First slice built (2026-10-27, untested in game; sync/invasion, net/session, net/steam, game/phone):**
+    - *Capacity/roles:* protocol 6. `net::Role {Coop, Invader}` is in Hello, the Welcome roster and PlayerJoined. The ENet
+      host takes up to 7 clients (ids 1..7): co-op group max 4 (host + 3), invaders max 4, otherwise `Reject::Full`;
+      an invader is refused with `Reject::NotOpen` unless the host called `Session::set_invasion_open(true)`.
+      `Session::kick_invaders()` disconnects them. `player_slots` kSlots 3 -> 7 (the engine has 32). Steam lobby
+      max members 8. The bot has `--invader`.
+    - *Window (host, sync/invasion):* new setting "Invasions: On/Off" (default Off, `iv-coop.ini [Session] Invasions`,
+      bit 7 of the settings flags; the phone's settings list now shows as many rows as the script array holds).
+      Open = setting on AND (GET_MISSION_FLAG or 3+ wanted stars), polled every 0.5 s; closes 5 s after the reason ends
+      (at once if the setting is switched off). Opening admits invaders, sets the lobby data `ivc_open=1`
+      (`steam::set_lobby_open`) and sends message 65 (Open); closing sends Result(window closed) and kicks the invaders
+      1.5 s later. The host gets a help message when invaders arrive. Message 65: `[65][sender][sub][value]`, sub 0 Open,
+      sub 1 Result (1 = the target died, 2 = the window closed).
+    - *Invading:* phone Multiplayer > "Invade" (`steam::find_open_lobby`: any lobby with `ivc_open=1`, worldwide) joins
+      through the Steam relay with `Role::Invader`. Dev path: F9 (`[Net] InvadeKey`) joins `JoinAddress` as an invader
+      (only while that host's window is open). On connect the invader's position, health and weapons are saved;
+      the client-mode swap puts the FBI agent model (`M_M_FBI`, else the usual joiner model) on the player; story
+      scripts and own blips are frozen/hidden as for any joiner. The lowest-id invader picks a bearing 200-400 m from the
+      host's protagonist, teleports there (LOAD_SCENE), takes the nearest road node (retries other bearings if it lands
+      too far/near, e.g. water), creates an `FBI` car (fallback POLICE, WASHINGTON) and drives; the others warp into
+      its free passenger seats (they wait 20 s for the lead's car, then spawn their own). Loadout: carbine, shotgun,
+      pistol, full health; the police ignore them (SET_POLICE_IGNORE_PLAYER). Goal text via the help box.
+    - *Dropped for invaders:* all story messages (text, blips, payouts, cutscenes, HUD, world ledger, clock/weather),
+      sounds, pickups, scenes, fx, npc anims, regroup, radio, drunk and bowling sync; no wallet swap (they keep their
+      own money), no character-creator outfit, no downed/revive. The world (entities, vehicles, players) still
+      replicates, so the invader sees and fights the host's world.
+    - *Blips:* invaders see the host (the target) and their own team only; the invaded group sees its partners per the
+      Partner blips setting and never the invaders.
+    - *Team fire:* `invasion::hostile(a, b)` (roles differ) forces lock-on, engine damage and outgoing/incoming damage
+      messages on between invaders and the invaded; co-op vs co-op keeps the setting. Melee sync's session-wide
+      switch is on whenever any invader is present (so co-op melee between partners also applies while invaders are in).
+    - *End:* invaders leave (disconnect, model back, position/health/weapons restored, their FBI car deleted) when the
+      window closes (Open 0, Result 2, or the kick), when the target dies (host's Result 1 or its puppet's dead flag;
+      "invasion successful"), or when they die: their health is held at the downed floor (110) by the same
+      lethal-damage guard, and reaching it ends the invasion instead of killing them. The invaded group's downed/revive
+      works as normal; invaders aren't their teammates. The host's death on a mission is the existing mission fail.
+    - *Left:* invader respawn near the car (they only leave on death); invader rewards and a result screen; stealth
+      for the invaded (nothing warns them of the approach besides the arrival message); coloured/red target blip
+      (the puppet's normal partner blip is used); a spawn point guaranteed on road/safe from walls (no ground probe:
+      the node's z is used); AI cops treating invaders as allies is only "ignore" (no cop shooting back is not
+      checked); the host-side clock/weather for invaders (they keep their own); interest management/bandwidth tuning
+      for 8 players (everything is still broadcast to everyone); Steam search shows only one lobby (the first match)
+      with no browser or invite; a host can't pick who may invade; the melee switch above; all of it needs in-game
+      testing (two Steam accounts, or the bot with `--invader` for the admission rules).
+- **Late: "free cutscenes" option** (host toggle, off by default). During cutscenes, joiners see the cutscene from
+  its camera as usual, but their characters stay visible and controllable in the scene instead of being hidden and
+  frozen. Needs: keep remote peds streamed and unfrozen during `.cut` playback, keep sending/applying their state, and
+  keep the local joiner's input live while the cutscene camera holds the view. The default stays as in the
+  cutscene row above.
 - **Connectivity:** UPnP port mapping, then Steam invites/relay (see Shape). This can land any time after M2.
 - **Final: one-click installer.** It finds the Steam install, checks that `GTAIV.exe` is 1.2.0.59, and installs
   FusionFix, the radio downgrade and iv-coop (plus a default ini). It also offers to uninstall and restore.

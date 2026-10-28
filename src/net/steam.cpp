@@ -41,11 +41,13 @@ void* iface(FindIfaceFn find, HSteamUser user, std::initializer_list<const char*
 using ApiCall = std::uint64_t;
 constexpr int kLobbyCreatedId = 513;   // LobbyCreated_t: EResult, (pad), uint64 lobby (pack 8)
 constexpr int kLobbyMatchListId = 510; // LobbyMatchList_t: uint32 count
-constexpr int kLobbyTypePublic = 2, kMaxMembers = 4, kDistanceWorldwide = 3, kCompareEqual = 0;
+constexpr int kLobbyTypePublic = 2, kMaxMembers = 8, // 4 co-op + 4 invaders
+               kDistanceWorldwide = 3, kCompareEqual = 0;
 constexpr const char* kKeyPassword = "ivc_pw";
 constexpr const char* kKeyVersion = "ivc_ver";
 constexpr const char* kKeyAddress = "ivc_addr";
 constexpr const char* kKeyName = "ivc_name";
+constexpr const char* kKeyOpen = "ivc_open"; // "1" while the host is open to invasion (M11)
 constexpr const char* kVersion = "1";
 
 constexpr int kLobbyEnterId = 504; // LobbyEnter_t: uint64 lobby, u32 perms, bool locked, u32 response
@@ -55,6 +57,7 @@ struct Pending {
   enum { Create, Search, Join } what;
   ApiCall call;
   std::string password, address;
+  bool open_only = false; // Search: any lobby open to invasion, whatever its password
 };
 std::deque<Pending> g_pending;
 std::deque<LobbyResult> g_results;
@@ -143,6 +146,29 @@ void find_lobby(const std::string& password) {
   log::info("Steam: searching for a lobby with password {}", password);
 }
 
+void find_open_lobby() {
+  if (!g_ok) return;
+  const auto filter = fn<void(__cdecl*)(void*, const char*, const char*, int)>(
+      "SteamAPI_ISteamMatchmaking_AddRequestLobbyListStringFilter");
+  const auto distance = fn<void(__cdecl*)(void*, int)>("SteamAPI_ISteamMatchmaking_AddRequestLobbyListDistanceFilter");
+  const auto request = fn<ApiCall(__cdecl*)(void*)>("SteamAPI_ISteamMatchmaking_RequestLobbyList");
+  filter(g_matchmaking, kKeyOpen, "1", kCompareEqual);
+  filter(g_matchmaking, kKeyVersion, kVersion, kCompareEqual);
+  distance(g_matchmaking, kDistanceWorldwide);
+  Pending p{Pending::Search, request(g_matchmaking), {}, {}};
+  p.open_only = true;
+  g_pending.push_back(p);
+  log::info("Steam: searching for a lobby open to invasion");
+}
+
+void set_lobby_open(bool open) {
+  if (!g_ok || !g_lobby) return;
+  const auto set = fn<bool(__cdecl*)(void*, std::uint64_t, const char*, const char*)>(
+      "SteamAPI_ISteamMatchmaking_SetLobbyData");
+  set(g_matchmaking, g_lobby, kKeyOpen, open ? "1" : "0");
+  log::info("Steam: lobby {} is {} to invasion", g_lobby, open ? "open" : "closed");
+}
+
 void join_lobby(std::uint64_t lobby) {
   if (!g_ok) return;
   const auto join = fn<ApiCall(__cdecl*)(void*, std::uint64_t)>("SteamAPI_ISteamMatchmaking_JoinLobby");
@@ -222,6 +248,7 @@ void tick() {
         set(g_matchmaking, g_lobby, kKeyVersion, kVersion);
         set(g_matchmaking, g_lobby, kKeyAddress, it->address.c_str());
         set(g_matchmaking, g_lobby, kKeyName, persona_name().c_str());
+        set(g_matchmaking, g_lobby, kKeyOpen, "0");
         log::info("Steam: lobby {} created (password {}, address {})", g_lobby, it->password, it->address);
         g_results.push_back({LobbyResult::Created, g_lobby});
       }
@@ -252,11 +279,15 @@ void tick() {
       LobbyResult r{LobbyResult::NotFound};
       for (std::uint32_t i = 0; !failed && i < count; ++i) {
         const std::uint64_t lobby = by_index(g_matchmaking, static_cast<int>(i));
-        if (it->password != lobby_data(lobby, kKeyPassword)) continue; // the filter should guarantee it
+        if (it->open_only) {
+          if (std::string(lobby_data(lobby, kKeyOpen)) != "1") continue; // the filter should guarantee it
+        } else if (it->password != lobby_data(lobby, kKeyPassword)) {
+          continue; // the filter should guarantee it
+        }
         r = {LobbyResult::Found, lobby, lobby_data(lobby, kKeyAddress), lobby_data(lobby, kKeyName)};
         break;
       }
-      log::info("Steam: search for {}: {} lobbies, {}", it->password, count,
+      log::info("Steam: search for {}: {} lobbies, {}", it->open_only ? "an open invasion" : it->password, count,
                 r.kind == LobbyResult::Found ? std::format("found {} ({} at {})", r.lobby, r.host_name, r.address)
                                              : std::string("no match"));
       g_results.push_back(r);

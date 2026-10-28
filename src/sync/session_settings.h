@@ -28,6 +28,7 @@ struct Settings {
   bool world_sync = true;     // clock and weather follow the host
   bool partner_blips = true;
   bool scenes_watch = true;   // host's scripted-camera scenes: joiners see the host's camera (off: their own); they always keep control
+  bool invasions = false;     // other groups may invade while the host is on a mission or has 3+ stars (M11)
   bool ambient_sync = false;  // city peds and traffic near several players are shared (off until proven in play)
   bool operator==(const Settings&) const = default;
 };

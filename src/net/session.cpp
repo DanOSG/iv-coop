@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <utility>
 #include <cstdio>
 #include <format>
 #include <random>
@@ -30,6 +31,7 @@ std::string reason_text(std::uint32_t data) {
     case Reject::HostLeft: return "host closed the session";
     case Reject::Kicked: return "kicked by the host (too much traffic)";
     case Reject::HelloTimeout: return "handshake timed out";
+    case Reject::NotOpen: return "that session isn't open to invasion";
     default: return "connection lost";
   }
 }
@@ -102,6 +104,7 @@ struct Session::Impl {
     ENetPeer* peer;
     std::uint8_t id;
     Name name{};
+    Role role = Role::Coop;
     bool greeted = false;
     std::uint32_t connected_ms = 0;
     std::uint32_t win_start_ms = 0, win_pkts = 0; // flood window (1 s)
@@ -121,6 +124,10 @@ struct Session::Impl {
   SessionStatus st;
   std::vector<RosterEntry> roster; // everyone, including us
   Name my_name{};
+  Role my_role = Role::Coop;
+  bool kick_invaders_pending = false;
+  Reject kick_reason = Reject::NotOpen;
+  std::atomic<bool> invasion_open{false};
   std::deque<std::vector<std::uint8_t>> out_states;
   std::deque<StateUpdate> in_states;
   std::deque<VehicleUpdate> in_vehicles;
@@ -283,9 +290,9 @@ struct Session::Impl {
     st = {};
   }
 
-  void event(SessionEvent::Kind k, std::uint8_t id, std::string text) {
+  void event(SessionEvent::Kind k, std::uint8_t id, std::string text, Role role = Role::Coop) {
     std::lock_guard lock(m);
-    events.push_back({k, id, std::move(text)});
+    events.push_back({k, id, std::move(text), role});
   }
 
   Client* client_by_peer(ENetPeer* p) {
@@ -332,11 +339,11 @@ struct Session::Impl {
       enet_peer_disconnect(ev.peer, reject_data(Reject::VersionMismatch));
       return;
     }
-    for (std::uint8_t id = 1; id < kMaxPlayers; ++id) {
+    for (std::uint8_t id = 1; id < kMaxPlayers; ++id) { // 1..7; the co-op/invader limits are checked at Hello
       bool used = false;
       for (const auto& c : clients) used |= c.id == id;
       if (!used) {
-        clients.push_back({ev.peer, id, {}, false, steady_ms()});
+        clients.push_back({ev.peer, id, {}, Role::Coop, false, steady_ms()});
         return; // announced once their Hello arrives
       }
     }
@@ -382,7 +389,9 @@ struct Session::Impl {
     if (type == MsgType::Hello && !c->greeted) {
       std::uint16_t version = 0;
       r.get(version), r.get(c->name);
-      if (!r.ok() || version != kProtocolVersion) {
+      Role role = Role::Coop;
+      r.get(role);
+      if (!r.ok() || version != kProtocolVersion || role > Role::Invader) {
         log(1, std::format("rejecting a joiner: Hello with protocol v{}, we run v{}", version, kProtocolVersion));
         enet_peer_disconnect(ev.peer, reject_data(Reject::VersionMismatch));
         return;
@@ -393,18 +402,31 @@ struct Session::Impl {
       mv.back() = 0;
       log(0, std::format("player #{} '{}' says hello (protocol v{}, mod {})", c->id, to_string(c->name), version,
                          mv[0] ? mv.data() : "?"));
+      // Co-op group: host + 3. Invaders: only while the host's invasion window is open, up to 4.
+      int coop = 1, invaders = 0; // the host counts as co-op
+      for (const auto& o : clients)
+        if (o.greeted) (o.role == Role::Invader ? invaders : coop)++;
+      if (role == Role::Invader && !invasion_open) {
+        enet_peer_disconnect(ev.peer, reject_data(Reject::NotOpen));
+        return;
+      }
+      if ((role == Role::Invader && invaders >= kMaxInvaders) || (role == Role::Coop && coop >= kMaxCoop)) {
+        enet_peer_disconnect(ev.peer, reject_data(Reject::Full));
+        return;
+      }
+      c->role = role;
       c->greeted = true;
       std::vector<RosterEntry> snapshot;
       {
         std::lock_guard lock(m);
-        roster.push_back({c->id, c->name});
+        roster.push_back({c->id, c->name, role});
         snapshot = roster;
       }
       tx(ev.peer, c->id, kChanControl, encode_welcome(c->id, snapshot), true);
-      const auto joined = encode_joined(c->id, c->name);
+      const auto joined = encode_joined(c->id, c->name, role);
       for (auto& other : clients)
         if (other.greeted && other.peer != ev.peer) tx(other.peer, other.id, kChanControl, joined, true);
-      event(SessionEvent::Kind::Joined, c->id, to_string(c->name));
+      event(SessionEvent::Kind::Joined, c->id, to_string(c->name), role);
     } else if ((type == MsgType::PlayerState || type == MsgType::VehicleState) && c->greeted) {
       if (!accept_state(type, r, c->id)) return;
       restamp_state(data, c->id); // never trust the sender's id
@@ -455,20 +477,24 @@ struct Session::Impl {
       r.get(my_id), r.get(count);
       if (count > kMaxPlayers) return;
       std::vector<RosterEntry> list(count);
-      for (auto& e : list) r.get(e.id), r.get(e.name);
+      for (auto& e : list) r.get(e.id), r.get(e.name), r.get(e.role);
       if (!r.ok()) return;
+      Role mine = my_role;
+      for (const auto& e : list)
+        if (e.id == my_id) mine = e.role;
       {
         std::lock_guard lock(m);
         roster = list;
         st.my_id = my_id;
+        st.my_role = mine;
         st.mode = Mode::Joined;
       }
-      event(SessionEvent::Kind::Connected, my_id, {});
+      event(SessionEvent::Kind::Connected, my_id, {}, mine);
       for (const auto& e : list)
-        if (e.id != my_id) event(SessionEvent::Kind::Joined, e.id, to_string(e.name));
+        if (e.id != my_id) event(SessionEvent::Kind::Joined, e.id, to_string(e.name), e.role);
     } else if (type == MsgType::PlayerJoined) {
       RosterEntry e{};
-      r.get(e.id), r.get(e.name);
+      r.get(e.id), r.get(e.name), r.get(e.role);
       if (!r.ok()) return;
       e.name.back() = 0;
       {
@@ -476,7 +502,7 @@ struct Session::Impl {
         std::erase_if(roster, [&](const RosterEntry& o) { return o.id == e.id; });
         roster.push_back(e);
       }
-      event(SessionEvent::Kind::Joined, e.id, to_string(e.name));
+      event(SessionEvent::Kind::Joined, e.id, to_string(e.name), e.role);
     } else if (type == MsgType::PlayerLeft) {
       std::uint8_t id = 0;
       if (!r.get(id)) return;
@@ -502,11 +528,15 @@ struct Session::Impl {
       std::deque<std::vector<std::uint8_t>> out;
       std::deque<OutGame> game;
       Mode mode;
+      bool kick = false;
+      Reject kick_why = Reject::NotOpen;
       {
         std::lock_guard lock(m);
         out.swap(out_states);
         game.swap(out_game);
         mode = st.mode;
+        kick = std::exchange(kick_invaders_pending, false);
+        kick_why = kick_reason;
         chaos = chaos_cfg;
         if (blackhole_until) blackhole_to = blackhole_until, blackhole_until = 0;
       }
@@ -532,6 +562,9 @@ struct Session::Impl {
             enet_peer_disconnect(c.peer, reject_data(Reject::HelloTimeout));
           }
       }
+      if (kick && mode == Mode::Hosting)
+        for (auto& c : clients)
+          if (c.role == Role::Invader) enet_peer_disconnect(c.peer, reject_data(kick_why));
       for (const auto& g : game) {
         const std::uint8_t ch = g.reliable ? kChanControl : kChanState;
         if (mode == Mode::Hosting) {
@@ -561,7 +594,7 @@ struct Session::Impl {
               host_on_connect(ev);
             } else {
               configure_peer(ev.peer);
-              tx(ev.peer, kHostId, kChanControl, encode_hello(to_string(my_name)), true);
+              tx(ev.peer, kHostId, kChanControl, encode_hello(to_string(my_name), my_role), true);
             }
             break;
           case ENET_EVENT_TYPE_RECEIVE:
@@ -607,7 +640,7 @@ struct Session::Impl {
         } else if (server && e.id == kHostId) {
           rtt = server->roundTripTime;
         }
-        st.players.push_back({e.id, to_string(e.name), rtt});
+        st.players.push_back({e.id, to_string(e.name), rtt, e.role});
       }
     }
   }
@@ -637,8 +670,8 @@ bool Session::host(std::uint16_t port, const std::string& name, const std::strin
     impl_->st.last_error = "bad bind address " + bind_address;
     return false;
   }
-  // One spare peer slot beyond the 3 joiners: with none, ENet silently ignores a 4th
-  // connection attempt and that client just times out instead of hearing "session is full".
+  // One spare peer slot beyond the 7 joiners (3 co-op + 4 invaders): with none, ENet silently ignores an
+  // extra connection attempt and that client just times out instead of hearing "session is full".
   impl_->host = enet_host_create(&addr, kMaxPlayers, kNumChannels, 0, 0);
   if (impl_->host) impl_->host->mtu = kMtu, impl_->host->maximumPacketSize = kMaxPacket;
   if (!impl_->host) {
@@ -648,17 +681,20 @@ bool Session::host(std::uint16_t port, const std::string& name, const std::strin
   {
     std::lock_guard lock(impl_->m);
     impl_->my_name = make_name(name);
-    impl_->roster = {{kHostId, impl_->my_name}};
+    impl_->my_role = Role::Coop;
+    impl_->roster = {{kHostId, impl_->my_name, Role::Coop}};
+    impl_->st.my_role = Role::Coop;
     impl_->st.mode = Mode::Hosting;
     impl_->st.my_id = kHostId;
     impl_->st.port = port;
     impl_->st.last_error.clear();
   }
+  impl_->invasion_open = false;
   impl_->start();
   return true;
 }
 
-bool Session::join(const std::string& address, std::uint16_t port, const std::string& name) {
+bool Session::join(const std::string& address, std::uint16_t port, const std::string& name, Role role) {
   impl_->stop();
   if (!g_enet_ok) {
     impl_->st.last_error = "ENet failed to initialise";
@@ -686,12 +722,22 @@ bool Session::join(const std::string& address, std::uint16_t port, const std::st
   {
     std::lock_guard lock(impl_->m);
     impl_->my_name = make_name(name);
+    impl_->my_role = role;
+    impl_->st.my_role = role;
     impl_->st.mode = Mode::Connecting;
     impl_->st.port = port;
     impl_->st.last_error.clear();
   }
   impl_->start();
   return true;
+}
+
+void Session::set_invasion_open(bool open) { impl_->invasion_open = open; }
+
+void Session::kick_invaders(Reject why) {
+  std::lock_guard lock(impl_->m);
+  impl_->kick_invaders_pending = true;
+  impl_->kick_reason = why;
 }
 
 void Session::leave() {
