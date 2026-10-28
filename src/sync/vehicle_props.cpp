@@ -24,7 +24,7 @@ enum Kind : std::uint8_t { kAppearance = 0, kState = 1, kOp = 2 };
 
 enum Op : std::uint8_t {
   OpenDoor = 1, ShutDoor, ControlDoor, BreakDoor, CloseAllDoors, LockDoors, SmashWindow, BurstTyre, FixTyre, FixCar,
-  Siren, ForceLights, LightsOn, Hazard, Indicator, Taxi, Livery, ExtraColours, Colour, Visible, ExtraOff,
+  Siren, ForceLights, LightsOn /* unused; keeps wire values */, Hazard, Indicator, Taxi, Livery, ExtraColours, Colour, Visible, ExtraOff,
 };
 
 struct Appearance {
@@ -229,7 +229,6 @@ void apply_op(n::Vehicle v, const WireOp& o) {
       case FixCar: n::invoke(0x3D562F78, v); break;
       case Siren: n::invoke(0x7781290F, v, b); break;
       case ForceLights: n::invoke(0x71B81DE7, v, o.a); break;
-      case LightsOn: n::invoke(0x22888C5A, v, b); break;
       case Hazard: n::invoke(0x24B42ED2, v, b); break;
       case Indicator: n::invoke(0x71D72486, v, b); break;
       case Taxi: n::invoke(0x460837F9, v, b); break;
@@ -292,7 +291,7 @@ void register_hooks() {
   on(0x3D562F78, "FIX_CAR", [](const Call& c) { queue(c, FixCar); });
   on(0x7781290F, "SWITCH_CAR_SIREN", [](const Call& c) { queue(c, Siren, -1, 1, -1, true); });
   on(0x71B81DE7, "FORCE_CAR_LIGHTS", [](const Call& c) { queue(c, ForceLights, 1); });
-  on(0x22888C5A, "SET_CAR_LIGHTS_ON", [](const Call& c) { queue(c, LightsOn, -1, 1, -1, true); });
+  // No SET_CAR_LIGHTS_ON: FusionFix lists it with a plain-joaat placeholder hash and this game has no such native.
   on(0x24B42ED2, "SET_VEH_HAZARDLIGHTS", [](const Call& c) { queue(c, Hazard, -1, 1, -1, true); });
   on(0x71D72486, "SET_VEH_INDICATORLIGHTS", [](const Call& c) { queue(c, Indicator, -1, 1, -1, true); });
   on(0x460837F9, "SET_TAXI_LIGHTS", [](const Call& c) { queue(c, Taxi, -1, 1, -1, true); });

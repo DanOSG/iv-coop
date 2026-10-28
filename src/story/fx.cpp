@@ -25,7 +25,7 @@ constexpr int kMaxArgs = 16;
 constexpr std::size_t kMaxPerFrame = 40, kMaxPending = 128, kMaxLive = 256;
 constexpr DWORD kPendingMs = 4000;
 
-constexpr std::uint32_t kStopPtfx = 0x0EAA4429, kRemoveScriptFire = 0x0E633C13, kRemoveAllScriptFires = 0x488CBB60;
+constexpr std::uint32_t kStopPtfx = 0x0EAA4429, kRemoveScriptFire = 0x0E633C13;
 
 enum class Cls : std::uint8_t { None = 0, Ptfx = 1, Fire = 2 };
 enum RefType : std::uint8_t { kRefNone = 0, kRefEntity = 1, kRefHostPlayer = 2 };
@@ -202,11 +202,11 @@ void register_hooks() {
   hook(0x4A802E89, {"EXPLODE_CHAR_HEAD", Cls::None, false, -1, 0});
   // Fires. The returned fire id is mapped so REMOVE_SCRIPT_FIRE finds ours.
   hook(0x24742BB9, {"START_SCRIPT_FIRE", F, true});
-  hook(0x94BC3DCE, {"START_CAR_FIRE", F, true, -1, 0});
   hook(0x5FB31295, {"START_CHAR_FIRE", F, true, -1, 0});
   hook(0x2D7D5DD2, {"START_OBJECT_FIRE", F, true, -1, 0});
   hook(kRemoveScriptFire, {"REMOVE_SCRIPT_FIRE", F, false, -1, -1, 0, kUnmap});
-  hook(kRemoveAllScriptFires, {"REMOVE_ALL_SCRIPT_FIRES", F, false, -1, -1, -1, kUnmapAllFires});
+  // START_CAR_FIRE and REMOVE_ALL_SCRIPT_FIRES are not hooked: FusionFix lists them with plain-joaat placeholder
+  // hashes (the game has no such natives; no story script calls them).
   // Particle effects: (name, [entity,] offset xyz, rotation xyz, [bone,] flags). START_* loop and return a handle.
   hook(0x3A774777, {"START_PTFX", P, true, 0});
   hook(0x0D8407E9, {"START_PTFX_ON_OBJ", P, true, 0, 1});

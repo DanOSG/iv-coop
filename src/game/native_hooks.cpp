@@ -173,11 +173,11 @@ bool install() {
       log::warn("Native hook {}: handler at static 0x{:X} is an engine stub in the protected region; skipped", s.name, va);
       continue;
     }
-    bool shared = false;
+    const char* shared = nullptr;
     for (int j = 0; j < i; ++j)
-      if (g_slots[j].target == s.target) shared = true;
+      if (g_slots[j].target == s.target) shared = g_slots[j].name;
     if (shared) { // two natives share one handler: can't tell them apart at the handler
-      log::warn("Native hook {}: handler {} shared with another hooked native; skipped", s.name, s.target);
+      log::warn("Native hook {}: handler {} shared with {}; skipped", s.name, s.target, shared);
       continue;
     }
     MH_STATUS st = MH_CreateHook(s.target, reinterpret_cast<void*>(kDetours[i]), reinterpret_cast<void**>(&s.orig));
