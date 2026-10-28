@@ -1,13 +1,14 @@
 # Changelog
 
-## Unreleased / 0.7.1
+## 0.7.1
 
-Planned in this release (the maintainer will confirm before it ships):
-
-- The debug overlay uses the normal font and stays small.
-- Closing the phone in the character creator no longer leaves you stuck in the preview model.
-- Fixed some game actions that failed to hook up correctly.
-- Bowling in the Episodes.
+- Multiplayer pool and darts, in all three games: everyone at the table plays your side against your friend,
+  taking turns shot by shot (pool) or dart by dart (darts). Players at the table watch through the same camera.
+- Bowling's full ten-frames-each mode now works in The Lost and Damned and The Ballad of Gay Tony too (TBoGT's
+  alley takes two bowlers).
+- Fixed some game actions that failed to hook up on every launch.
+- The debug overlay shows the mod's version.
+- New player README and this changelog.
 
 ## 0.7.0
 

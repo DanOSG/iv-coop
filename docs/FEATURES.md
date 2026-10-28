@@ -3,7 +3,7 @@
 iv-coop turns **GTA IV: The Complete Edition**'s single-player story into a co-op game for **up to 4 players**
 (a host + 3 partners). The host plays their own save and story; partners join that world as their own characters
 and play the missions alongside, and their own saves are never loaded or changed. It's one ASI plugin, set up by a
-one-click installer. Status: version 0.7.0; much of it is new and still being tested in play (see the end).
+one-click installer. Status: version 0.7.1; much of it is new and still being tested in play (see the end).
 
 ## Getting in
 - **Installer:** finds GTA IV, checks it's the supported version (1.2.0.59), installs TJGM's Drag n' Drop pack
@@ -49,6 +49,9 @@ one-click installer. Status: version 0.7.0; much of it is new and still being te
   car only the front seats choose the station (like GTA Online); the back follows.
 - **Friend outings:** the friend comes along for partners too, and partners who drink with the host get drunk with
   the wobbly walk and camera.
+- **Multiplayer pool and darts** (all three games): everyone at the table plays the host's side against the friend,
+  taking turns shot by shot or dart by dart, steering the host's game with their own controls and watching the
+  table camera.
 - **Multiplayer bowling:** partners take turns on the host's lane, each playing a full 10 frames on a shared
   scorecard, watching the lane camera; the AI friend plays its own turns.
 

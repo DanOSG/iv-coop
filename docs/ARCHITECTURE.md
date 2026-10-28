@@ -498,6 +498,15 @@ docs/
     GET_TEXTURE_FROM_STREAMED_TXD; partners load the same texture). `parachute*` and `*stattracker` always run
     locally (the engine starts parachutelauncher for whoever boards a helicopter). Natives were picked by diffing
     the episodes' decompiled scripts against IV's.
+  - **Pool and darts (0.7.1, `sync/minigame_sync`, message 73):** bowling's approach without a scorecard of our
+    own. pool_game and darts are the same script in all three games; the human side is played by everyone at the
+    table (host and partners within 15 m when the script starts) as a team against the friend. The controlling
+    player's sticks, mouse, keyboard move (pool aims with it), controls (2: 0 1 2 4 23 77 78, 0: 77 78), pad buttons
+    0-19 and mouse buttons answer the script's reads on the host. A go ends after 1.5 s without aim reads (sticks,
+    mouse, keyboard move) and the next read hands it on, so pool alternates shots and darts alternates darts.
+    Table cameras (tenpinbowl, pool_game, darts) only stream to the players at the table. **To verify in game:** that
+    the scripts don't read the aim during the friend's turn or while balls/darts are in flight (otherwise a go
+    would never end), and that pool's per-player pad index (`l_U318._fU32[l_U243]`) is 0 for the human side.
   - **Hook safety:** `native_hooks::install` skips any handler inside the protected region; no-op natives such as
     SET_PLAYER_INVISIBLE_TO_AI point at a shared engine stub (0x4016A0) that the engine calls everywhere, and
     hooking it crashed the game at startup.

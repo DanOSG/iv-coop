@@ -80,7 +80,7 @@ place, and the backups it made stay in your game folder in case you want to rest
 
 ## Known limitations
 
-- Early access: invasions, bowling, the character creator, shared pedestrians and traffic, and the Episodes support
+- Early access: invasions, bowling, pool and darts, the character creator, shared pedestrians and traffic, and the Episodes support
   have had little play-testing.
 - The Episodes' own minigames and some HUD meters aren't fully shared yet.
 - The radio can hiccup briefly when a song changes.
