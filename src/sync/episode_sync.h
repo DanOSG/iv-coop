@@ -33,6 +33,8 @@ void on_message(const net::GameMessage& m, bool hosting);
 std::optional<std::string> take_refusal();
 // The host's episode while joined (Unknown if not told yet), for logs and displays.
 episode::Id host_episode();
+// How many times a host in another episode turned us away (self-test).
+unsigned refusals();
 void clear();
 
 } // namespace ivc::episode_sync

@@ -30,6 +30,10 @@ Id from_wire(std::uint8_t v);       // anything out of range -> Unknown
 // episodes only change its clothes), which is the default; if the running game's player turns out to wear another
 // real ped model when no session has touched it yet, that measured model is used instead (logged).
 std::uint32_t protagonist_model();
+// Starts another episode the way the frontend's Episodes menu does (story/self_test): the frontend action handler
+// (0x5A3980) runs action 0x3E with the frontend mode at 1, which starts the episode in [0x1160C08] (0x5C1980) and
+// rebuilds the world. GTAIV.exe 1.2.0.59, static analysis outside the protected region. Game thread.
+void request_switch(Id id);
 // Report a model the local player wears while nothing of ours has changed it (not in a session, not previewing the
 // character editor). The first report per episode is kept.
 void note_player_model(std::uint32_t model);

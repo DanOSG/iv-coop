@@ -13,6 +13,7 @@ enum Op : std::uint8_t { OpHost = 0, OpJoiner = 1 };
 
 episode::Id g_host = episode::Id::Unknown;
 std::optional<std::string> g_refusal;
+unsigned g_refusals = 0;
 
 void send(net::Session& net, Op op) {
   net::Writer w;
@@ -53,6 +54,7 @@ void on_message(const net::GameMessage& m, bool hosting) {
   }
   log::warn("Episode: the host is playing {} (protagonist {}) but we are in {}; leaving", episode::name(theirs),
             episode::protagonist_name(theirs), episode::name(mine));
+  ++g_refusals;
   g_refusal = std::format("Can't join: the host is playing {}. Start {} (Episodes from Liberty City) and join again.",
                           episode::name(theirs), episode::name(theirs));
 }
@@ -60,6 +62,8 @@ void on_message(const net::GameMessage& m, bool hosting) {
 std::optional<std::string> take_refusal() { return std::exchange(g_refusal, std::nullopt); }
 
 episode::Id host_episode() { return g_host; }
+
+unsigned refusals() { return g_refusals; }
 
 void clear() {
   g_host = episode::Id::Unknown;

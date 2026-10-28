@@ -479,7 +479,15 @@ docs/
     `M_Y_MULTIPLAYER`; the cutscene swap uses the episode's protagonist model; blip sprite scan up to 256.
   - Bowling's script card swap is IV-only (the episodes' `tenpinbowl` statics are laid out differently); there
     bowling uses shared frames. The mission runner and mission saves are IV-only.
-  - **To verify in game:** everything; especially the episode phone menu, Johnny/Luis cutscene swaps, and the
+  - **Self-test** (`story/self_test`, `tools/self_test.py`, 2026-10-28): one launch switches IV -> TLAD -> TBoGT the
+    way the frontend's Episodes menu does (action 0x3E with `[0x1160C08]` = episode; `[0x11D6FD0]` requested,
+    `[0x11D6FD4]` current episode, applied by 0x5C1980), opens the phone (a short "up" for the phone scripts, a
+    short accept, pad A / control 77, for the rest, which skips the episodes' scripted intros), checks the menu
+    items, then hosts the bot, joins a bot host in the same episode (client model swap and restore) and one in
+    another (turned away). The bot's `--episode N` plays message 67. All 27 checks passed on 2026-10-28; one
+    earlier run crashed once in the renderer (`CDrawPedDC` allocation failed, TLAD intro, a frame after a model
+    swap), not seen again in two more runs.
+  - **To verify in game:** Johnny/Luis cutscene swaps with a real partner, and the
     episodes' own HUD elements (gang/club meters) and minigames (TBoGT club, base jumps, fight club, TLAD gang wars).
 - **Co-op settings** (phone: Multiplayer > Co-op Settings; done 2026-10-26, sync/session_settings): the host's
   settings are the session's, saved in `iv-coop.ini [Session]` and sent to joiners. Friendly fire: **Off** (no

@@ -326,6 +326,22 @@ void show_help(const std::string& text, bool forever) {
 
 } // namespace
 
+MenuProbe probe() {
+  MenuProbe p;
+  p.screen = screen();
+  std::int32_t* st = main_statics();
+  p.ui = st != nullptr;
+  if (!st) return p;
+  p.count = st[kSlotCount], p.capacity = st[kSlotArray];
+  if (p.count > 0 && p.capacity > 0 && p.capacity <= 64) {
+    p.first_id = st[kSlotArray + 1];
+    p.multiplayer = has_item(st, kIdMultiplayer);
+  }
+  return p;
+}
+
+void open_screen(std::int32_t to) { switch_screen(to); }
+
 bool unavailable() { return !episode::known() || g_bad_menu_frames >= kBadMenuFrames; }
 
 bool install() {

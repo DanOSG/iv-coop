@@ -4,7 +4,7 @@
 //
 //   iv-coop-bot [--host 127.0.0.1] [--port 41300] [--name Bot] [--radius 4] [--speed 1.6]
 //               [--phase 0] [--skew 123456] [--fixed] [--invader] [--serve] [--seconds N] [--retry]
-//               [--drive MODEL] [--ride [--seat N]] [--replay FILE.ivcrec] [--chaos [LEVEL]]
+//               [--drive MODEL] [--ride [--seat N]] [--replay FILE.ivcrec] [--chaos [LEVEL]] [--episode N]
 //
 // --chaos [1-3]: fault injection on everything this bot sends (default level 2): random
 // drops (unreliable only), delays/reordering, duplicates, truncated and bit-flipped game
@@ -16,6 +16,8 @@
 // --drive sultan: circle the host in that car (sends VehicleState as the car's owner).
 // --ride: sit in the host's car (passenger seat --seat, default 0) whenever they drive one.
 //
+// --episode 0|1|2 (IV, TLAD, TBoGT): play that episode for sync/episode_sync (message 67): as the host, tell each
+// joiner; as a joiner, tell the host on connecting. Messages 67 received are printed either way.
 // Run up to three at once (different --name/--phase) to fill a 4-player session.
 // --serve makes the bot the host instead (circling the origin), for testing the session
 // layer with no game running at all. --seconds quits after N seconds.
@@ -76,6 +78,7 @@ struct Args {
   int health = 200;         // starting (and respawn) health
   std::string replay;       // --serve: replay a recorded host session (.ivcrec) to the first client
   int chaos = 0;            // --chaos level 1-3 (0 = off)
+  int episode = -1;         // --episode: sent in message 67 (-1 = never)
   std::string model;        // appear as this model (e.g. PLAYER = Niko); empty = receivers' fallback
 };
 
@@ -150,6 +153,7 @@ Args parse(int argc, char** argv) {
     else if (k == "--health") a.health = std::atoi(next());
     else if (k == "--replay") a.replay = next(), a.serve = true;
     else if (k == "--model") a.model = next();
+    else if (k == "--episode") a.episode = std::atoi(next());
     else if (k == "--chaos") {
       a.chaos = 2;
       if (i + 1 < argc && std::isdigit(static_cast<unsigned char>(argv[i + 1][0]))) a.chaos = std::clamp(std::atoi(argv[++i]), 1, 3);
@@ -263,6 +267,16 @@ int main(int argc, char** argv) {
     m.insert(m.end(), clip.begin(), clip.end());
     session.send_game(std::move(m), true);
   };
+  // sync/episode_sync: [67][sender][op 0 host / 1 joiner][episode][protagonist model u32].
+  auto send_episode = [&session, &a](std::uint8_t op) {
+    if (a.episode < 0) return;
+    const std::uint32_t model = 0x6F0783F5; // "player"
+    session.send_game({67, 0, op, static_cast<std::uint8_t>(a.episode), static_cast<std::uint8_t>(model),
+                       static_cast<std::uint8_t>(model >> 8), static_cast<std::uint8_t>(model >> 16),
+                       static_cast<std::uint8_t>(model >> 24)},
+                      true);
+    std::printf("[%s] told %s we play episode %d\n", a.name.c_str(), op == 0 ? "everyone" : "the host", a.episode);
+  };
   auto send_clip = [&send_melee](const std::string& dict, const std::string& clip) { send_melee(46, 0xFF, dict, clip); };
 
   while (!g_quit) {
@@ -277,10 +291,12 @@ int main(int argc, char** argv) {
       using K = net::SessionEvent::Kind;
       if (e.kind == K::Connected) {
         std::printf("[%s] connected as player #%u\n", a.name.c_str(), e.id);
+        send_episode(1);
         if (a.downed) downed = true, health = a.health; // each new session starts us down again
       }
       if (e.kind == K::Joined) {
         std::printf("[%s] player #%u '%s' is here\n", a.name.c_str(), e.id, e.text.c_str());
+        if (a.serve) send_episode(0);
         if (!a.replay.empty() && !replay_start) {
           replay = load_recording(a.replay);
           std::printf("[%s] loaded %zu recorded messages (%.1f s) from %s\n", a.name.c_str(), replay.size(),
@@ -327,6 +343,8 @@ int main(int argc, char** argv) {
     const std::uint8_t my_id = session.status().my_id;
     static unsigned world_ops = 0;
     for (const auto& gm : session.drain_game()) {
+      if (!gm.data.empty() && gm.data[0] == 67 && gm.data.size() >= 4)
+        std::printf("[%s] episode message from #%u: op %u, episode %u\n", a.name.c_str(), gm.from, gm.data[2], gm.data[3]);
       // --melee: melee_sync messages from the host. The one being hit decides contact; we have no game to test
       // bones in, so an attack clip of the host's (46) counts as touching us 350 ms in (we stand in reach). 47:
       // our swing landed on them, 48: they blocked it (we play the recoil).

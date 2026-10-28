@@ -1,5 +1,7 @@
 #include "render/overlay.h"
 
+#include <algorithm>
+
 #include <d3d9.h>
 
 #include <imgui.h>
@@ -63,10 +65,26 @@ constexpr ImGuiWindowFlags kHudFlags = ImGuiWindowFlags_NoDecoration | ImGuiWind
                                        ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoFocusOnAppearing |
                                        ImGuiWindowFlags_NoNav;
 
+// The debug windows grow with their text (more players, entities, scripts); in a small game window that covered the
+// whole screen. They stay in the top-left corner, at most this share of the screen, with the text scaled down on
+// small displays; whatever doesn't fit is cut off.
+constexpr float kMaxWidth = 0.42f, kMaxHeight = 0.45f, kScriptsMaxHeight = 0.4f;
+constexpr int kMaxListed = 4; // remote vehicles / entities shown before "+N more"
+float g_status_bottom = 12;   // where the scripts list starts
+
+void fit_window(float max_w, float max_h) {
+  const ImVec2 screen = ImGui::GetIO().DisplaySize;
+  ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(screen.x * max_w, screen.y * max_h));
+}
+
+void scale_text() { ImGui::SetWindowFontScale(std::clamp(ImGui::GetIO().DisplaySize.y / 1080.0f, 0.7f, 1.0f)); }
+
 void draw_status() {
   ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_Always);
+  fit_window(kMaxWidth, kMaxHeight);
   ImGui::SetNextWindowBgAlpha(0.55f);
   if (ImGui::Begin("##ivcoop", nullptr, kHudFlags)) {
+    scale_text();
     ImGui::TextUnformatted("iv-coop  M2");
     ImGui::Text("frame %llu  |  %.0f fps", g_frames, ImGui::GetIO().Framerate);
 
@@ -119,27 +137,34 @@ void draw_status() {
     if (!c.vehicles.empty()) {
       ImGui::Separator();
       ImGui::TextUnformatted("remote vehicles");
+      int shown = 0;
       for (const auto& v : c.vehicles)
-        ImGui::Text("  0x%08X #%u  err %4.1f m  snaps %3u  gain %.2f  steer %+.2f%s", v.vehicle_id, v.owner, v.error_m,
+        if (shown++ < kMaxListed) ImGui::Text("  0x%08X #%u  err %4.1f m  snaps %3u  gain %.2f  steer %+.2f%s", v.vehicle_id, v.owner, v.error_m,
                     v.snaps, v.gain, v.steer, v.blocked ? "  BLOCKED" : "");
+      if (shown > kMaxListed) ImGui::TextDisabled("  +%d more", shown - kMaxListed);
     }
     if (s.mode == net::Mode::Hosting || !c.entities.empty()) {
       ImGui::Separator();
       ImGui::TextUnformatted("networked entities  [host: Ctrl+Shift+P ped | V car | X delete all | R record]");
+      int shown = 0;
       for (const auto& e : c.entities)
-        ImGui::Text("  %4u %-7s owner #%u %-10s  %.0f %.0f %.0f  migrations %u", e.id,
+        if (shown++ < kMaxListed) ImGui::Text("  %4u %-7s owner #%u %-10s  %.0f %.0f %.0f  migrations %u", e.id,
                     e.type == sync::EntityType::Ped ? "ped" : "vehicle", e.sim_owner, e.live ? "LIVE here" : "follower",
                     e.x, e.y, e.z, e.migrations);
+      if (shown > kMaxListed) ImGui::TextDisabled("  +%d more", shown - kMaxListed);
     }
     ImGui::TextDisabled("F7 scripts  |  F8 overlay  |  F9 ghost  |  built " __DATE__ " " __TIME__);
   }
+  g_status_bottom = ImGui::GetWindowPos().y + ImGui::GetWindowSize().y + 8;
   ImGui::End();
 }
 
 void draw_scripts() {
-  ImGui::SetNextWindowPos(ImVec2(12, 220), ImGuiCond_Always);
+  ImGui::SetNextWindowPos(ImVec2(12, g_status_bottom), ImGuiCond_Always);
   ImGui::SetNextWindowBgAlpha(0.7f);
+  fit_window(kMaxWidth * 0.75f, kScriptsMaxHeight);
   if (ImGui::Begin("##scripts", nullptr, kHudFlags)) {
+    scale_text();
     ImGui::TextUnformatted("Running scripts");
     ImGui::Separator();
     static const char* kStates[] = {"run", "blocked", "aborted", "halted"};

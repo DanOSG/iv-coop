@@ -1247,6 +1247,22 @@ bool host() {
   return true;
 }
 
+bool join(const std::string& address) {
+  if (session().status().mode != net::Mode::Idle) return false;
+  if (!session().join(address, g_cfg.port, g_cfg.name)) {
+    log::error("Joining failed: {}", session().status().last_error);
+    return false;
+  }
+  log::info("Joining {}:{} as '{}' (self-test)", address, g_cfg.port, g_cfg.name);
+  return true;
+}
+
+void leave() {
+  if (session().status().mode == net::Mode::Idle) return;
+  log::info("Leaving session (self-test)");
+  session().leave();
+}
+
 bool start_recording(const std::string& path) {
   if (session().recording()) session().stop_recording();
   if (!session().start_recording(path)) return false;

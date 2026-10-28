@@ -72,6 +72,23 @@ void tick() {
   g_current = seen;
 }
 
+namespace engine {
+template <class T> T at_static(std::uintptr_t va) {
+  return reinterpret_cast<T>(va - 0x400000 + reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr)));
+}
+using SetInt = std::uint32_t(__cdecl*)(std::int32_t);
+constexpr std::uintptr_t kMenuEpisode = 0x1160C08; // the episode the frontend's menu picked
+constexpr std::int32_t kStartEpisode = 0x3E;
+} // namespace engine
+
+void request_switch(Id id) {
+  if (id == Id::Unknown) return;
+  *engine::at_static<volatile std::int32_t*>(engine::kMenuEpisode) = static_cast<std::int32_t>(id);
+  engine::at_static<engine::SetInt>(0x8BECC0)(1);                    // frontend mode ([0x1030B7C])
+  engine::at_static<engine::SetInt>(0x8BE0E0)(engine::kStartEpisode); // pending action ([0x1160C24])
+  log::warn("Episode: starting {} (frontend action 0x3E)", name(id));
+}
+
 std::uint32_t protagonist_model() { return g_measured ? g_measured : kPlayerModel; }
 
 void note_player_model(std::uint32_t model) {

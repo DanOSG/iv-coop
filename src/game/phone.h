@@ -48,6 +48,16 @@ std::string dialled();
 // match the known script layout (logged). remote_players then offers F10 host / F11 join instead.
 bool unavailable();
 
+// Self-test (story/self_test): the phone's main-menu list as the script holds it, and a jump to a screen the way the
+// phone's own switch helper does it (1011 main menu, 2000 our Multiplayer item, 1001 close).
+struct MenuProbe {
+  std::int32_t screen = -1, count = -1, capacity = -1, first_id = -1;
+  bool multiplayer = false; // our item is in the list
+  bool ui = false;          // spcellphonemain is running
+};
+MenuProbe probe();
+void open_screen(std::int32_t screen);
+
 // Text override: returned instead of the game's string for `key` (ASCII).
 void set_label(const std::string& key, const std::string& text);
 
