@@ -246,7 +246,7 @@ void start_game(const Frame& f, const std::vector<const Player*>& mates) {
 
 // ---- the script's card (host)
 //
-// tenpinbowl's scorecard is l_U617[player] (one 113-word element per bowler, element i at static 618 + 113 i,
+// tenpinbowl's scorecard (IV slot numbers; TLAD/TBoGT in Layout below) is l_U617[player] (one 113-word element per bowler, element i at static 618 + 113 i,
 // the array's size word at 617): _fU0 the ped, _fU4[21][3] the rolls ({pins, frame, kind}; -99 = unused,
 // 999 = unused kind), _fU344[10] frame scores, _fU388 the frame being bowled (0..9), _fU396 the strike run,
 // _fU400[10] and _fU444 "finished". Nested arrays carry a size word each, so the layout is checkable: every
@@ -259,17 +259,41 @@ void start_game(const Frame& f, const std::vector<const Player*>& mates) {
 // sub_13200/frame start. The script then plays a full 10 frames for each human and ends itself when card 0
 // (and card 1) are finished. With a friend we steer sub_13200 by faking the two fields it reads: card 1's
 // _fU388 reads 9 while a human is up (nothing is "ahead" of it), card 0's _fU444 reads 1 while the friend is up.
-constexpr int kStaticsWords = 2200;
-constexpr int kSPlayers = 263, kSTurn = 264, kSCards = 617, kSState = 2146;
-constexpr int kCardWords = 113, kMaxCards = 6, kCardFirst = kSCards + 1;
+// Card struct (per element, same in all three games' scripts): see the field offsets below. Only the slot numbers of
+// the arrays/variables differ per episode; they are in Layout, picked by script_statics().
+constexpr int kCardWords = 113;
 constexpr int kWRolls = 1, kWRoll0 = 2, kWScores = 86, kWFrame = 97, kWMarks = 100, kWFinished = 111;
 constexpr int kNumRolls = 21;
 constexpr std::int32_t kEmptyOld = 65437; // how the decompile prints -99
 
-// The layout above is IV's tenpinbowl; the episodes' copies lay their statics out differently (not mapped yet), so
-// there bowling falls back to shared frames (no script card swap).
+// Static slots of each game's tenpinbowl, matched by the same code in the three decompiles (research/
+// GTAIVMissionScripts/{IV,TLAD,TBOGT}/tenpinbowl.txt). The slots are not a uniform shift between games, and the card
+// struct (113 words, offsets above) is identical in all three (the same _fU0.._fU448 set, the same init code).
+//  - players/turn: IV `l_U263 = l_U1366 + l_U1367;` (:683) and `l_U264 = 0;` (:46, :299); TLAD l_U235 (:721, capped
+//    at 6 :724) / l_U236 (:34, :289); TBOGT l_U25 (:665, capped at 2 :668: the card array is 2 long) / l_U26 (:5, :260).
+//  - cards: sub_11987 in IV (:1236, `l_U617[iVar2]._fU4[I][2] = 999`), the same function at TLAD :1277 (l_U589) and
+//    TBOGT :1225 (l_U379). The array's length shows in where the next static starts: the ped l_U1296 (IV, 617 + 1 +
+//    6*113 = 1296), l_U1268 (TLAD, 589 + 679), l_U606 (TBOGT, 379 + 1 + 2*113) - so TBOGT's card array has 2 elements.
+//  - state: IV l_U2146 is set to 28 in the init block (:219) next to 7 (l_U2147) and 3 (l_U2149), and to 1 at :298/:4581
+//    with the turn reset; TLAD l_U2134 (:207, :288), TBOGT l_U1068 (:178, :259) have identical init/neighbours and the
+//    same 56 uses with the same assigned-value histogram (27 x6, 17 x5, 33 x4, 22 x4).
+//  - statics_words: highest slot the script references + 1 (IV keeps 2200, its original margin); readable_range checks it.
+struct Layout {
+  int players, turn, cards, state, statics_words, max_cards;
+};
+constexpr Layout kLayoutIV{263, 264, 617, 2146, 2200, 6};
+constexpr Layout kLayoutTLAD{235, 236, 589, 2134, 2141, 6};
+constexpr Layout kLayoutTBoGT{25, 26, 379, 1068, 1075, 2};
+Layout g_lay{};
+
+// Fills g_lay for the running game; nullptr (shared frames, no script card swap) while the episode is unknown.
 std::int32_t* script_statics() {
-  if (!episode::is_iv()) return nullptr;
+  switch (episode::current()) {
+    case episode::Id::IV: g_lay = kLayoutIV; break;
+    case episode::Id::TLAD: g_lay = kLayoutTLAD; break;
+    case episode::Id::TBoGT: g_lay = kLayoutTBoGT; break;
+    default: return nullptr;
+  }
   auto* t = static_cast<std::uint8_t*>(script::find_thread("tenpinbowl"));
   return t ? *reinterpret_cast<std::int32_t**>(t + 0x58) : nullptr;
 }
@@ -286,7 +310,7 @@ bool readable_range(const void* p, std::size_t bytes) {
   return true;
 }
 
-std::int32_t* card_at(std::int32_t* st, int i) { return st + kCardFirst + kCardWords * i; }
+std::int32_t* card_at(std::int32_t* st, int i) { return st + g_lay.cards + 1 + kCardWords * i; }
 bool is_empty(std::int32_t v) { return v == -99 || v == kEmptyOld; }
 std::int32_t* roll_at(std::int32_t* c, int i) { return c + kWRoll0 + 4 * i + 1; } // -> {pins, frame, kind}
 
@@ -314,13 +338,13 @@ bool card_ok(std::int32_t* c, std::string& why) {
   return true;
 }
 
-// The statics look like tenpinbowl's: size words, counts and ranges. `players` out: l_U263.
+// The statics look like tenpinbowl's: size words, counts and ranges. `players` out: IV l_U263.
 bool script_ok(std::int32_t* st, int& players, std::string& why) {
-  if (st[kSCards] != kMaxCards) return why = "card array size", false;
-  players = st[kSPlayers];
-  if (players < 1 || players > kMaxCards) return why = "player count", false;
-  if (st[kSTurn] < 0 || st[kSTurn] >= players) return why = "turn index", false;
-  if (st[kSState] < 0 || st[kSState] > 80) return why = "state variable", false;
+  if (st[g_lay.cards] != g_lay.max_cards) return why = "card array size", false;
+  players = st[g_lay.players];
+  if (players < 1 || players > g_lay.max_cards) return why = "player count", false;
+  if (st[g_lay.turn] < 0 || st[g_lay.turn] >= players) return why = "turn index", false;
+  if (st[g_lay.state] < 0 || st[g_lay.state] > 80) return why = "state variable", false;
   for (int i = 0; i < players && i < 2; ++i)
     if (!card_ok(card_at(st, i), why)) return why = std::format("card {}: {}", i, why), false;
   return true;
@@ -433,7 +457,7 @@ void abandon_script_mode(const char* why) {
 void begin_script_mode() {
   g_script_mode = false;
   std::int32_t* st = script_statics();
-  if (!st || !readable_range(st, kStaticsWords * sizeof(std::int32_t))) {
+  if (!st || !readable_range(st, g_lay.statics_words * sizeof(std::int32_t))) {
     log::warn("Bowling: tenpinbowl's statics are not readable; frames shared");
     return;
   }
@@ -483,7 +507,7 @@ void roll_processed(const Frame& f, std::int32_t* st, int k, DWORD now) {
   g_seen_frame[k] = ck[kWFrame];
   const bool mine = !who->frames.empty() && frame_complete(who->frames.back());
   log::info("Bowling: {} rolled ({} rolls, frame {}, turn state {}){}", who->name, g_seen_cnt[k], ck[kWFrame] + 1,
-            st[kSState], over_frame ? ", frame over" : "");
+            st[g_lay.state], over_frame ? ", frame over" : "");
   if (mine != over_frame)
     log::warn("Bowling: the script's frame end ({}) and the mod's rules ({}) disagree for {}", over_frame, mine,
               who->name);
@@ -529,7 +553,7 @@ void script_tick(const Frame& f, DWORD now) {
   std::int32_t* st = script_statics();
   if (!st) return;
   if (st != g_checked_statics) {
-    if (!readable_range(st, kStaticsWords * sizeof(std::int32_t))) return abandon_script_mode("statics moved");
+    if (!readable_range(st, g_lay.statics_words * sizeof(std::int32_t))) return abandon_script_mode("statics moved");
     g_checked_statics = st;
   }
   int players = 0;
