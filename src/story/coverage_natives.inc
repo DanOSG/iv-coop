@@ -2,7 +2,6 @@
 // {hash, native, category}: story natives co-op doesn't sync yet.
 {0x5C9807CA, "TASK_CHAT_WITH_CHAR", "npc_anims"},
 {0x76D72D89, "TASK_PICKUP_AND_CARRY_OBJECT", "npc_anims"},
-{0xA1A22A1E, "TASK_COMPLEX_PICKUP_OBJECT", "npc_anims"},
 {0x245F424F, "SET_CHAR_ANIM_CURRENT_TIME", "npc_anims"},
 {0x3C2A3334, "SET_CHAR_ANIM_SPEED", "npc_anims"},
 {0x4CD43E46, "SET_ANIM_GROUP_FOR_CHAR", "npc_anims"},
