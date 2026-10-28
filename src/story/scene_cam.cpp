@@ -11,6 +11,7 @@
 #include "game/native_hooks.h"
 #include "game/natives.h"
 #include "net/bytes.h"
+#include "sync/bowling_sync.h"
 #include "story/cutscene.h"
 #include "story/story_sync.h"
 
@@ -29,7 +30,7 @@ constexpr DWORD kSendMs = 40;            // 25 Hz
 constexpr DWORD kTimeoutMs = 1500;       // joiner: no samples this long = the scene is over
 constexpr DWORD kFadeFailsafeMs = 15000; // joiner: a fade-out of ours with no fade-in after the scene ended
 constexpr float kSnapMeters = 25.0f, kSnapDegrees = 100.0f, kSmoothSeconds = 0.045f;
-enum Op : std::uint8_t { OpCam = 0, OpEnd = 1, OpFade = 2 };
+enum Op : std::uint8_t { OpCam = 0, OpEnd = 1, OpFade = 2, OpBowlCam = 3 }; // 3: a camera only bowlers watch
 
 struct Pose {
   float p[3]{}, r[3]{}, fov = 45.0f;
@@ -37,7 +38,11 @@ struct Pose {
 
 // ---------------------------------------------------------------- host
 bool g_hosting = false;
-std::vector<n::Camera> g_cams; // cameras the story scripts made active, last = current
+struct SceneCam {
+  n::Camera cam;
+  bool bowling; // made active by tenpinbowl: only streamed while a bowling game with partners is on
+};
+std::vector<SceneCam> g_cams; // cameras the story scripts made active, last = current
 bool g_scripted = false;       // ACTIVATE_SCRIPTED_CAMS is on
 bool g_control_off = false;    // the host's player control is off
 bool g_sent_scene = false;
@@ -50,9 +55,13 @@ struct PendingFade {
 std::vector<PendingFade> g_fades;
 
 bool story_call(const Call& c) { return g_hosting && is_story_script(c.script); }
-bool scene_on() { return g_scripted && !g_cams.empty(); }
+bool scene_on() {
+  return g_scripted && !g_cams.empty() && (!g_cams.back().bowling || bowling_sync::lane_cam_wanted());
+}
 
-void drop_cam(n::Camera cam) { std::erase(g_cams, cam); }
+void drop_cam(n::Camera cam) {
+  std::erase_if(g_cams, [cam](const SceneCam& s) { return s.cam == cam; });
+}
 
 void captured_fade(const Call& c, std::uint8_t kind) {
   if (story_call(c)) g_fades.push_back({kind, c.arg<std::uint32_t>(0), scene_on() || g_control_off});
@@ -64,6 +73,7 @@ void captured_control(const Call& c) {
 
 // ---------------------------------------------------------------- joiner
 bool g_scene = false; // the host's scene is on (samples keep coming)
+bool g_bowl_scene = false; // ... and it is the bowling lane camera: only for the host's bowlers
 bool g_have_sample = false;
 Pose g_target, g_cur;
 DWORD g_last_sample = 0;
@@ -125,7 +135,7 @@ void register_hooks() {
     if (!story_call(c)) return;
     const auto cam = c.arg<n::Camera>(0);
     drop_cam(cam);
-    if (c.arg<bool>(1)) g_cams.push_back(cam);
+    if (c.arg<bool>(1)) g_cams.push_back({cam, _stricmp(c.script.c_str(), "tenpinbowl") == 0});
   });
   on(kActivateScripted, "ACTIVATE_SCRIPTED_CAMS", [](const Call& c) {
     if (story_call(c)) g_scripted = c.arg<bool>(0);
@@ -169,7 +179,8 @@ void host_tick(bool hosting, net::Session& net) {
   }
   if (now - g_last_send < kSendMs) return;
   g_last_send = now;
-  const n::Camera cam = g_cams.back();
+  const n::Camera cam = g_cams.back().cam;
+  const bool bowl = g_cams.back().bowling;
   const n::Vector3 p = n::GetCamPos(cam), r = n::GetCamRot(cam);
   float fov = 45.0f;
   invoke(kGetCamFov, cam, &fov);
@@ -177,7 +188,7 @@ void host_tick(bool hosting, net::Session& net) {
   if (!g_sent_scene) log::info("Scene: host's scene began (camera {})", cam);
   g_sent_scene = true;
   net::Writer w;
-  w.put(kMsg).put(std::uint8_t{0}).put(static_cast<std::uint8_t>(OpCam)).put(p.x).put(p.y).put(p.z).put(r.x).put(
+  w.put(kMsg).put(std::uint8_t{0}).put(static_cast<std::uint8_t>(bowl ? OpBowlCam : OpCam)).put(p.x).put(p.y).put(p.z).put(r.x).put(
       r.y).put(r.z).put(fov);
   net.send_game(std::move(w.data()), false);
 }
@@ -186,12 +197,13 @@ void client_apply(std::span<const std::uint8_t> msg) {
   net::Reader r(msg);
   std::uint8_t type, sender, op;
   if (!r.get(type) || !r.get(sender) || !r.get(op)) return;
-  if (op == OpCam) {
+  if (op == OpCam || op == OpBowlCam) {
     Pose s;
     if (!r.get(s.p[0]) || !r.get(s.p[1]) || !r.get(s.p[2]) || !r.get(s.r[0]) || !r.get(s.r[1]) || !r.get(s.r[2]) ||
         !r.get(s.fov))
       return;
     g_target = s;
+    g_bowl_scene = op == OpBowlCam;
     g_last_sample = GetTickCount();
     if (!g_scene) g_have_sample = false; // a new scene: snap to its first sample
     g_scene = true;
@@ -209,6 +221,8 @@ void client_tick(bool watch) {
   const DWORD now = GetTickCount();
   const bool cutscene_on = cutscene::playing();
   if (g_scene && now - g_last_sample > kTimeoutMs) g_scene = false, g_fade_since = now;
+  // The lane camera is for the people bowling with the host, not for whoever is elsewhere in the session.
+  const bool scene = g_scene && (!g_bowl_scene || bowling_sync::participating());
   if (!watch || cutscene_on) { // our own setting, or a cutscene is playing here: stand down
     g_pending_fades.clear();
     if (g_cam_live || g_control_taken) teardown();
@@ -225,9 +239,9 @@ void client_tick(bool watch) {
     if (out) g_fade_since = now;
   }
   g_pending_fades.clear();
-  if (g_faded_out && !g_scene && now - g_fade_since > kFadeFailsafeMs) fade_in();
+  if (g_faded_out && !scene && now - g_fade_since > kFadeFailsafeMs) fade_in();
 
-  if (!g_scene) {
+  if (!scene) {
     if (g_cam_live || g_control_taken) teardown();
     return;
   }
