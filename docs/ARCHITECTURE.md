@@ -138,7 +138,7 @@ The original MP character models are still in the CE data: `M_Y_Multiplayer` and
 | **Money** | Every joiner has their **own wallet**. Mission payouts are mirrored: whenever a host story script pays the protagonist (`ADD_SCORE` on the host's player), each joiner gets the same amount. Everything else is per player: cash picked up (dropped by peds, robberies, pickups) goes to whoever collects it, and spending (guns, clothes, food, taxis, car washes, hospital and arrest fees) comes out of that player's own wallet. A joiner's wallet is stored per host campaign (`plugins/iv-coop/wallets.ini`, keyed by host and save) and restored when they rejoin that campaign. Their single-player money is put back when they leave. |
 | **Friends, dating, activities, minigames, TV, internet, taxis** | Host-driven. Joiners can come along as passengers or spectators but can't start them. |
 | **Ambient world** | Each client has its own traffic and peds around itself. Where players overlap, ambient entities near more than one player become networked (sim owner = nearest). |
-| **EFLC (TLAD / TBoGT)** | Same system. The host picks the episode and it stays fixed for the session. |
+| **EFLC (TLAD / TBoGT)** | Same system. The host's episode is the session's; a joiner in another episode is told which one to start and leaves (message 67). |
 
 ### Radio: listen together (beyond the original MP)
 
@@ -464,7 +464,23 @@ docs/
     `SET_CHAR_PROP_INDEX_TEXTURE` (ped, type, index, texture) is a guess; the phone list window is scrolled by
     setting the visible-window slots (`rebuild_display` `select_item`) and its capacity is unknown (rows are cut to
     fit); restoring single-player Niko after an idle preview restores his components, not other state.
-- **M10:** TLAD and TBoGT.
+- **M10: TLAD and TBoGT** (first slice 2026-10-28). The Complete Edition runs all three from one GTAIV.exe.
+  - `game/episode`: `GET_CURRENT_EPISODE` (0 IV, 1 TLAD, 2 TBoGT), re-read every 2 s; names, protagonist; the
+    protagonist model is the generic `player` unless the running player is measured wearing another real ped model
+    while nothing of ours has changed it.
+  - `sync/episode_sync`, message 67 (reliable): `[67][sender][op][episode][protagonist model u32]`. Op 0 host ->
+    everyone on each join; a joiner in another episode leaves and the phone says which episode to start. Op 1 joiner
+    -> host on connecting; the host only warns. No protocol bump.
+  - Phone: the phone global is 91 / 94 / 95, and the episodes' `spcellphonemain` statics are IV's shifted up by 5
+    (same struct sizes; checked in the decompiled scripts), so `main_statics()` returns the shifted base. If the main
+    menu's list doesn't look right for 90 frames the co-op menu turns off (`phone::unavailable()`) and F10 hosts with
+    a random password / F11 joins `[Net] JoinAddress`.
+  - The joiner model is checked against the episode's image (`IS_MODEL_IN_CDIMAGE`), falling back to
+    `M_Y_MULTIPLAYER`; the cutscene swap uses the episode's protagonist model; blip sprite scan up to 256.
+  - Bowling's script card swap is IV-only (the episodes' `tenpinbowl` statics are laid out differently); there
+    bowling uses shared frames. The mission runner and mission saves are IV-only.
+  - **To verify in game:** everything; especially the episode phone menu, Johnny/Luis cutscene swaps, and the
+    episodes' own HUD elements (gang/club meters) and minigames (TBoGT club, base jumps, fight club, TLAD gang wars).
 - **Co-op settings** (phone: Multiplayer > Co-op Settings; done 2026-10-26, sync/session_settings): the host's
   settings are the session's, saved in `iv-coop.ini [Session]` and sent to joiners. Friendly fire: **Off** (no
   lock-on, no damage), **On** (lock-on and damage, with the engine's own melee between players: partners' copies are

@@ -52,6 +52,10 @@ one-click installer. Status: version 0.6.1; much of it is new and still being te
 - **Multiplayer bowling:** partners take turns on the host's lane, each playing a full 10 frames on a shared
   scorecard, watching the lane camera; the AI friend plays its own turns.
 
+## The Lost and Damned and The Ballad of Gay Tony
+- Co-op works in the Episodes too: everyone plays the host's episode (a partner in another one is told which to
+  start), with the episode's own phone menu and protagonist. Bowling there uses shared frames.
+
 ## Combat
 - **Team fire** setting: Off / On / No aim (default No aim). Damage from guns, cars, explosions, melee and fire
   (molotovs) between players follows it.
@@ -90,4 +94,5 @@ per-player traffic log every 10 s.
 ## Known gaps
 - Most 0.6.x sync features, invasions, bowling, the character creator, ambient sync and the cutscene stand-in are
   untested in play.
-- Not done yet: The Lost and Damned and The Ballad of Gay Tony (M10), the small radio hiccup at song changes.
+- The Episodes support is new and untested in play; their own minigames and HUD meters aren't synced yet.
+- Not done yet: the small radio hiccup at song changes.
