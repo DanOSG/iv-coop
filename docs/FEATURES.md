@@ -54,7 +54,7 @@ one-click installer. Status: version 0.7.0; much of it is new and still being te
 
 ## The Lost and Damned and The Ballad of Gay Tony
 - Co-op works in the Episodes too: everyone plays the host's episode (a partner in another one is told which to
-  start), with the episode's own phone menu and protagonist. Bowling there uses shared frames.
+  start), with the episode's own phone menu and protagonist. Bowling there uses the same script scorecard as IV (TBoGT's alley holds two bowlers).
 - What the host's story does to the host's player happens to partners too: weapons given or taken (TBoGT's parachute
   before every skydive), armour, vests, health, no-jump/no-crouch sections. Every player gets their own parachute.
 - Race checkpoints and the GPS race track (street races, TLAD bike races, TBoGT races and base jumps) show for

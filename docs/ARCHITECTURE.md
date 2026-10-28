@@ -477,8 +477,9 @@ docs/
     a random password / F11 joins `[Net] JoinAddress`.
   - The joiner model is checked against the episode's image (`IS_MODEL_IN_CDIMAGE`), falling back to
     `M_Y_MULTIPLAYER`; the cutscene swap uses the episode's protagonist model; blip sprite scan up to 256.
-  - Bowling's script card swap is IV-only (the episodes' `tenpinbowl` statics are laid out differently); there
-    bowling uses shared frames. The mission runner and mission saves are IV-only.
+  - Bowling's script card swap works in all three games with a per-episode static-slot table (`Layout` in
+    `bowling_sync.cpp`, matched from the decompiled `tenpinbowl`; TBoGT's card array holds 2, not 6; unmapped/unknown
+    episode or a failed layout check falls back to shared frames). The mission runner and mission saves are IV-only.
   - **Self-test** (`story/self_test`, `tools/self_test.py`, 2026-10-28): one launch switches IV -> TLAD -> TBoGT the
     way the frontend's Episodes menu does (action 0x3E with `[0x1160C08]` = episode; `[0x11D6FD0]` requested,
     `[0x11D6FD4]` current episode, applied by 0x5C1980), opens the phone (a short "up" for the phone scripts, a
