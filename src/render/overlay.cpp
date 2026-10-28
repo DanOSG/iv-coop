@@ -9,6 +9,7 @@
 #include "core/crash.h"
 #include "core/log.h"
 #include "game/script.h"
+#include "render/banner.h"
 #include "sync/ghost.h"
 #include "sync/remote_players.h"
 
@@ -31,6 +32,7 @@ void init_imgui(IDirect3DDevice9* dev) {
   io.IniFilename = nullptr; // don't drop imgui.ini into the game folder
   io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
   ImGui::StyleColorsDark();
+  banner::load_font(); // before the backend builds the atlas
   ImGui_ImplWin32_Init(g_window);
   ImGui_ImplDX9_Init(dev);
   g_ready = true;
@@ -153,8 +155,11 @@ void draw_scripts() {
 }
 
 void draw() {
-  draw_status();
-  if (g_show_scripts) draw_scripts();
+  if (g_visible) {
+    draw_status();
+    if (g_show_scripts) draw_scripts();
+  }
+  banner::draw(); // event banners show even with the debug overlay hidden
 }
 } // namespace
 
@@ -178,7 +183,7 @@ void on_present(IDirect3DDevice9* dev) {
   if (g_frames == 1 || g_frames % 3600 == 0) log::debug("Present frame {}", g_frames);
 
   poll_toggle();
-  if (!g_visible) return;
+  if (!g_visible && !banner::active()) return;
 
   ImGui_ImplDX9_NewFrame();
   ImGui_ImplWin32_NewFrame();

@@ -18,6 +18,7 @@
 #include "game/netprobe.h"
 #include "game/radio_probe.h"
 #include "game/phone.h"
+#include "render/banner.h"
 #include "net/steam.h"
 #include "story/call_log.h"
 #include "story/coverage.h"
@@ -112,6 +113,7 @@ void startup(HMODULE self) {
   const Config cfg = load_config(dir / "iv-coop.ini");
   session_settings::load(dir / "iv-coop.ini");
   wallet::configure(dir);
+  banner::configure(self, dir);
   character::configure(dir);
   story::coverage::configure(dir);
   story::runner::configure(dir);

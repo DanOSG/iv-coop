@@ -7,17 +7,19 @@
 // Multiplayer > Invade finds it. Invaders are joiners with the Invader role: up to 4 beside the co-op group's 4.
 //
 // Invaders (client side): they play the host's world like joiners (story scripts frozen) but take no part in the
-// host's story (remote_players drops the story messages, no wallet, no downed/revive, no regroup). When their FBI
+// host's story (remote_players drops the story messages, no wallet, no regroup). When their FBI
 // agent model is worn they spawn together: the lowest-id invader picks a road node 200-400 m from the target (the
 // host's protagonist), creates an FBI car there, and the others warp into its passenger seats. They get an FBI
-// loadout and hunt the target; their only blip is the target's (plus their own team's). The invasion ends - they
-// leave to their own game, position/health/weapons restored - when the window closes, the target dies (success) or
-// they are killed.
+// loadout and hunt the target; their only blip is the target's (plus their own team's). Invaders don't respawn: like
+// co-op players they go down at the health floor and are revived by other invaders (never by the invaded, and
+// invaders can't revive them). The invasion ends - they leave to their own game, position/health/weapons restored -
+// when the window closes, the target dies (success) or ALL invaders are down or dead at once (failure; the host
+// decides). Event banners (render/banner) mark the arrival and each outcome.
 //
 // Team fire between invaders and the invaded group is always on (hostile()); co-op vs co-op keeps the setting.
 //
 // Messages (65): [65][sender][sub u8][value u8]. sub 0 = Open (host -> all: the window), 1 = Result (host -> all:
-// 1 the target died, 2 the window closed).
+// 1 the target died, 2 the window closed, 3 all invaders are down), 2 = Arrived (host -> all: invaders entered).
 
 #include <cstdint>
 #include <optional>
@@ -31,8 +33,8 @@
 namespace ivc::invasion {
 
 constexpr std::uint8_t kMsg = 65;
-enum class Sub : std::uint8_t { Open = 0, Result = 1 };
-enum class Result : std::uint8_t { TargetDied = 1, WindowClosed = 2 };
+enum class Sub : std::uint8_t { Open = 0, Result = 1, Arrived = 2 };
+enum class Result : std::uint8_t { TargetDied = 1, WindowClosed = 2, InvadersDown = 3 };
 
 inline bool is_msg(std::span<const std::uint8_t> d) { return !d.empty() && d[0] == kMsg; }
 // Invaders and the invaded group are enemies whatever the Team fire setting says.
@@ -46,6 +48,7 @@ struct Player {
   bool known_pos = false;    // pos is from a received state
   natives::Vector3 pos{};
   bool dead = false;
+  bool downed = false;       // down, waiting for a revive (from their state)
 };
 
 struct Frame {

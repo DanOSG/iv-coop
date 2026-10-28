@@ -1,0 +1,5 @@
+#include "banner_res.h"
+
+// The banner font (Cinzel, SIL OFL 1.1; the license sits beside it in assets/OFL.txt), embedded so the .asi is
+// the only file to install.
+IDR_BANNER_FONT RCDATA "assets/Cinzel.ttf"

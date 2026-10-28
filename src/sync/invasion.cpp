@@ -11,7 +11,7 @@
 #include "core/log.h"
 #include "game/phone.h"
 #include "net/bytes.h"
-#include "sync/downed.h"
+#include "render/banner.h"
 #include "sync/session_settings.h"
 
 namespace ivc::invasion {
@@ -44,7 +44,7 @@ float dist2d(const n::Vector3& a, const n::Vector3& b) { return std::hypot(a.x -
 // --- host: the window ---
 bool g_open = false;
 DWORD g_poll = 0, g_closing_since = 0, g_last_send = 0, g_kick_at = 0;
-bool g_result_sent = false;
+bool g_result_sent = false, g_down_sent = false;
 int g_invaders_seen = 0;
 
 void host_close(net::Session& net, bool had_invaders) {
@@ -64,7 +64,12 @@ void host_tick(const Frame& f, net::Session& net) {
   int invaders = 0;
   for (const Player& p : f.players) invaders += p.role == net::Role::Invader;
   if (invaders > g_invaders_seen) phone::notify("Invaders have entered your game: FBI agents are hunting you!");
+  if (invaders > 0 && g_invaders_seen == 0) { // the first one in: the invaded group gets the banner
+    banner::show(banner::Kind::Invading, "FBI INVADING");
+    send(net, Sub::Arrived, 1);
+  }
   g_invaders_seen = invaders;
+  if (!invaders) g_down_sent = false;
 
   if (g_kick_at && now >= g_kick_at) {
     g_kick_at = 0;
@@ -95,12 +100,27 @@ void host_tick(const Frame& f, net::Session& net) {
     send(net, Sub::Open, 1);
   }
 
+  // Every invader down or dead at once (nobody left to revive them): the invasion failed.
+  if (invaders > 0 && !g_down_sent) {
+    bool all = true;
+    for (const Player& p : f.players)
+      if (p.role == net::Role::Invader) all = all && p.known_pos && (p.downed || p.dead);
+    if (all) {
+      g_down_sent = true;
+      send(net, Sub::Result, static_cast<std::uint8_t>(Result::InvadersDown));
+      banner::show(banner::Kind::Victory, "FBI VANQUISHED");
+      g_kick_at = now + 2500; // they leave on their own; this is the backstop
+      log::info("Invasion: every invader is down; the invasion failed");
+    }
+  }
+
   // The target dying is the invaders' win.
   const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
   const bool dead = me && n::DoesCharExist(me) && n::IsCharDead(me);
   if (dead && invaders > 0 && !g_result_sent) {
     g_result_sent = true;
     send(net, Sub::Result, static_cast<std::uint8_t>(Result::TargetDied));
+    banner::show(banner::Kind::Defeat, "DEFEATED BY THE FBI");
     log::info("Invasion: the target died; the invaders win");
   }
   if (!dead) g_result_sent = false;
@@ -108,7 +128,7 @@ void host_tick(const Frame& f, net::Session& net) {
 
 void host_reset(net::Session& net) {
   if (g_open) net.set_invasion_open(false);
-  g_open = false, g_closing_since = 0, g_kick_at = 0, g_result_sent = false, g_invaders_seen = 0;
+  g_open = false, g_closing_since = 0, g_kick_at = 0, g_result_sent = g_down_sent = false, g_invaders_seen = 0;
 }
 
 // --- invader ---
@@ -141,9 +161,10 @@ float rnd(float lo, float hi) { return std::uniform_real_distribution<float>(lo,
 
 void set_stage(Stage s) { g_stage = s, g_stage_since = GetTickCount(); }
 
-void leave(const std::string& why) {
+void leave(const std::string& why, const char* banner_text = nullptr, banner::Kind kind = banner::Kind::Defeat) {
   if (g_leave) return;
   g_leave = why;
+  if (banner_text) banner::show(kind, banner_text);
   log::info("Invasion: leaving ({})", why);
 }
 
@@ -179,18 +200,21 @@ void hunting(const Frame& f, n::Ped me) {
 
 void invader_tick(const Frame& f) {
   if (g_leave) return;
-  if (g_result == static_cast<std::uint8_t>(Result::TargetDied)) return leave("Target eliminated: invasion successful! Back to your own game.");
+  if (g_result == static_cast<std::uint8_t>(Result::TargetDied))
+    return leave("Target eliminated: invasion successful! Back to your own game.", "TARGET ELIMINATED", banner::Kind::Victory);
+  if (g_result == static_cast<std::uint8_t>(Result::InvadersDown))
+    return leave("All invaders are down: the invasion failed. Back to your own game.", "INVASION FAILED");
   if (g_result == static_cast<std::uint8_t>(Result::WindowClosed) || g_window_closed)
     return leave("The invasion window closed. Back to your own game.");
   const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
   if (!me || !n::DoesCharExist(me)) return;
-  if (downed::take_invader_killed() || n::IsCharDead(me)) return leave("You were killed. Back to your own game.");
+  if (n::IsCharDead(me)) return leave("You were killed. Back to your own game.", "YOU DIED"); // downed is the usual end; this is a real death
   if (!f.ready) return;
   const DWORD now = GetTickCount();
 
   const Player* target = find(f, net::kHostId);
   if (target && target->dead && g_stage == Stage::Hunting)
-    return leave("Target eliminated: invasion successful! Back to your own game.");
+    return leave("Target eliminated: invasion successful! Back to your own game.", "TARGET ELIMINATED", banner::Kind::Victory);
   if (!g_police_ignored) {
     invoke(kSetPoliceIgnorePlayer, n::GetPlayerId(), true); // FBI: the police don't bother us
     g_police_ignored = true;
@@ -320,7 +344,15 @@ void on_message(const net::GameMessage& m) {
   if (sub == static_cast<std::uint8_t>(Sub::Open)) {
     if (g_active && value == 0) g_window_closed = true;
   } else if (sub == static_cast<std::uint8_t>(Sub::Result)) {
-    if (g_active) g_result = value;
+    if (g_active) {
+      g_result = value;
+    } else if (value == static_cast<std::uint8_t>(Result::TargetDied)) { // the invaded group (a co-op joiner)
+      banner::show(banner::Kind::Defeat, "DEFEATED BY THE FBI");
+    } else if (value == static_cast<std::uint8_t>(Result::InvadersDown)) {
+      banner::show(banner::Kind::Victory, "FBI VANQUISHED");
+    }
+  } else if (sub == static_cast<std::uint8_t>(Sub::Arrived)) {
+    if (!g_active) banner::show(banner::Kind::Invading, "FBI INVADING");
   }
 }
 
@@ -336,7 +368,6 @@ void begin(n::Ped me) {
   g_leave.reset();
   g_window_closed = false;
   g_result = 0;
-  downed::take_invader_killed();
   g_origin = {};
   if (!me || !n::DoesCharExist(me)) return;
   g_origin.valid = true;
