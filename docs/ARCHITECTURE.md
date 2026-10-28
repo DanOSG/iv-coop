@@ -383,18 +383,50 @@ docs/
     14 s) and applies standard scoring per player. The host sends the whole view (names, frames, current player)
     reliably on change and every 2 s; every machine draws it as an overlay (`DRAW_RECT` +
     `DISPLAY_TEXT_WITH_LITERAL_STRING`, left of screen), partner gets a "Your turn" line.
-  - **Limits of the slice (what remains):** (1) The game is the script's 10 frames shared by everyone (2 players: 5
-    frames each). A full 10 each needs the script's frame counter held: `phone.cpp` shows statics are reachable
-    (`find_thread(..)` + 0x58 -> statics, slot N = `l_U<N>`); `tenpinbowl`'s card is `l_U617[player]` with a
-    452-byte stride (`_fU388` frame index, `_fU444` finished, `_fU4[]` rolls, `_fU344[]` frame scores) and the turn
-    in `l_U264`, player count `l_U263` (= the player's group size). Swapping the slot-0 card per turn, and clearing
-    `_fU444`/`l_U1353`, is the way, but the layout isn't verified against CE and the timing against the script's
-    own frame transition needs a live look. (2) Partners have no camera: the lane cams are scripted on the host
-    (stream `GET_SCRIPT_CAM` pos/rot/fov to the partner as a spectator cam), and their character isn't frozen
-    while they aim. (3) A friend in the party (AI bowler, `l_U263 > 1`) isn't detected: its throws would be
-    scored as the current player's. (4) Whether the lane's pins/ball reach partners as networked objects is
-    unchecked; they only matter once (2) exists. (5) All of the input mapping (control ids, the stick gesture
-    with a partner's pad) is from the decompile and needs an in-game run.
+  - **Second slice (2026-10-28, `sync/bowling_sync` + `story/scene_cam`, built, statics layout and timing untested in game):**
+    - **Full 10 frames each.** The script's card is read and written directly (tenpinbowl statics: `find_thread` + 0x58).
+      Layout (`l_U617` array size word at static 617 = 6; element i at 618 + 113 i): word 0 ped, word 1 size 21 of
+      `_fU4`, roll j = size word 3 at 2+4j then {pins, frame, kind} at 3+4j.., `_fU344` size 10 at 86, `_fU388` frame at
+      97, `_fU396` at 99, `_fU400` size 10 at 100, `_fU444` finished at 111, `_fU448` at 112. Every size word, range
+      (frame 0..9, flags 0/1, pins 0..10, kinds 0..4, no gaps in the rolls), `l_U617` = 6, `l_U263` 1..6, `l_U264` <
+      `l_U263`, `l_U2146` 0..80 and that the statics block is readable (VirtualQuery) is checked at the first throw and
+      every tick; the script must also be at its very start (no rolls). Any failure logs why and keeps the first slice
+      (pin counting, frames shared); a failure mid-game (`abandon_script_mode`) falls back the same way.
+    - **Method.** Card 0 is a window onto whichever human is bowling. When the script records a roll (roll count of
+      card 0 or 1 grows) the mod rebuilds that bowler's frames from the script's rolls (the script's own result, no
+      pin counting), and the frame is over when `_fU388` moved or `_fU444` is set (the mod's own frame rules are
+      cross-checked, a disagreement is logged). At a frame end it saves card 0's words (1..112, never the ped) for that
+      human and writes the next human's saved card (or a fresh one, as `sub_11987` would) over them in the same tick the
+      roll was seen, which is at least a few script ticks before the script's own `sub_13200` (turn select + game-over
+      test, in state 1 or in state 35 after an AI roll) runs. The last bowler's real `_fU444` ends the game through the
+      script's normal path (`l_U1353`). Rotation is one frame per bowler, in the order host, partners, friend; finished
+      and absent players are skipped. A partner who leaves mid-frame: the host's own input finishes that frame for them.
+    - **AI friend.** `l_U263 == 2` (one friend) adds a card named after the friend's model (Roman, Jacob, Brucie, ...;
+      guessed `IG_*` model names, else "Friend") as the last bowler. Their rolls are read from script card 1 and never
+      credited to a human; the script still plays the friend's throw. The mod steers `sub_13200` (which picks the turn
+      from the cards' frame counters) by faking two fields: card 1 `_fU388` reads 9 while a human is up (restored for the
+      friend), card 0 `_fU444` reads 1 while the friend is up (the human's real card is in the snapshot). More than one
+      friend (`l_U263` > 2) is not supported: frames shared as before. With a friend but nobody near the host the game
+      stays vanilla.
+    - **Lane camera.** `tenpinbowl` is a story script (not in `LocalScripts`) and uses `SET_CAM_ACTIVE` /
+      `ACTIVATE_SCRIPTED_CAMS` (lines ~409, ~5573), so `scene_cam` already captured it. Now its cameras are tagged: they
+      are streamed only while `bowling_sync::lane_cam_wanted()` (a game with a partner) and as op 3, which a joiner only
+      applies while `bowling_sync::participating()` (their id is on the scorecard); far-away joiners and the solo host are
+      untouched. The camera starts with the first throw (the game is only known then).
+    - **Partner freeze and controls hint.** On their own turn a partner's `SET_PLAYER_CONTROL` is switched off (back on
+      when the turn, the game or the session ends; the script reads the sticks with the host's control off too). They
+      see a "YOUR TURN" block: aim left/right, hold the throw control, pull back then push forward (pad and mouse
+      wording by `IS_USING_CONTROLLER`); the game's own `TEN_PIN_*` help also arrives as story text.
+  - **Needs an in-game check:** (1) the log line "driving the script's scorecard" (else the warning names the failed
+    layout check; if the roll entries have no per-entry size word the layout test fails safely); (2) two or three
+    players bowl a full 10 frames each, the script's scoreboard shows the current bowler's card and the game ends only
+    after the last bowler's 10th; (3) the swap lands before the script's next turn select (a late swap shows as the same
+    player bowling twice, "frame end disagree" warnings or odd turn state numbers in the log); (4) the friend's turns
+    land in the friend's card and the order host, partner, friend holds (the faked `_fU388`/`_fU444` steering); (5)
+    partners see the lane camera, nobody else does, and control returns after the game; (6) the input mapping (control
+    ids, `GET_PAD_PITCH_ROLL` is not answered), and that disabling a partner's control doesn't mute their input reads;
+    (7) the lane's pins/ball reaching partners as networked objects is still unchecked (they watch from the host's
+    camera). "Play again" after a game is vanilla (the 10 s over timer locks the mod out of the replay).
 - **M9:** MP character creator (built 2026-10-27, `sync/character`; untested in game). It doesn't depend on the other
   milestones.
   - **Data:** a character = model (`M_Y_MULTIPLAYER` / `F_Y_MULTIPLAYER`) + drawable and texture for components 0..8 +

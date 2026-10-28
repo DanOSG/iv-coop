@@ -13,9 +13,12 @@
 // 15 degrees) and scores each player's rolls with standard bowling rules. The scorecard is drawn as an
 // overlay on every machine with each player's name, frames and score.
 //
-// The game is the script's 10 frames shared by all the players (so 2 players get 5 frames each). Not yet:
-// a full 10 frames each (needs the script's frame counter held, docs/ARCHITECTURE.md), a camera for the
-// partner, and bowling with a friend (AI bowler) in the party.
+// Full games: the script's own card (tenpinbowl's l_U617[0], layout-checked) is swapped between the humans at
+// each frame end so every player bowls all 10 frames, and the mod reads the script's rolls rather than counting
+// pins itself. An AI friend (the script's card 1) is a bowler in the rotation too. If the statics don't look
+// like the expected layout the older behaviour stays: pin counting, the script's 10 frames shared by everyone.
+// Partners at the lane also watch the host's lane camera (story/scene_cam) and their character stands still on
+// their turn. docs/ARCHITECTURE.md ("Multiplayer bowling") has the details and what needs an in-game check.
 
 #include <cstdint>
 #include <span>
@@ -49,6 +52,11 @@ void register_hooks();
 // Game thread, every frame, from a script context (draws the scorecard).
 void tick(const Frame& f, net::Session& net);
 void on_message(const net::GameMessage& m);
+
+// Host: a bowling game with at least one partner is on (scene_cam streams the lane camera only then).
+bool lane_cam_wanted();
+// Joiner: the host's game lists us as a bowler (we watch the lane camera).
+bool participating();
 
 // Scoring (exposed for tests): one frame's rolls.
 struct Roll {

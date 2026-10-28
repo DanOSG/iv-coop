@@ -11,9 +11,13 @@
 // is off) are replayed too; a fade-in always undoes a fade-out we made. The "Scenes" co-op setting picks Watch
 // (the default) or Keep control (joiners ignore all of it). Not mirrored: camera shake, depth of field.
 //
+// The bowling lane's camera (tenpinbowl is a story script like the rest) is streamed too, but only while a bowling
+// game with partners is on, and only the host's bowlers apply it (op 3, the payload of op 0).
+//
 // Messages: [kMsg][sender][op] then
 //   op 0 camera : 7 floats x y z rx ry rz fov
 //   op 1 end    : (the scene is over)
+//   op 3 camera : as op 0, the bowling lane camera
 //   op 2 fade   : u8 kind (0 out, 1 in, 2/3 the unhacked variants), u32 ms, u8 scene
 
 #include <cstdint>

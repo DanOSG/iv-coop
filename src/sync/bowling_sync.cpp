@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstring>
 #include <format>
+#include <map>
 
 #include "core/log.h"
 #include "game/native_hooks.h"
@@ -25,7 +26,7 @@ constexpr std::uint32_t kCreateObjectNoOffset = 0x75C51A26, kSetObjectInitialVel
                         kIsUsingController = 0x669D053F, kSetTextScale = 0x02C069E5, kSetTextColour = 0x19C967B5,
                         kSetTextDropshadow = 0x58F5023F, kSetTextFont = 0x75363BB5, kSetTextWrap = 0x19D006EB,
                         kSetTextProportional = 0x15585A65, kSetTextBackground = 0x768F5140,
-                        kDisplayLiteral = 0x661B239A, kDrawRect = 0x3B2526E3;
+                        kDisplayLiteral = 0x661B239A, kDrawRect = 0x3B2526E3, kSetPlayerControl = 0x1A6203EA;
 // tenpinbowl's models (CREATE_OBJECT_NO_OFFSET): the pin and the ball.
 constexpr std::int32_t kPinModel = -190707996, kBallModel = -1862626618;
 // The script's own "pin is down" test (sub_65157): moved over 0.2 m on the ground, or tilted over 15 degrees.
@@ -34,6 +35,7 @@ constexpr DWORD kBurstMs = 700; // pins created closer together than this are on
 constexpr DWORD kMinRollMs = 2500, kQuietMs = 1200, kMaxRollMs = 14000;
 constexpr DWORD kInputMs = 33, kInputStaleMs = 500, kResendMs = 2000, kStaleMs = 6000, kOverShowMs = 10000;
 constexpr int kFrames = 10;
+constexpr std::uint8_t kFriendId = 0xFE; // the AI friend's card in the scorecard (not a session id)
 
 enum Op : std::uint8_t { OpState = 0, OpInput = 1 };
 
@@ -98,7 +100,20 @@ Input g_in;                 // the controlling partner's latest input
 std::uint8_t g_in_just = 0; // latched just-pressed bits, cleared as the script reads them
 DWORD g_in_at = 0;
 
+// Host: driving the script's own card (see "the script's card" below).
+bool g_script_mode = false;
+std::uint8_t g_slot0_owner = 0;                              // whose card the script's slot 0 holds now
+std::map<std::uint8_t, std::vector<std::int32_t>> g_snaps;   // each human's card while another bowler's is in slot 0
+std::int32_t g_empty = -99;                                  // the script's "no roll yet" value, as seen in memory
+int g_seen_cnt[2] = {0, 0}, g_seen_frame[2] = {0, 0};        // per script card: rolls recorded, frame index
+bool g_friend = false;                                       // l_U263 == 2: card 1 is the AI friend
+bool g_friend_virtual = false, g_slot0_done_virtual = false; // our overrides that steer the script's own rotation
+std::int32_t g_friend_real_frame = 0;
+bool g_proxy = false;                                        // the controlling partner left: the host finishes the frame
+const std::int32_t* g_checked_statics = nullptr;
+
 // Partner.
+bool g_froze = false;       // we switched our player's control off for our turn
 std::uint8_t g_rx_seq = 0;
 bool g_rx_valid = false;
 DWORD g_rx_at = 0;
@@ -152,6 +167,9 @@ void reset_game() {
   g_pins.clear();
   g_phase = Phase::Aim;
   g_in = {}, g_in_just = 0;
+  g_script_mode = g_friend = g_friend_virtual = g_slot0_done_virtual = g_proxy = false;
+  g_snaps.clear();
+  g_checked_statics = nullptr;
 }
 
 Card* card_of(std::uint8_t id) {
@@ -161,7 +179,7 @@ Card* card_of(std::uint8_t id) {
 }
 
 bool in_session(const Frame& f, std::uint8_t id) {
-  return id == g_my_id || std::any_of(f.players.begin(), f.players.end(), [&](const Player& p) { return p.id == id; });
+  return id == g_my_id || id == kFriendId || std::any_of(f.players.begin(), f.players.end(), [&](const Player& p) { return p.id == id; });
 }
 
 // Next player in the rotation that is still in the session.
@@ -225,12 +243,313 @@ void start_game(const Frame& f, const std::vector<const Player*>& mates) {
   log::info("Bowling: game started, host plus{}", who);
 }
 
+// ---- the script's card (host)
+//
+// tenpinbowl's scorecard is l_U617[player] (one 113-word element per bowler, element i at static 618 + 113 i,
+// the array's size word at 617): _fU0 the ped, _fU4[21][3] the rolls ({pins, frame, kind}; -99 = unused,
+// 999 = unused kind), _fU344[10] frame scores, _fU388 the frame being bowled (0..9), _fU396 the strike run,
+// _fU400[10] and _fU444 "finished". Nested arrays carry a size word each, so the layout is checkable: every
+// size word must match before we touch anything. The script always bowls card 0 as the player and card 1 as
+// an AI friend (l_U263 = 2); its own sub_13200 picks the turn between them from the cards' frame counters.
+//
+// Method: the script's card 0 is a window onto whichever *human* is bowling. When the script finishes a
+// frame (a roll was recorded and _fU388 moved on, or _fU444 was set), we save card 0's words for that human
+// and write the next bowler's saved card (or a fresh one) over them, before the script's next
+// sub_13200/frame start. The script then plays a full 10 frames for each human and ends itself when card 0
+// (and card 1) are finished. With a friend we steer sub_13200 by faking the two fields it reads: card 1's
+// _fU388 reads 9 while a human is up (nothing is "ahead" of it), card 0's _fU444 reads 1 while the friend is up.
+constexpr int kStaticsWords = 2200;
+constexpr int kSPlayers = 263, kSTurn = 264, kSCards = 617, kSState = 2146;
+constexpr int kCardWords = 113, kMaxCards = 6, kCardFirst = kSCards + 1;
+constexpr int kWRolls = 1, kWRoll0 = 2, kWScores = 86, kWFrame = 97, kWMarks = 100, kWFinished = 111;
+constexpr int kNumRolls = 21;
+constexpr std::int32_t kEmptyOld = 65437; // how the decompile prints -99
+
+std::int32_t* script_statics() {
+  auto* t = static_cast<std::uint8_t*>(script::find_thread("tenpinbowl"));
+  return t ? *reinterpret_cast<std::int32_t**>(t + 0x58) : nullptr;
+}
+
+bool readable_range(const void* p, std::size_t bytes) {
+  const auto* a = static_cast<const std::uint8_t*>(p);
+  const auto* end = a + bytes;
+  while (a < end) {
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (!VirtualQuery(a, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT) return false;
+    if (!(mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE)) || (mbi.Protect & PAGE_GUARD)) return false;
+    a = static_cast<const std::uint8_t*>(mbi.BaseAddress) + mbi.RegionSize;
+  }
+  return true;
+}
+
+std::int32_t* card_at(std::int32_t* st, int i) { return st + kCardFirst + kCardWords * i; }
+bool is_empty(std::int32_t v) { return v == -99 || v == kEmptyOld; }
+std::int32_t* roll_at(std::int32_t* c, int i) { return c + kWRoll0 + 4 * i + 1; } // -> {pins, frame, kind}
+
+int roll_count(std::int32_t* c) {
+  int k = 0;
+  while (k < kNumRolls && !is_empty(roll_at(c, k)[0])) ++k;
+  return k;
+}
+
+bool card_ok(std::int32_t* c, std::string& why) {
+  if (c[kWRolls] != kNumRolls || c[kWScores] != 10 || c[kWMarks] != 10) return why = "array size words", false;
+  for (int i = 0; i < kNumRolls; ++i)
+    if (c[kWRoll0 + 4 * i] != 3) return why = "roll entry size word", false;
+  if (c[kWFrame] < 0 || c[kWFrame] > 9) return why = "frame index", false;
+  if (c[kWFinished] != 0 && c[kWFinished] != 1) return why = "finished flag", false;
+  bool gap = false;
+  for (int i = 0; i < kNumRolls; ++i) {
+    const std::int32_t* r = roll_at(c, i);
+    if (is_empty(r[0])) {
+      gap = true;
+      continue;
+    }
+    if (gap || r[0] < 0 || r[0] > 10 || r[1] < 0 || r[1] > 9 || r[2] < 0 || r[2] > 4) return why = "roll values", false;
+  }
+  return true;
+}
+
+// The statics look like tenpinbowl's: size words, counts and ranges. `players` out: l_U263.
+bool script_ok(std::int32_t* st, int& players, std::string& why) {
+  if (st[kSCards] != kMaxCards) return why = "card array size", false;
+  players = st[kSPlayers];
+  if (players < 1 || players > kMaxCards) return why = "player count", false;
+  if (st[kSTurn] < 0 || st[kSTurn] >= players) return why = "turn index", false;
+  if (st[kSState] < 0 || st[kSState] > 80) return why = "state variable", false;
+  for (int i = 0; i < players && i < 2; ++i)
+    if (!card_ok(card_at(st, i), why)) return why = std::format("card {}: {}", i, why), false;
+  return true;
+}
+
+std::vector<Roll> read_rolls(std::int32_t* c) {
+  std::vector<Roll> out;
+  std::int32_t cur = -1;
+  for (int i = 0; i < kNumRolls; ++i) {
+    const std::int32_t* r = roll_at(c, i);
+    if (is_empty(r[0])) break;
+    if (r[1] != cur) {
+      out.push_back(Roll{{0, 0, 0}, 0, static_cast<std::uint8_t>(r[1] == kFrames - 1 ? 1 : 0)});
+      cur = r[1];
+    }
+    Roll& f = out.back();
+    if (f.n < 3) f.r[f.n++] = static_cast<std::uint8_t>(r[0]);
+  }
+  return out;
+}
+
+bool frame_complete(const Roll& r) {
+  if (!r.last) return r.r[0] == 10 || r.n >= 2;
+  return r.n >= 3 || (r.n == 2 && !(r.r[0] == 10 || r.r[0] + r.r[1] == 10));
+}
+
+bool finished(const Card& c) {
+  return c.frames.size() >= static_cast<std::size_t>(kFrames) && frame_complete(c.frames.back());
+}
+
+std::vector<std::int32_t> save_card(std::int32_t* c) { return std::vector<std::int32_t>(c, c + kCardWords); }
+
+// Words 1.. only: word 0 is the ped the script bowls with.
+void load_card(std::int32_t* c, const std::vector<std::int32_t>& w) {
+  for (int i = 1; i < kCardWords; ++i) c[i] = w[i];
+}
+
+// A new game's card for card 0 (sub_11987), cloned from the live one so the size words carry over.
+std::vector<std::int32_t> fresh_card(std::int32_t* like) {
+  std::vector<std::int32_t> w = save_card(like);
+  for (int i = 0; i < kNumRolls; ++i) {
+    w[kWRoll0 + 4 * i + 1] = g_empty, w[kWRoll0 + 4 * i + 2] = g_empty, w[kWRoll0 + 4 * i + 3] = 999;
+  }
+  for (int j = 0; j < 10; ++j) w[kWScores + 1 + j] = g_empty, w[kWMarks + 1 + j] = j == 0 ? 1 : 0;
+  w[kWFrame] = w[kWFrame + 1] = w[kWFrame + 2] = 0; // _fU388, _fU392, _fU396
+  w[kWFinished] = w[kWFinished + 1] = 0;            // _fU444, _fU448
+  return w;
+}
+
+std::string friend_name(n::Ped ped) {
+  if (!ped || !n::DoesCharExist(ped)) return "Friend";
+  static const struct {
+    const char* model;
+    const char* name;
+  } kFriends[] = {{"IG_ROMAN", "Roman"},       {"IG_JACOB", "Jacob"},     {"IG_LITTLE_JACOB", "Jacob"},
+                  {"IG_BRUCIE", "Brucie"},     {"IG_PACKIE", "Packie"},   {"IG_PACKIE_MCREARY", "Packie"},
+                  {"IG_DWAYNE", "Dwayne"},     {"IG_MANNY", "Manny"},     {"IG_MALLORIE", "Mallorie"},
+                  {"IG_MICHELLE", "Michelle"}, {"IG_KATE", "Kate"},       {"IG_VLAD", "Vlad"},
+                  {"IG_FRANCIS", "Francis"},   {"IG_ANTHONY", "Anthony"}, {"IG_ELIZABETA", "Elizabeta"}};
+  const std::uint32_t m = n::GetCharModel(ped);
+  for (const auto& e : kFriends)
+    if (n::GetHashKey(e.model) == m) return e.name;
+  return "Friend";
+}
+
+// Next bowler after `from` (cyclic, `from` last) who is still in the session and has frames left.
+const Card* next_bowler(const Frame& f, std::uint8_t from) {
+  const auto& cs = g_view.cards;
+  std::size_t at = 0;
+  for (std::size_t i = 0; i < cs.size(); ++i)
+    if (cs[i].id == from) at = i;
+  for (std::size_t step = 1; step <= cs.size(); ++step) {
+    const Card& c = cs[(at + step) % cs.size()];
+    if ((c.id == kFriendId || in_session(f, c.id)) && !finished(c)) return &c;
+  }
+  return nullptr;
+}
+
+void set_friend_virtual(std::int32_t* st, bool on) {
+  if (!g_friend) return;
+  std::int32_t* c1 = card_at(st, 1);
+  if (on && !g_friend_virtual) {
+    g_friend_real_frame = c1[kWFrame];
+    c1[kWFrame] = 9; // nothing is ahead of a friend at the last frame: sub_13200 keeps/gives the turn to card 0
+    g_friend_virtual = true;
+  } else if (!on && g_friend_virtual) {
+    c1[kWFrame] = g_friend_real_frame;
+    g_seen_frame[1] = g_friend_real_frame;
+    g_friend_virtual = false;
+  }
+}
+
+void abandon_script_mode(const char* why) {
+  if (!g_script_mode) return;
+  log::warn("Bowling: leaving the script-card mode ({}); the rest is scored from the pins, frames shared", why);
+  g_script_mode = false;
+  g_proxy = false;
+  g_snaps.clear();
+  std::erase_if(g_view.cards, [](const Card& c) { return c.id == kFriendId; });
+  if (!card_of(g_view.cur_id)) g_view.cur_id = g_my_id;
+  std::size_t frames = 0;
+  for (const Card& c : g_view.cards) frames = std::max(frames, c.frames.size());
+  g_view.frame = static_cast<std::uint8_t>(std::min<std::size_t>(frames, kFrames - 1));
+  const Card* c = card_of(g_view.cur_id);
+  g_ball_in_frame = c && !c->frames.empty() && !frame_complete(c->frames.back()) ? c->frames.back().n : 0;
+  g_dirty = true;
+}
+
+// First throw with partners present: check the layout and start steering. Any doubt: stay on the pin scoring.
+void begin_script_mode() {
+  g_script_mode = false;
+  std::int32_t* st = script_statics();
+  if (!st || !readable_range(st, kStaticsWords * sizeof(std::int32_t))) {
+    log::warn("Bowling: tenpinbowl's statics are not readable; frames shared");
+    return;
+  }
+  int players = 0;
+  std::string why;
+  if (!script_ok(st, players, why)) {
+    log::warn("Bowling: tenpinbowl's statics don't match the expected layout ({}); frames shared", why);
+    return;
+  }
+  if (players > 2) {
+    log::warn("Bowling: {} bowlers in the script (more than one friend); frames shared", players);
+    return;
+  }
+  std::int32_t* c0 = card_at(st, 0);
+  std::int32_t* c1 = players == 2 ? card_at(st, 1) : nullptr;
+  if (roll_count(c0) != 0 || (c1 && roll_count(c1) != 0) || c0[kWFrame] != 0) {
+    log::warn("Bowling: the script's card is already in play ({} rolls); frames shared", roll_count(c0));
+    return;
+  }
+  g_empty = roll_at(c0, 0)[0]; // the "unused" value as the script stores it
+  g_checked_statics = st;
+  g_snaps.clear();
+  g_slot0_owner = g_my_id;
+  g_friend = c1 != nullptr;
+  g_friend_virtual = g_slot0_done_virtual = false;
+  g_proxy = false;
+  if (g_friend) {
+    g_view.cards.push_back({kFriendId, friend_name(static_cast<n::Ped>(c1[0])), {}});
+    g_friend_real_frame = c1[kWFrame];
+  }
+  g_seen_cnt[0] = g_seen_cnt[1] = 0;
+  g_seen_frame[0] = c0[kWFrame];
+  g_seen_frame[1] = c1 ? c1[kWFrame] : 0;
+  g_script_mode = true;
+  log::info("Bowling: driving the script's scorecard ({} bowler(s) in the script{}), a full 10 frames each", players,
+            g_friend ? ", one is a friend" : "");
+}
+
+// A roll was recorded in script card `k` (0: the human in slot 0, 1: the AI friend).
+void roll_processed(const Frame& f, std::int32_t* st, int k, DWORD now) {
+  std::int32_t* ck = card_at(st, k);
+  Card* who = card_of(k == 0 ? g_slot0_owner : kFriendId);
+  if (!who) return abandon_script_mode("no card for the roller");
+  who->frames = read_rolls(ck);
+  g_seen_cnt[k] = roll_count(ck);
+  const bool over_frame = ck[kWFinished] != 0 || ck[kWFrame] != g_seen_frame[k];
+  g_seen_frame[k] = ck[kWFrame];
+  const bool mine = !who->frames.empty() && frame_complete(who->frames.back());
+  log::info("Bowling: {} rolled ({} rolls, frame {}, turn state {}){}", who->name, g_seen_cnt[k], ck[kWFrame] + 1,
+            st[kSState], over_frame ? ", frame over" : "");
+  if (mine != over_frame)
+    log::warn("Bowling: the script's frame end ({}) and the mod's rules ({}) disagree for {}", over_frame, mine,
+              who->name);
+  g_dirty = true;
+  if (!over_frame) {
+    g_view.cur_id = who->id;
+    g_view.frame = static_cast<std::uint8_t>(std::min<std::size_t>(who->frames.size() - (mine ? 0 : 1), kFrames - 1));
+    return;
+  }
+  g_proxy = false;
+  if (k == 0) g_snaps[g_slot0_owner] = save_card(ck); // before any of our overrides
+  const Card* nb = next_bowler(f, who->id);
+  if (!nb) {
+    g_view.over = true;
+    g_over_at = now;
+    log::info("Bowling: game over");
+    return;
+  }
+  if (nb->id == kFriendId) {
+    // The friend is up: card 0 reads "finished" so sub_13200 moves on to card 1.
+    set_friend_virtual(st, false);
+    card_at(st, 0)[kWFinished] = 1;
+    g_slot0_done_virtual = true;
+  } else {
+    if (nb->id != g_slot0_owner || g_slot0_done_virtual) {
+      std::int32_t* c0 = card_at(st, 0);
+      const auto it = g_snaps.find(nb->id);
+      load_card(c0, it != g_snaps.end() ? it->second : fresh_card(c0));
+      g_slot0_done_virtual = false;
+      g_slot0_owner = nb->id;
+      g_seen_cnt[0] = roll_count(c0);
+      g_seen_frame[0] = c0[kWFrame];
+    }
+    set_friend_virtual(st, true);
+  }
+  g_view.cur_id = nb->id;
+  g_view.frame = static_cast<std::uint8_t>(std::min<std::size_t>(nb->frames.size(), kFrames - 1));
+  g_in = {}, g_in_just = 0;
+  log::info("Bowling: next up {} (frame {})", nb->name, g_view.frame + 1);
+}
+
+void script_tick(const Frame& f, DWORD now) {
+  std::int32_t* st = script_statics();
+  if (!st) return;
+  if (st != g_checked_statics) {
+    if (!readable_range(st, kStaticsWords * sizeof(std::int32_t))) return abandon_script_mode("statics moved");
+    g_checked_statics = st;
+  }
+  int players = 0;
+  std::string why;
+  if (!script_ok(st, players, why)) return abandon_script_mode(why.c_str());
+  if (players != (g_friend ? 2 : 1)) return abandon_script_mode("player count changed");
+  // The controlling partner left in the middle of a frame: the host bowls it out on their behalf.
+  if (!g_proxy && g_view.cur_id != g_my_id && g_view.cur_id != kFriendId && !in_session(f, g_view.cur_id)) {
+    g_proxy = true;
+    log::info("Bowling: player {} left mid-frame, the host finishes it", g_view.cur_id);
+  }
+  const int n0 = roll_count(card_at(st, 0)), n1 = g_friend ? roll_count(card_at(st, 1)) : 0;
+  if (n0 < g_seen_cnt[0] || n1 < g_seen_cnt[1]) return abandon_script_mode("the script's card was reset");
+  if (n0 > g_seen_cnt[0]) return roll_processed(f, st, 0, now);
+  if (g_friend && n1 > g_seen_cnt[1]) return roll_processed(f, st, 1, now);
+}
+
 void finish_roll(const Frame& f) {
   int down = 0;
   for (const Pin& p : g_pins)
     if (p.down) ++down;
   g_phase = Phase::Aim;
   g_pins.clear(); // a rack is only valid for the throw it was taken for
+  if (g_script_mode) return; // the script's own card says what was bowled
   apply_ball(f, std::min(down, g_standing_before));
 }
 
@@ -298,16 +617,18 @@ void host_tick(const Frame& f, net::Session& net, DWORD now) {
       g_pins.clear();
     } else {
       start_game(f, mates);
+      begin_script_mode();
       // This first ball was the host's: score it once the pins settle (the phase carries on).
     }
   }
   if (g_view.active && !g_view.over) {
     // A player who left the session drops out of the rotation (their card stays).
-    if (g_phase == Phase::Aim && !in_session(f, g_view.cur_id)) {
+    if (!g_script_mode && g_phase == Phase::Aim && !in_session(f, g_view.cur_id)) {
       advance_player(f);
       g_dirty = true;
     }
     if (g_phase == Phase::Rolling) track_roll(f, now);
+    if (g_script_mode) script_tick(f, now);
   }
   if (g_view.over && now - g_over_at > kOverShowMs) {
     reset_game();
@@ -357,7 +678,10 @@ void on_release(const Call& c) {
 }
 
 // While it is a partner's turn the script's input reads are answered with the partner's.
-bool partner_controls() { return g_hosting && g_view.active && !g_view.over && g_view.cur_id != g_my_id; }
+bool partner_controls() {
+  return g_hosting && g_view.active && !g_view.over && g_view.cur_id != g_my_id && g_view.cur_id != kFriendId &&
+         !g_proxy;
+}
 bool input_fresh() { return GetTickCount() - g_in_at < kInputStaleMs; }
 
 void on_sticks(const Call& c) {
@@ -450,7 +774,16 @@ void draw(std::uint8_t my_id) {
   }
   if (v.over) return;
   if (v.cur_id == my_id && my_id != net::kHostId) {
-    text(x0, y + 0.004f, "Your turn: pull back, then push forward on the stick", 120, 255, 120, 0.26f);
+    // The script reads the aim sideways and the throw as a pull-back then push-forward gesture (hold the fire /
+    // action control while doing it); a partner's input reaches it from here.
+    const bool pad = n::invoke<bool>(kIsUsingController);
+    text(x0, y + 0.004f, "YOUR TURN", 120, 255, 120, 0.30f);
+    text(x0, y + 0.004f + row,
+         pad ? "Left stick left/right: aim." : "Mouse left/right: aim.", 120, 255, 120, 0.26f);
+    text(x0, y + 0.004f + row * 2,
+         pad ? "Hold the throw button, pull the stick back, then push it forward."
+             : "Hold fire, pull the mouse back, then push it forward to throw.",
+         120, 255, 120, 0.26f);
   } else if (v.cur_id != my_id) {
     for (const Card& c : v.cards)
       if (c.id == v.cur_id) text(x0, y + 0.004f, std::format("{} is bowling", c.name), 200, 200, 200, 0.26f);
@@ -458,6 +791,17 @@ void draw(std::uint8_t my_id) {
 }
 
 } // namespace
+
+bool lane_cam_wanted() {
+  if (!g_hosting || !g_view.active) return false;
+  return std::any_of(g_view.cards.begin(), g_view.cards.end(),
+                     [](const Card& c) { return c.id != g_my_id && c.id != kFriendId; });
+}
+
+bool participating() {
+  if (g_hosting || !g_view.active || !g_rx_valid) return false;
+  return std::any_of(g_view.cards.begin(), g_view.cards.end(), [](const Card& c) { return c.id == g_my_id; });
+}
 
 int score(const std::vector<Roll>& frames) {
   int total = 0;
@@ -490,6 +834,10 @@ void tick(const Frame& f, net::Session& net) {
   g_hosting = f.in_session && f.hosting;
   g_my_id = f.my_id;
   if (!f.in_session) {
+    if (g_froze) {
+      n::invoke(kSetPlayerControl, n::GetPlayerId(), true);
+      g_froze = false;
+    }
     if (g_view.active || g_rx_valid) {
       reset_game();
       g_rx_valid = false;
@@ -503,7 +851,13 @@ void tick(const Frame& f, net::Session& net) {
     g_view = View{}; // the host stopped sending: its game is over
     g_rx_valid = false;
   }
-  if (!f.hosting && g_view.active && !g_view.over && g_view.cur_id == f.my_id) send_input(net, now);
+  const bool my_turn = !f.hosting && g_view.active && !g_view.over && g_view.cur_id == f.my_id;
+  if (my_turn) send_input(net, now);
+  // Our character stands still while we aim (the throw is the host's character's; the host's script has the lane).
+  if (my_turn != g_froze) {
+    n::invoke(kSetPlayerControl, n::GetPlayerId(), !my_turn);
+    g_froze = my_turn;
+  }
   draw(f.my_id);
 }
 
