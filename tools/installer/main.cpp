@@ -54,10 +54,23 @@ constexpr std::uint32_t kGameVersion[4] = {1, 2, 0, 59};
 constexpr wchar_t kPackMediafire[] =
     L"https://www.mediafire.com/file/n0zgiw6d6sxrb4y/IV.TJGMsDragnDropArchive_v1.0.0.zip/file";
 constexpr wchar_t kPackPage[] = L"https://tjgm.dev/resources/gtaiv/TJGM%27s-Drag-n%27-Drop-Archive/";
+// Tomasak's Radio Restoration Mod (GPL-3.0; the radio restoration in TJGM's pack, same audio data), from its
+// official GitHub release. Only its option files are used: "vanilla" for GTA IV's stations plus the "split"
+// set, which gives the Episodes their own station lists (EFLC_SOUNDS/eflc_GAME and the episode setup files),
+// so GTA IV's Vladivostok FM plays the original songs and the Episodes keep their club music.
+constexpr wchar_t kRadioRelease[] =
+    L"https://github.com/Tomasak/GTA-Downgraders/releases/download/iv-latest/Radio.Restoration.Mod.23-05-2025.rar";
+struct RadioOption {
+  const char* file; // inside the release, under "Resources/Radio Restorer/"
+  std::uint32_t crc; // its hashes.ini CRC-32
+};
+constexpr RadioOption kRadioSplit[] = {{"opVANILLA.dat", 0x5C3C23F6}, {"opSPLITbase.dat", 0xDF4B1508},
+                                       {"opSPLITVANILLA.dat", 0x54ECD144}};
 
 // ------------------------------------------------------------------ UI plumbing
 
-HWND g_wnd, g_log, g_progress, g_path_label, g_install, g_uninstall, g_browse, g_use_zip;
+HWND g_wnd, g_log, g_progress, g_path_label, g_install, g_uninstall, g_browse, g_use_zip, g_split_radio;
+bool g_want_split_radio = false;
 fs::path g_local_zip; // a pack zip the user downloaded themselves
 fs::path g_game; // ...\Grand Theft Auto IV\GTAIV
 bool g_busy = false;
@@ -585,6 +598,74 @@ void install_pack(const fs::path& game) {
   fs::remove_all(dl, ec);
 }
 
+std::uint32_t crc32_file(const fs::path& path) {
+  static const auto table = [] {
+    std::array<std::uint32_t, 256> t{};
+    for (std::uint32_t i = 0; i < 256; ++i) {
+      std::uint32_t c = i;
+      for (int k = 0; k < 8; ++k) c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+      t[i] = c;
+    }
+    return t;
+  }();
+  std::ifstream in(path, std::ios::binary);
+  std::uint32_t c = 0xFFFFFFFFu;
+  std::vector<char> buf(1 << 16);
+  while (in.read(buf.data(), static_cast<std::streamsize>(buf.size())) || in.gcount())
+    for (std::streamsize i = 0; i < in.gcount(); ++i)
+      c = table[(c ^ static_cast<std::uint8_t>(buf[static_cast<std::size_t>(i)])) & 0xFF] ^ (c >> 8);
+  return c ^ 0xFFFFFFFFu;
+}
+
+// The split radio: downloads the Radio Restoration release (~1 GB), takes its three option files (checked
+// against the release's own CRCs), backs up what they replace, and unpacks them over the game folder.
+// `local_rar`: an already downloaded release (tests); otherwise it is downloaded.
+void install_split_radio(const fs::path& game, const fs::path& local_rar = {}) {
+  const fs::path dl = game / "_iv-coop_download";
+  const fs::path rar = local_rar.empty() ? dl / "radio-restoration.rar" : local_rar;
+  fs::create_directories(dl);
+  if (local_rar.empty()) {
+    log(L"Downloading Tomasak's Radio Restoration release from GitHub (about 1 GB)...");
+    std::ofstream out(rar, std::ios::binary | std::ios::trunc);
+    std::uint64_t total = 0, done = 0;
+    const DWORD status = http(kRadioRelease, "GET", "", [&](const std::uint8_t* p, std::size_t n) {
+      out.write(reinterpret_cast<const char*>(p), static_cast<std::streamsize>(n));
+      done += n;
+      if (total) progress(0.85 + 0.1 * static_cast<double>(done) / static_cast<double>(total));
+    }, &total);
+    if (status != 200 || !out) throw Failure{L"the Radio Restoration download failed (HTTP " + std::to_wstring(status) + L")"};
+  }
+  const fs::path tar = tar_exe();
+  std::wstring names;
+  for (const RadioOption& o : kRadioSplit) names += L" \"Resources/Radio Restorer/" + widen(o.file) + L"\"";
+  if (run(L"\"" + tar.wstring() + L"\" -xf \"" + rar.wstring() + L"\" -C \"" + dl.wstring() + L"\"" + names) != 0)
+    throw Failure{L"couldn't unpack the Radio Restoration release"};
+  const fs::path backup = backup_dir(game);
+  std::ofstream manifest(backup / "manifest.txt", std::ios::app);
+  for (const RadioOption& o : kRadioSplit) {
+    const fs::path opt = dl / "Resources" / "Radio Restorer" / o.file;
+    if (crc32_file(opt) != o.crc) throw Failure{L"the Radio Restoration file " + widen(o.file) + L" didn't check out"};
+    std::vector<std::string> listing;
+    if (run(L"\"" + tar.wstring() + L"\" -tf \"" + opt.wstring() + L"\"", &listing) != 0)
+      throw Failure{L"couldn't read " + widen(o.file)};
+    for (const std::string& entry : listing) {
+      if (entry.empty() || entry.back() == '/' || entry.back() == '\\') continue;
+      const fs::path rel = fs::path(widen(entry)).make_preferred();
+      std::error_code ec;
+      if (!fs::exists(game / rel, ec) || fs::exists(backup / rel, ec)) continue;
+      fs::create_directories((backup / rel).parent_path());
+      fs::copy_file(game / rel, backup / rel, ec);
+      manifest << "radio-overwrote " << rel.string() << std::endl;
+    }
+    if (run(L"\"" + tar.wstring() + L"\" -xf \"" + opt.wstring() + L"\" -C \"" + game.wstring() + L"\"") != 0)
+      throw Failure{L"installing " + widen(o.file) + L" failed"};
+  }
+  std::error_code ec;
+  fs::remove_all(dl, ec);
+  log(L"Radio: GTA IV's stations play the original songs, the Episodes keep their own (Radio Restoration "
+      L"\"split\", by Tomasak).");
+}
+
 void install_mod(const fs::path& game) {
   HRSRC res = FindResourceW(nullptr, MAKEINTRESOURCEW(IDR_IVCOOP_ASI), RT_RCDATA);
   HGLOBAL data = res ? LoadResource(nullptr, res) : nullptr;
@@ -614,6 +695,7 @@ void do_install() {
     log(L"TJGM's pack (FusionFix, radio restoration, fixes) is already installed; skipping it.");
   else
     install_pack(game);
+  if (g_want_split_radio) install_split_radio(game);
   install_mod(game);
   progress(1.0);
   log(L"Done. Start GTA IV, then open the phone > Multiplayer to host or join.");
@@ -641,6 +723,7 @@ void set_busy(bool busy) {
   EnableWindow(g_uninstall, !busy && !g_game.empty());
   EnableWindow(g_browse, !busy);
   EnableWindow(g_use_zip, !busy && !g_game.empty());
+  EnableWindow(g_split_radio, !busy);
 }
 
 void show_game() {
@@ -686,6 +769,7 @@ void browse() {
 LRESULT CALLBACK wnd_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
   switch (msg) {
     case WM_COMMAND:
+      g_want_split_radio = SendMessageW(g_split_radio, BM_GETCHECK, 0, 0) == BST_CHECKED;
       if (reinterpret_cast<HWND>(lp) == g_install) start(do_install);
       if (reinterpret_cast<HWND>(lp) == g_uninstall) start(do_uninstall);
       if (reinterpret_cast<HWND>(lp) == g_browse) browse();
@@ -766,6 +850,19 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmd, int show) {
       }
       return 0;
     }
+    // --radiosplit <game> <release.rar> <report>: the split-radio step against a folder, from a local release.
+    if (argc >= 5 && std::wstring(argv[1]) == L"--radiosplit") {
+      std::wofstream report(argv[4]);
+      try {
+        fs::create_directories(backup_dir(argv[2]));
+        install_split_radio(argv[2], argv[3]);
+        report << L"ok";
+        return 0;
+      } catch (const Failure& f) {
+        report << L"failed: " << f.why;
+        return 2;
+      }
+    }
   }
   CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
   INITCOMMONCONTROLSEX icc{sizeof(icc), ICC_PROGRESS_CLASS};
@@ -795,9 +892,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmd, int show) {
   g_install = make(L"BUTTON", L"Install", BS_DEFPUSHBUTTON, 12, 80, 120, 30);
   g_uninstall = make(L"BUTTON", L"Uninstall", BS_PUSHBUTTON, 140, 80, 120, 30);
   g_use_zip = make(L"BUTTON", L"Install from a downloaded zip...", BS_PUSHBUTTON, 392, 80, 200, 30);
-  g_progress = make(PROGRESS_CLASSW, L"", 0, 12, 120, 580, 18);
+  g_split_radio = make(L"BUTTON",
+                       L"Original Vladivostok FM songs in GTA IV, club music only in the Episodes (Radio Restoration "
+                       L"\"split\", ~1 GB download)",
+                       BS_AUTOCHECKBOX | BS_MULTILINE, 12, 116, 580, 30);
+  g_progress = make(PROGRESS_CLASSW, L"", 0, 12, 150, 580, 18);
   SendMessageW(g_progress, PBM_SETRANGE32, 0, 1000);
-  g_log = make(L"EDIT", L"", WS_BORDER | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 12, 146, 580, 240);
+  g_log = make(L"EDIT", L"", WS_BORDER | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL, 12, 176, 580, 210);
   if (auto game = find_game()) g_game = *game;
   show_game();
   ShowWindow(g_wnd, show);

@@ -46,6 +46,14 @@ Free-roam is not a separate mode. It's simply the campaign between missions.
      per lobby member, P2P accepted for lobby members only; joiner: ENet connects to a local proxy port; ENet
      MTU 1200 to fit unreliable P2P). Joiner path untested until a second Steam account is available.
   3. Direct IP + manual port forward always remains as a fallback.
+- **Installer radio option** (0.6.1): a checkbox installs Tomasak's Radio Restoration "split" over TJGM's pack:
+  GTA IV's stations get the "vanilla" lists (original Vladivostok FM songs) and the Episodes their own lists
+  (`EFLC_SOUNDS.DAT15`, `eflc_GAME.DAT16`, episode `setup2.xml`/`downsplit.dat`, needs FusionFix's `DISABLE_FILE`),
+  so the Episodes keep their club music. Only the release's option files are used (`opVANILLA`, `opSPLITbase`,
+  `opSPLITVANILLA`, CRC-checked against its `hashes.ini`): TJGM's pack already has the same audio
+  (`RADIO_RESTORATION.rpf`, `RR_EP1/2_SFX.rpf`, `SOUNDS.DAT15` identical to the 23-05-2025 release's). The release
+  (~1 GB RAR, GPL-3.0) is downloaded from its official GitHub page and read with Windows' tar; replaced files go to
+  `_iv-coop_backup`. Test path: `iv-coop-setup --radiosplit <game> <release.rar> <report>`.
 - **Network hardening** (net/session, net/upnp, tools/bot --chaos):
   - **UPnP** (net/upnp): when hosting by IP (phone Host with no Steam, the host hotkey), a worker thread asks the
     router to forward the UDP port with Windows' built-in `IUPnPNAT` / `IStaticPortMappingCollection` COM API (no
