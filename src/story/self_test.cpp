@@ -299,7 +299,7 @@ void tick() {
       if (mode() == net::Mode::Joined) g_joined_seen = true;
       if (mode() == net::Mode::Idle && !g_mark_ms && !g_joined_seen) g_mark_ms = now, coop::join("127.0.0.1");
       if (episode_sync::refusals() > g_refusals_before && mode() == net::Mode::Idle) {
-        result("join other episode", true, std::format("turned away after {:.1f} s", (now - g_mark_ms) / 1000.0));
+        result("join other episode", true, std::format("turned away after {} ms", now - g_mark_ms));
         go(Step::Next);
       } else if (in_step > kRefuseTimeoutMs) {
         result("join other episode", false,

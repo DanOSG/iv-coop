@@ -38,6 +38,7 @@
 #include "sync/drunk_sync.h"
 #include "sync/player_mirror.h"
 #include "sync/race_sync.h"
+#include "sync/minigame_sync.h"
 #include "sync/scream.h"
 #include "sync/ped_looks.h"
 #include "sync/vehicle_props.h"
@@ -77,6 +78,7 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
   drunk_sync::register_hooks();
   player_mirror::register_hooks();
   race_sync::register_hooks();
+  minigame_sync::register_hooks();
   bowling_sync::register_hooks();
   ped_looks::register_hooks();
   vehicle_props::register_hooks();

@@ -12,6 +12,7 @@
 #include "game/natives.h"
 #include "net/bytes.h"
 #include "sync/bowling_sync.h"
+#include "sync/minigame_sync.h"
 #include "story/cutscene.h"
 #include "story/story_sync.h"
 
@@ -40,7 +41,7 @@ struct Pose {
 bool g_hosting = false;
 struct SceneCam {
   n::Camera cam;
-  bool bowling; // made active by tenpinbowl: only streamed while a bowling game with partners is on
+  bool bowling; // made active by a table game (tenpinbowl, pool_game, darts): only streamed to its players
 };
 std::vector<SceneCam> g_cams; // cameras the story scripts made active, last = current
 bool g_scripted = false;       // ACTIVATE_SCRIPTED_CAMS is on
@@ -56,7 +57,8 @@ std::vector<PendingFade> g_fades;
 
 bool story_call(const Call& c) { return g_hosting && is_story_script(c.script); }
 bool scene_on() {
-  return g_scripted && !g_cams.empty() && (!g_cams.back().bowling || bowling_sync::lane_cam_wanted());
+  return g_scripted && !g_cams.empty() && (!g_cams.back().bowling || bowling_sync::lane_cam_wanted() ||
+                                                         minigame_sync::cam_wanted());
 }
 
 void drop_cam(n::Camera cam) {
@@ -135,7 +137,10 @@ void register_hooks() {
     if (!story_call(c)) return;
     const auto cam = c.arg<n::Camera>(0);
     drop_cam(cam);
-    if (c.arg<bool>(1)) g_cams.push_back({cam, _stricmp(c.script.c_str(), "tenpinbowl") == 0});
+    if (c.arg<bool>(1)) {
+      const char* s = c.script.c_str();
+      g_cams.push_back({cam, _stricmp(s, "tenpinbowl") == 0 || _stricmp(s, "pool_game") == 0 || _stricmp(s, "darts") == 0});
+    }
   });
   on(kActivateScripted, "ACTIVATE_SCRIPTED_CAMS", [](const Call& c) {
     if (story_call(c)) g_scripted = c.arg<bool>(0);
@@ -222,7 +227,8 @@ void client_tick(bool watch) {
   const bool cutscene_on = cutscene::playing();
   if (g_scene && now - g_last_sample > kTimeoutMs) g_scene = false, g_fade_since = now;
   // The lane camera is for the people bowling with the host, not for whoever is elsewhere in the session.
-  const bool scene = g_scene && (!g_bowl_scene || bowling_sync::participating());
+  const bool scene =
+      g_scene && (!g_bowl_scene || bowling_sync::participating() || minigame_sync::participating());
   if (!watch || cutscene_on) { // our own setting, or a cutscene is playing here: stand down
     g_pending_fades.clear();
     if (g_cam_live || g_control_taken) teardown();

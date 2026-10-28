@@ -85,7 +85,7 @@ void draw_status() {
   ImGui::SetNextWindowBgAlpha(0.55f);
   if (ImGui::Begin("##ivcoop", nullptr, kHudFlags)) {
     scale_text();
-    ImGui::TextUnformatted("iv-coop  M2");
+    ImGui::TextUnformatted("iv-coop " IVCOOP_VERSION);
     ImGui::Text("frame %llu  |  %.0f fps", g_frames, ImGui::GetIO().Framerate);
 
     const std::string host = script::host_script();

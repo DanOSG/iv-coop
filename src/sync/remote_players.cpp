@@ -35,6 +35,7 @@
 #include "story/scene_cam.h"
 #include "sync/downed.h"
 #include "sync/episode_sync.h"
+#include "sync/minigame_sync.h"
 #include "sync/player_mirror.h"
 #include "sync/race_sync.h"
 #include "sync/invasion.h"
@@ -830,6 +831,10 @@ void tick() {
         bf.players.push_back({p.id, p.name, p.id != f.my_id && it != g_remotes.end() ? it->second.puppet.ped() : 0});
       }
       bowling_sync::tick(bf, session());
+      minigame_sync::Frame mf;
+      mf.in_session = bf.in_session, mf.hosting = bf.hosting, mf.my_id = bf.my_id;
+      for (const auto& p : bf.players) mf.players.push_back({p.id, p.name, p.ped});
+      minigame_sync::tick(mf, session());
     }
     {
       // Invaders and the invaded fight whatever the Team fire setting says (melee's switch is session-wide).
@@ -1092,7 +1097,8 @@ void tick() {
                          story::scene_cam::is_msg(m.data) || story::fx::is_msg(m.data) ||
                          story::npc_anims::is_msg(m.data) || regroup::is_msg(m.data) || radio_sync::is_msg(m.data) ||
                          drunk_sync::is_msg(m.data) || bowling_sync::is_msg(m.data) ||
-                         player_mirror::is_msg(m.data) || race_sync::is_msg(m.data)))
+                         player_mirror::is_msg(m.data) || race_sync::is_msg(m.data) ||
+                         minigame_sync::is_msg(m.data)))
         continue;
       if (melee_sync::is_msg(m.data)) {
         const auto it = g_remotes.find(m.from);
@@ -1117,6 +1123,10 @@ void tick() {
       }
       if (race_sync::is_msg(m.data)) {
         race_sync::on_message(m);
+        continue;
+      }
+      if (minigame_sync::is_msg(m.data)) {
+        minigame_sync::on_message(m);
         continue;
       }
       if (bowling_sync::is_msg(m.data)) {

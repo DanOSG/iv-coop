@@ -136,6 +136,7 @@ add_library(iv-coop SHARED
   src/sync/episode_sync.cpp
   src/sync/player_mirror.cpp
   src/sync/race_sync.cpp
+  src/sync/minigame_sync.cpp
   src/sync/attach_sync.cpp
   src/sync/ped_looks.cpp
   src/sync/vehicle_props.cpp
