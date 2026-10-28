@@ -27,7 +27,11 @@ struct Config {
   ghost::Settings ghost;
   coop::Settings net;
   netprobe::Settings netprobe;
+#ifdef NDEBUG
+  bool story_log_calls = false;  // M6a diagnostics: log story natives scripts call (big logs; testers opt in)
+#else
   bool story_log_calls = true;   // M6a diagnostics: log story natives scripts call
+#endif
   bool story_trace_calls = false; // also log each hooked call before it runs (needs [Log] Debug=1)
   story::Settings story;
   story::audit::Settings audit;
