@@ -688,9 +688,13 @@ void tick() {
     rf.in_session = f.in_session && settings.radio_sync && !f.invader, rf.hosting = f.hosting, rf.my_id = f.my_id;
     const n::Ped me = n::GetPlayerChar(n::GetPlayerId());
     if (me && n::DoesCharExist(me) && n::IsCharInAnyCar(me)) {
-      const n::Ped driver = n::GetDriverOfCar(n::StoreCarCharIsInNoSave(me));
-      for (const auto& [id, r] : g_remotes)
+      const n::Vehicle car = n::StoreCarCharIsInNoSave(me);
+      const n::Ped driver = n::GetDriverOfCar(car), front = n::GetCharInCarPassengerSeat(car, 0);
+      rf.in_car = true, rf.front_seat = driver == me || front == me;
+      for (const auto& [id, r] : g_remotes) {
         if (driver && driver != me && r.puppet.ped() == driver) rf.driver_id = id;
+        if (front && front != me && r.puppet.ped() == front) rf.front_id = id;
+      }
     }
     radio_sync::tick(rf, session());
     scream::tick(f.in_session, session());

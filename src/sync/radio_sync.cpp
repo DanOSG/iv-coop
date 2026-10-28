@@ -35,6 +35,9 @@ std::array<Remote, kMaxStations> g_host{};
 int g_host_count = 0;
 bool g_pending = false;
 std::map<std::uint8_t, int> g_player_station; // player id -> their tuned station (player numbering)
+std::map<std::uint8_t, DWORD> g_changed_at;    // player id -> when we saw their station change
+int g_my_station = -2;
+DWORD g_my_changed = 0;
 
 void send_timeline(net::Session& net, int count, bool reliable) {
   net::Writer w;
@@ -88,11 +91,24 @@ void client_apply(DWORD now) {
   }
 }
 
-void follow_driver(const Frame& f) {
-  if (f.driver_id == 0xFF) return;
-  const auto it = g_player_station.find(f.driver_id);
+// Front seats choose (the one who changed it last; the driver by default), the back follows.
+void follow_front(const Frame& f, DWORD now) {
+  if (!f.in_car) return;
+  const int mine = radio::player_station();
+  if (mine != g_my_station) g_my_station = mine, g_my_changed = now;
+  std::uint8_t chooser = 0xFF;
+  DWORD latest = 0;
+  for (const std::uint8_t id : {f.driver_id, f.front_id}) {
+    if (id == 0xFF) continue;
+    const auto it = g_changed_at.find(id);
+    const DWORD at = it != g_changed_at.end() ? it->second : 0;
+    if (chooser == 0xFF || at > latest) chooser = id, latest = at;
+  }
+  if (chooser == 0xFF) return;
+  if (f.front_seat && g_my_changed >= latest) return; // our own change is the latest: the others follow us
+  const auto it = g_player_station.find(chooser);
   if (it == g_player_station.end() || it->second < 0 || it->second >= 255) return;
-  if (radio::player_station() != it->second) radio::retune(it->second);
+  if (mine != it->second) radio::retune(it->second), g_my_station = it->second;
 }
 
 } // namespace
@@ -111,7 +127,7 @@ void tick(const Frame& f, net::Session& net) {
     g_sent_station = station, g_last_station_send = now;
     send_station(net, station);
   }
-  follow_driver(f);
+  follow_front(f, now);
 }
 
 void on_message(const net::GameMessage& m) {
@@ -119,6 +135,8 @@ void on_message(const net::GameMessage& m) {
   std::uint8_t type, sender, kind, value;
   if (!r.get(type) || !r.get(sender) || !r.get(kind) || !r.get(value)) return;
   if (kind == 1) {
+    const auto old = g_player_station.find(m.from);
+    if (old == g_player_station.end() || old->second != value) g_changed_at[m.from] = GetTickCount();
     g_player_station[m.from] = value;
     return;
   }
@@ -140,6 +158,8 @@ void clear() {
   g_pending = false;
   g_sent_station = -2;
   g_player_station.clear();
+  g_changed_at.clear();
+  g_my_station = -2, g_my_changed = 0;
 }
 
 } // namespace ivc::radio_sync

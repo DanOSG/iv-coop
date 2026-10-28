@@ -8,8 +8,9 @@
 // silent station): the station it hears restarts on the host's item at the host's position; silent
 // stations are loaded and positioned, so tuning in starts in sync.
 //
-// The station: each player sends the station they have on. A passenger whose driver is another player
-// follows the driver's station.
+// The station: each player sends the station they have on. In a car, as in GTA Online, only the front
+// seats choose: the car plays whichever front-seat player (driver or front passenger) changed it last
+// (the driver by default), and back-seat passengers are kept on it (a change from the back is undone).
 
 #include <cstdint>
 #include <span>
@@ -25,6 +26,9 @@ struct Frame {
   bool in_session = false, hosting = false;
   std::uint8_t my_id = 0;
   std::uint8_t driver_id = 0xFF; // the player driving the vehicle we're a passenger in (0xFF: none)
+  std::uint8_t front_id = 0xFF;  // the other player in the front passenger seat (0xFF: none)
+  bool in_car = false;
+  bool front_seat = false;       // we drive or sit in the front passenger seat
 };
 
 inline bool is_msg(std::span<const std::uint8_t> d) { return !d.empty() && d[0] == kMsg; }
