@@ -47,7 +47,7 @@ struct Teammate {
 
 struct Frame {
   bool in_session = false, hosting = false;
-  bool invader = false; // an invader (M11): no downing; a lethal hit is held at the floor and reported (take_invader_killed)
+  bool invader = false; // an invader (M11): always "on a mission" (downed, never bleeds out); only invaders revive invaders
   std::uint8_t my_id = 0;
   std::vector<Teammate> teammates;
 };
@@ -57,8 +57,6 @@ bool install();
 // Game thread, every frame.
 void tick(const Frame& f, net::Session& net);
 void on_message(const net::GameMessage& m, std::uint8_t my_id);
-// An invader was brought to the floor (or a lethal hit was held there) since the last call.
-bool take_invader_killed();
 // The local player is down (sent in PlayerState flags).
 bool local_downed();
 // Damage from a remote player while on a mission: never below the downed threshold.

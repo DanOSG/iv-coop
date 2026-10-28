@@ -680,7 +680,7 @@ void tick() {
     }
     const session_settings::Settings& settings = session_settings::current();
     const bool session_live = f.in_session;
-    f.in_session = f.in_session && (settings.downed || f.invader); // off: deaths are normal (invaders: the floor ends the invasion)
+    f.in_session = f.in_session && (settings.downed || f.invader); // off: deaths are normal (invaders are always downed/revived)
     downed::tick(f, session());
     f.in_session = session_live;
 
@@ -942,7 +942,7 @@ void tick() {
                        frames ? 100.0f * static_cast<float>(st.extrapolated) / static_cast<float>(frames) : 0.0f,
                        dist, r.puppet.phase(), r.puppet.error_m(), r.puppet.snaps(), r.health, r.weapon, r.dead,
                        r.wanted});
-    ip.dead = r.dead;
+    ip.dead = r.dead, ip.downed = r.downed;
     inv_players.push_back(ip);
   }
 
@@ -1036,7 +1036,7 @@ void tick() {
             (session_settings::damage_allowed() || invasion::hostile(ss.my_role, role_of(m.from)))) {
           const std::uint32_t h = n::GetCharHealth(me);
           const std::uint32_t left = h > d.amount ? h - d.amount : 0;
-          n::SetCharHealth(me, ss.my_role == net::Role::Invader ? left : downed::floor_health(left)); // invaders aren't downed
+          n::SetCharHealth(me, downed::floor_health(left));
           if (d.weapon <= 3) { // a melee hit: stagger
             const auto attacker = g_remotes.find(m.from);
             melee_sync::react_to_melee(attacker != g_remotes.end() ? attacker->second.puppet.ped() : 0);

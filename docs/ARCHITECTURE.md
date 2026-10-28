@@ -442,10 +442,10 @@ docs/
   - Sessions above 4 players: our ENet session (not the native MP session) raises its player cap; extra
     player slots for puppets (player_slots has 3 now), bandwidth/interest management for 8 players.
   - Invader mode: invaders don't take part in the host's story (no story replication of objectives/HUD, no
-    payouts), spawn together in one FBI car at a distance from the target, with an FBI loadout, see the target's blip, and leave or
-    respawn on death; the invaded group's downed/revive rules apply to them as normal.
+    payouts), spawn together in one FBI car at a distance from the target, with an FBI loadout, see the target's blip, and do not respawn: they go down and are revived
+    like co-op partners (see the rules slice below).
   - Outcomes: protagonist killed -> the invaded group fails (mission failed / wasted) and invaders get a
-    reward; invaders all killed or the window closes -> they're sent home. Invaders return to their own
+    reward; all invaders down or dead at once, or the window closes -> they're sent home. Invaders return to their own
     session/world afterwards.
   - Friendly fire rules between invaders and the invaded host's police (police ignore FBI invaders or treat
     them as allies).
@@ -478,6 +478,28 @@ docs/
       (`steam::set_lobby_open`) and sends message 65 (Open); closing sends Result(window closed) and kicks the invaders
       1.5 s later. The host gets a help message when invaders arrive. Message 65: `[65][sender][sub][value]`, sub 0 Open,
       sub 1 Result (1 = the target died, 2 = the window closed).
+  - **Rules and banners slice (built 2026-10-28, untested in game; sync/invasion, sync/downed, render/banner):**
+    - *Invaders go down, not out:* `downed` treats an invader as always "on a mission": a lethal hit is held at the
+      floor and they lie injured; they never bleed out and the mission-ended get-up doesn't apply. Only same-role
+      players are teammates, so invaders revive invaders (hold E, same CPR clip and 6 s) and the invaded revive the
+      invaded; the host's AllDown (co-op group) is ignored by invaders. A real death (not just the floor) still sends
+      that invader home.
+    - *Failure:* the host checks every tick that all invaders (with a received state) are downed or dead
+      (`Player::downed` comes from the kDowned state flag). Then it sends Result 3 (InvadersDown), shows "FBI VANQUISHED",
+      and kicks any invader still connected 2.5 s later; the invaders' own client sees Result 3 and takes the
+      leave/restore path with the "INVASION FAILED" banner. Sub 2 Arrived (host -> all) is sent when the first invader
+      enters.
+    - *Banners (render/banner):* invaded group: "FBI INVADING" on arrival, "FBI VANQUISHED" when the invaders all fall,
+      "DEFEATED BY THE FBI" when the target dies; invaders: "TARGET ELIMINATED" (win), "INVASION FAILED" (all down),
+      "YOU DIED" (a real death). Drawn by the imgui overlay's foreground draw list (also when the F8 debug overlay is
+      hidden): full-width translucent dark band with feathered edges, Cinzel capitals with letter spacing that drifts
+      wider, gold for victories and red for defeats, fade in 0.3 s, hold 3 s, fade out 1 s. The font is Cinzel (SIL OFL
+      1.1, from google/fonts ofl/cinzel; `src/render/assets/Cinzel.ttf` + `OFL.txt`) embedded in the .asi as an RCDATA
+      resource (`banner.rc`), so nothing else is installed. Sound: an optional WAV in `plugins/iv-coop/ui/`
+      (`banner_invading.wav`, `banner_victory.wav`, `banner_defeat.wav`, PlaySoundW async), else a game sound: victory =
+      `TRIGGER_MISSION_COMPLETE_AUDIO(50)` (mission-passed stinger), defeat = `PLAY_SOUND_FRONTEND`
+      `R4_BLEED_OUT_BODY_SPLASH` + `POLICE_COMPUTER_SEARCH_FAIL`, invading = `PLAY_AUDIO_EVENT` `FRONTEND_OTHER_RACE_321`
+      (names from the decompiled mission scripts; no FromSoftware assets).
     - *Invading:* phone Multiplayer > "Invade" (`steam::find_open_lobby`: any lobby with `ivc_open=1`, worldwide) joins
       through the Steam relay with `Role::Invader`. Dev path: F9 (`[Net] InvadeKey`) joins `JoinAddress` as an invader
       (only while that host's window is open). On connect the invader's position, health and weapons are saved;

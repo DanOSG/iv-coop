@@ -43,7 +43,7 @@ bool g_downed = false;
 DWORD g_downed_since = 0;
 bool g_revived = false;        // a teammate finished reviving us
 bool g_all_down = false;       // host said everyone is down: die
-bool g_invader_killed = false; // invader mode: health reached the floor
+bool g_invader = false;        // we are an invader (M11): downed all the time, revived only by other invaders
 // Reviving someone.
 std::uint8_t g_reviving = 0xFF;
 DWORD g_revive_since = 0;
@@ -239,8 +239,8 @@ void on_message(const net::GameMessage& m, std::uint8_t my_id) {
     case Msg::Revive:
       if (value == my_id && g_downed) g_revived = true;
       break;
-    case Msg::AllDown:
-      if (m.from == net::kHostId) g_all_down = true;
+    case Msg::AllDown: // the co-op group's: invaders go down on their own terms (sync/invasion)
+      if (m.from == net::kHostId && !g_invader) g_all_down = true;
       break;
   }
 }
@@ -250,17 +250,12 @@ void tick(const Frame& f, net::Session& net) {
   if (!me || !n::DoesCharExist(me)) return;
   const DWORD now = GetTickCount();
   g_guard_ped = ped_object(me);
+  g_invader = f.in_session && f.invader;
   g_guard = f.in_session && (g_on_mission || f.invader);
   if (!f.in_session) {
     g_guard = false;
     if (g_downed) get_up(me, kRevivedHealth);
     clear();
-    return;
-  }
-  if (f.invader) { // invaders aren't downed or revived: the floor is the end of the invasion (sync/invasion)
-    if (g_downed) get_up(me, kRevivedHealth);
-    if (g_lethal_hit || (!n::IsCharDead(me) && n::GetCharHealth(me) <= kDownAt)) g_invader_killed = true;
-    g_lethal_hit = false;
     return;
   }
   if (f.hosting && now - g_mission_poll > kMissionPollMs) { // the host decides what "on a mission" is
@@ -286,18 +281,18 @@ void tick(const Frame& f, net::Session& net) {
       g_revived = false;
       get_up(me, kRevivedHealth);
       log::info("Downed: revived");
-    } else if (!g_on_mission) {
-      get_up(me, kRevivedHealth); // the mission ended while we were down
-    } else if (!f.hosting && now - g_downed_since > kBleedOutMs) {
+    } else if (!g_on_mission && !f.invader) {
+      get_up(me, kRevivedHealth); // the mission ended while we were down (invaders stay down until revived)
+    } else if (!f.hosting && !f.invader && now - g_downed_since > kBleedOutMs) { // invaders: the host ends the invasion when all are down
       log::info("Downed: bled out");
       die(me);
     } else {
       n::SetCharHealth(me, kDownedHealth);
       g_pose.update(me, now);
       const DWORD left = f.hosting ? 0 : (kBleedOutMs - (now - g_downed_since)) / 1000;
-      prompt(f.hosting ? "You're down! A partner can revive you." : std::format("You're down! A partner can revive you ({} s).", left / 10 * 10 + 10));
+      prompt(f.invader ? "You're down! Another invader can revive you." : f.hosting ? "You're down! A partner can revive you." : std::format("You're down! A partner can revive you ({} s).", left / 10 * 10 + 10));
     }
-  } else if (g_on_mission && !n::IsCharDead(me) && (g_lethal_hit || n::GetCharHealth(me) <= kDownAt)) {
+  } else if ((g_on_mission || f.invader) && !n::IsCharDead(me) && (g_lethal_hit || n::GetCharHealth(me) <= kDownAt)) {
     if (g_lethal_hit) log::info("Downed: a lethal hit was held at {}", kDownedHealth);
     go_down(me);
   }
@@ -354,10 +349,8 @@ void tick(const Frame& f, net::Session& net) {
 
 bool local_downed() { return g_downed; }
 
-bool take_invader_killed() { return std::exchange(g_invader_killed, false); }
-
 std::uint32_t floor_health(std::uint32_t health) {
-  return g_on_mission && health < kDownedHealth ? kDownedHealth : health;
+  return (g_on_mission || g_invader) && health < kDownedHealth ? kDownedHealth : health;
 }
 
 void clear() {

@@ -138,11 +138,14 @@ add_library(iv-coop SHARED
   src/sync/car_follower.cpp
   src/sync/entity_sync.cpp
   src/render/d3d9_hook.cpp
-  src/render/overlay.cpp)
+  src/render/overlay.cpp
+  src/render/banner.cpp
+  src/render/banner.rc)
 target_include_directories(iv-coop PRIVATE src)
 target_compile_definitions(iv-coop PRIVATE UNICODE _UNICODE)
 target_compile_options(iv-coop PRIVATE ${IVCOOP_WARNINGS})
-target_link_libraries(iv-coop PRIVATE ivc_net minhook imgui d3d9 version ole32 oleaut32 uuid)
+target_link_libraries(iv-coop PRIVATE ivc_net minhook imgui d3d9 version ole32 oleaut32 uuid winmm)
+set_source_files_properties(src/render/banner.rc PROPERTIES OBJECT_DEPENDS ${CMAKE_SOURCE_DIR}/src/render/assets/Cinzel.ttf)
 set_target_properties(iv-coop PROPERTIES SUFFIX ".asi" OUTPUT_NAME "iv-coop")
 # Linker map, so crash-logger offsets (iv-coop.asi+0x...) can be resolved to functions.
 target_link_options(iv-coop PRIVATE /MAP:$<TARGET_FILE_DIR:iv-coop>/iv-coop.map)
