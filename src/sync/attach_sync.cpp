@@ -118,7 +118,7 @@ void register_hooks() {
   hook_detach("DETACH_OBJECT", 0x05C87C26);
   hook_detach("DETACH_OBJECT_NO_COLLIDE", 0x6B2E49CD);
   hook_detach("DETACH_PED", 0x2CD52C5C);
-  hook_detach("DETACH_PED_FROM_WITHIN_CAR", 0x15F70500);
+  // DETACH_PED_FROM_WITHIN_CAR (0x15F70500) runs the same handler as DETACH_PED: that hook already sees its calls.
   hook_detach("DETACH_CAR", 0x34CC1F23);
 }
 
