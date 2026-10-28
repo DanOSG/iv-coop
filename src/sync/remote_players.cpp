@@ -9,9 +9,11 @@
 #include <ws2tcpip.h>
 
 #include <format>
+#include <random>
 #include <string>
 
 #include "core/input.h"
+#include "game/episode.h"
 #include "game/phone.h"
 #include "net/steam.h"
 #include "net/steam_relay.h"
@@ -25,6 +27,7 @@
 #include "sync/cutscene_double.h"
 #include "story/scene_cam.h"
 #include "sync/downed.h"
+#include "sync/episode_sync.h"
 #include "sync/invasion.h"
 #include "story/story_protocol.h"
 #include "story/fx.h"
@@ -110,7 +113,7 @@ struct HiddenBlip {
   std::uint32_t display;
 };
 std::vector<HiddenBlip> g_hidden_blips;
-constexpr std::uint32_t kBlipSprites = 128; // sprite ids to scan; IV uses fewer
+constexpr std::uint32_t kBlipSprites = 256; // sprite ids to scan; IV uses fewer, the episodes add their own
 constexpr std::uint32_t kSpritePlayer = 6, kSpriteNorth = 7, kSpriteWaypoint = 8;
 
 void hide_own_blips(n::Ped me) {
@@ -147,12 +150,28 @@ std::uint32_t joiner_model_hash() {
   return character::joiner_model(n::GetHashKey(g_cfg.joiner_model.c_str()));
 }
 
+// joiner_model_hash(), if this episode's image has it; a model that is missing would never finish streaming and leave
+// the joiner stuck as the protagonist, so fall back to the stock multiplayer model, else `fallback` (no swap).
+std::uint32_t joiner_model_checked(std::uint32_t fallback) {
+  const std::uint32_t model = joiner_model_hash();
+  if (n::IsModelInCdimage(model) && n::IsThisModelAPed(model)) return model;
+  static std::uint32_t warned = 0;
+  const std::uint32_t stock = n::GetHashKey("M_Y_MULTIPLAYER");
+  const bool have_stock = n::IsModelInCdimage(stock) && n::IsThisModelAPed(stock);
+  if (warned != model) {
+    warned = model;
+    log::warn("Client mode: model 0x{:08X} isn't a ped model in {}; using {}", model, episode::name(episode::current()),
+              have_stock ? "M_Y_MULTIPLAYER" : "the protagonist");
+  }
+  return have_stock ? stock : fallback;
+}
+
 void update_client_mode(n::Ped me) {
   if (!me) return;
   if (g_want_client_mode && !g_client_mode) {
-    const std::uint32_t model = joiner_model_hash();
     const std::uint32_t original = n::GetCharModel(me);
-    if (swap_player_model(model)) {
+    const std::uint32_t model = joiner_model_checked(original);
+    if (model == original || swap_player_model(model)) {
       g_original_model = original;
       g_client_mode = true;
       if (g_cfg.freeze_story_scripts) script::set_suppress_predicate(story::is_story_script);
@@ -272,7 +291,8 @@ void process_pending_spawn(n::Ped me) {
 void handle_hotkeys() {
   const net::Mode mode = session().status().mode;
   handle_entity_keys(mode == net::Mode::Hosting);
-  if (input::dev_pressed(g_cfg.host_key, g_host_was_down)) {
+  const bool no_phone = phone::unavailable(); // F10/F11 stand in for the phone menu (handle_phone hosts)
+  if (!no_phone && input::dev_pressed(g_cfg.host_key, g_host_was_down)) {
     if (mode == net::Mode::Idle) {
       if (session().host(g_cfg.port, g_cfg.name, g_cfg.bind_address)) {
         log::info("Hosting on UDP {} as '{}'", g_cfg.port, g_cfg.name);
@@ -295,7 +315,7 @@ void handle_hotkeys() {
       session().leave();
     }
   }
-  if (input::dev_pressed(g_cfg.join_key, g_join_was_down)) {
+  if (no_phone ? input::pressed(g_cfg.join_key, g_join_was_down) : input::dev_pressed(g_cfg.join_key, g_join_was_down)) {
     if (mode == net::Mode::Idle) {
       if (session().join(g_cfg.join_address, g_cfg.port, g_cfg.name))
         log::info("Joining {}:{} as '{}'", g_cfg.join_address, g_cfg.port, g_cfg.name);
@@ -379,7 +399,40 @@ void handle_phone() {
   steam::tick();
   steam_relay::tick();
 
-  if (auto req = phone::poll()) {
+  // The host is in another episode (message 67): leave and say which one to start.
+  if (auto why = episode_sync::take_refusal()) {
+    g_invading = false;
+    if (mode != net::Mode::Idle) {
+      log::info("Leaving session (different episode)");
+      net.leave();
+    }
+    steam_relay::stop();
+    steam::leave_lobby();
+    upnp::close();
+    phone::notify(*why);
+  }
+
+  auto req = phone::poll();
+  if (!req && phone::unavailable()) {
+    // No phone menu in this episode (its script layout isn't mapped or didn't check out): F10 hosts with a random
+    // password / leaves, F11 joins [Net] JoinAddress / leaves (handle_hotkeys).
+    static bool host_down = true, told = false;
+    if (!told) {
+      told = true;
+      phone::notify(std::format("The co-op phone menu isn't available in {} yet. Press F10 to host (a password is shown) "
+                                "or F11 to join the address in iv-coop.ini.",
+                                episode::name(episode::current())));
+    }
+    if (input::pressed(g_cfg.host_key, host_down)) {
+      if (mode == net::Mode::Idle) {
+        static std::mt19937 rng{std::random_device{}()};
+        req = phone::Request{phone::Action::Host, std::format("{:06}", 100000 + rng() % 900000)};
+      } else {
+        req = phone::Request{phone::Action::Leave, {}};
+      }
+    }
+  }
+  if (req) {
     switch (req->action) {
       case phone::Action::Host:
         if (mode != net::Mode::Idle) break;
@@ -499,11 +552,11 @@ bool cutscene_begin() {
   // Our own character stays behind as a separate ped the player keeps steering (and that
   // the others see); the player ped becomes the cutscene's actor.
   if (!sync::cutscene_double::begin()) return false;
-  if (!swap_player_model(0x6F0783F5)) return false; // "player": streaming, try next frame
+  if (!swap_player_model(episode::protagonist_model())) return false; // "player": streaming, try next frame
   return true;
 }
 bool cutscene_end() {
-  const std::uint32_t model = g_client_mode && !g_restore_pending ? joiner_model_hash() : g_original_model;
+  const std::uint32_t model = g_client_mode && !g_restore_pending ? joiner_model_checked(g_original_model) : g_original_model;
   if (model && !swap_player_model(model)) return false;
   const n::Vector3 back = sync::cutscene_double::end(); // where our character walked to
   if (const n::Ped me = n::GetPlayerChar(n::GetPlayerId()); me && (back.x || back.y))
@@ -641,9 +694,14 @@ void configure(const Settings& s) {
 }
 
 void tick() {
+  episode::tick();
   {
     const net::SessionStatus s0 = session().status();
     g_my_role = s0.mode == net::Mode::Idle || s0.mode == net::Mode::Hosting ? net::Role::Coop : s0.my_role;
+    // The episode's own protagonist model, measured while nothing of ours has changed the player.
+    if (s0.mode == net::Mode::Idle && !g_client_mode && !g_restore_pending && !character::editor_active())
+      if (const n::Ped me = n::GetPlayerChar(n::GetPlayerId()); me && n::DoesCharExist(me))
+        episode::note_player_model(n::GetCharModel(me));
   }
   handle_hotkeys();
   handle_phone();
@@ -744,6 +802,7 @@ void tick() {
           attach_sync::host_on_player_joined(net);
           ped_looks::host_on_player_joined(net);
           vehicle_props::host_on_player_joined(net);
+          episode_sync::host_on_player_joined(net);
         }
         break;
       case K::Left:
@@ -755,6 +814,7 @@ void tick() {
       case K::Connected:
         log::info("Connected; we are player {} ({})", e.id, e.role == net::Role::Invader ? "invader" : "co-op");
         g_want_client_mode = true;
+        episode_sync::on_connected(net);
         if (e.role == net::Role::Invader) {
           const n::Ped p = n::GetPlayerChar(n::GetPlayerId());
           invasion::begin(p && n::DoesCharExist(p) ? p : 0); // where we were, to go back to
@@ -767,6 +827,7 @@ void tick() {
         // leave already said so.
         if (e.text != "left the session") phone::notify("Disconnected: " + e.text);
         drop_all();
+        episode_sync::clear();
         g_vehicles.clear();
         g_entities.clear(g_was_host);
         attach_sync::clear();
@@ -965,6 +1026,10 @@ void tick() {
     const bool is_invader = ss.my_role == net::Role::Invader;
     for (const auto& m : net.drain_game()) {
       if (!in_session(m.from)) continue;
+      if (episode_sync::is_msg(m.data)) {
+        episode_sync::on_message(m, ss.mode == net::Mode::Hosting);
+        continue;
+      }
       if (invasion::is_msg(m.data)) {
         invasion::on_message(m);
         continue;

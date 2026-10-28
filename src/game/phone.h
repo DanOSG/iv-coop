@@ -44,6 +44,10 @@ void notify(const std::string& text);
 std::int32_t screen();
 std::string dialled();
 
+// True when the co-op menu can't be put on the phone: the episode isn't known yet, or the main menu's list didn't
+// match the known script layout (logged). remote_players then offers F10 host / F11 join instead.
+bool unavailable();
+
 // Text override: returned instead of the game's string for `key` (ASCII).
 void set_label(const std::string& key, const std::string& text);
 

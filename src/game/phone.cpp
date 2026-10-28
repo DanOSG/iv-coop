@@ -14,6 +14,7 @@
 #include <mutex>
 
 #include "core/log.h"
+#include "game/episode.h"
 #include "game/natives.h"
 #include "game/script.h"
 #include "sync/character.h"
@@ -34,7 +35,18 @@ constexpr std::uintptr_t kTextGet = 0x008C5BE0; // wchar_t* __thiscall CText::Ge
 constexpr std::uintptr_t kTextGetByHash = 0x008C5AE0; // wchar_t* __thiscall (u32 hash, ?)
 constexpr std::uintptr_t kTextExists = 0x008C5A40;    // bool __thiscall (const char* key)
 constexpr std::uintptr_t kKeyHash = 0x0040BA60;       // u32 __cdecl (const char* key, u32 seed): the game's own
-constexpr int kPhoneGlobal = 91;
+// The phone global is 91 in GTA IV, 94 in TLAD and 95 in TBoGT (same fields). The episodes' spcellphonemain has
+// the same statics as IV's shifted up by 5 (l_U1 -> l_U6, l_U226 -> l_U231, l_U958 -> l_U963, l_U1090 -> l_U1095;
+// struct sizes unchanged), so main_statics() hands out the shifted base and every slot below holds for all three.
+int phone_global() {
+  switch (episode::current()) {
+    case episode::Id::IV: return 91;
+    case episode::Id::TLAD: return 94;
+    case episode::Id::TBoGT: return 95;
+    default: return -1;
+  }
+}
+constexpr int kEpisodeStaticsShift = 5;
 constexpr int kScreenOffset = 0, kDialledOffset = 128;
 
 // Phone screens (g_U91._fU0).
@@ -76,13 +88,15 @@ template <class T> T at_static(std::uintptr_t va) {
 std::uint8_t* global_ptr(int index) {
   auto* base = *at_static<std::uint8_t**>(kGlobalsPtr);
   const auto count = *at_static<std::int32_t*>(kGlobalsCount);
-  if (!base || index >= count) return nullptr;
+  if (!base || index < 0 || index >= count) return nullptr;
   return base + index * 4;
 }
 
 std::int32_t* main_statics() {
+  if (!episode::known()) return nullptr;
   auto* t = static_cast<std::uint8_t*>(script::find_thread("spcellphonemain"));
-  return t ? *reinterpret_cast<std::int32_t**>(t + 0x58) : nullptr;
+  auto* st = t ? *reinterpret_cast<std::int32_t**>(t + 0x58) : nullptr;
+  return st && !episode::is_iv() ? st + kEpisodeStaticsShift : st;
 }
 
 std::mutex g_mutex; // labels are read on whatever thread draws text
@@ -151,9 +165,11 @@ bool g_menu_dirty = false; // a setting changed: rewrite the labels
 std::int32_t g_menu_cursor = 0;
 std::optional<Action> g_awaiting;         // Host/Join chosen; waiting for the password
 std::optional<Request> g_request;         // ready for poll()
+int g_bad_menu_frames = 0;                // frames the main menu was up with a list that didn't check out
+constexpr int kBadMenuFrames = 90;
 
 void switch_screen(std::int32_t to) {
-  auto* g = global_ptr(kPhoneGlobal);
+  auto* g = global_ptr(phone_global());
   std::int32_t* st = main_statics();
   if (!g || !st) return;
   *reinterpret_cast<std::int32_t*>(g + kScreenOffset) = to;
@@ -179,7 +195,7 @@ bool has_item(const std::int32_t* st, std::int32_t id) {
 // list and scrolling walks off the end (the phone script crashed and restarted).
 // `select_item` >= 0: put the cursor on that item (absolute), scrolling the window to show it.
 void rebuild_display(std::int32_t* st, std::int32_t cursor = 0, std::int32_t select_item = -1) {
-  std::uint8_t* g = global_ptr(kPhoneGlobal);
+  std::uint8_t* g = global_ptr(phone_global());
   if (!g) return;
   const std::int32_t count = st[kSlotCount];
   if (count <= 0) return;
@@ -231,7 +247,14 @@ std::string dynamic_key(const std::string& text) {
 // Main menu (1011): the normal list plus "Multiplayer", or our co-op items.
 void fix_main_menu(std::int32_t* st) {
   const std::int32_t count = st[kSlotCount], cap = st[kSlotArray];
-  if (count <= 0 || cap <= 0 || cap > 64) return;
+  if (count <= 0 || cap <= 0 || cap > 64) {
+    // The menu is up but its list doesn't look like the layout we know: give up on the phone menu (unavailable()).
+    if (++g_bad_menu_frames == kBadMenuFrames)
+      log::warn("Phone: the main menu's list doesn't match the known layout in {} (count {}, capacity {}); the co-op "
+                "menu is off, F10/F11 host and join instead", episode::name(episode::current()), count, cap);
+    return;
+  }
+  g_bad_menu_frames = 0;
   if (g_menu == Menu::Settings) {
     // The list's capacity is the script's array size: show as many settings as fit (plus Back).
     const std::int32_t shown = std::min<std::int32_t>(session_settings::count(), cap - 1);
@@ -303,6 +326,8 @@ void show_help(const std::string& text, bool forever) {
 
 } // namespace
 
+bool unavailable() { return !episode::known() || g_bad_menu_frames >= kBadMenuFrames; }
+
 bool install() {
   set_label("CP_OPT_NETWORK", "Multiplayer");
   set_label("IVC_HOST", "Host Co-op");
@@ -327,7 +352,7 @@ bool install() {
 }
 
 std::int32_t screen() {
-  const auto* g = global_ptr(kPhoneGlobal);
+  const auto* g = global_ptr(phone_global());
   return g ? *reinterpret_cast<const std::int32_t*>(g + kScreenOffset) : -1;
 }
 
@@ -336,7 +361,7 @@ std::int32_t screen() {
 // deletes by counting l_U1090 down and keeping that many characters, so a count of 9
 // with 6 digits shown means "delete one".
 void limit_password_digits() {
-  std::uint8_t* g = global_ptr(kPhoneGlobal);
+  std::uint8_t* g = global_ptr(phone_global());
   std::int32_t* st = main_statics();
   if (!g || !st) return;
   char* number = reinterpret_cast<char*>(g + kDialledOffset);
@@ -353,7 +378,7 @@ void limit_password_digits() {
 }
 
 std::string dialled() {
-  const auto* g = global_ptr(kPhoneGlobal);
+  const auto* g = global_ptr(phone_global());
   if (!g) return {};
   const char* s = reinterpret_cast<const char*>(g + kDialledOffset);
   return std::string(s, strnlen(s, 16));

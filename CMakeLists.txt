@@ -94,6 +94,7 @@ add_library(iv-coop SHARED
   src/game/radio.cpp
   src/game/player_slots.cpp
   src/game/phone.cpp
+  src/game/episode.cpp
   src/net/steam.cpp
   src/net/steam_relay.cpp
   src/net/upnp.cpp
@@ -130,6 +131,7 @@ add_library(iv-coop SHARED
   src/sync/character.cpp
   src/sync/scream.cpp
   src/sync/regroup.cpp
+  src/sync/episode_sync.cpp
   src/sync/attach_sync.cpp
   src/sync/ped_looks.cpp
   src/sync/vehicle_props.cpp
