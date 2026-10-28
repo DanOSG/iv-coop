@@ -71,7 +71,7 @@ constexpr int kSlotMenuType = 1, kSlotMemory = 3, kSlotMemoryFlag = 4, kSlotWind
               kRowSlots = 31, kMaxRows = 6;
 constexpr int kG91Rows = 500, kG91Style = 40, kG91Speed = 492; // g_U91 byte offsets used by sub_10177
 constexpr std::int32_t kIdMultiplayer = 2000, kIdHost = 2001, kIdJoin = 2002, kIdLeave = 2003, kIdGoToHost = 2004,
-                         kIdInvade = 2006;
+                         kIdInvade = 2006, kIdLogs = 2007;
 // Co-op Settings (session_settings): the submenu, one item per setting (2011 + index), Back.
 constexpr std::int32_t kIdSettings = 2010, kIdFirstSetting = 2011, kIdBack = 2029;
 // Character creator (sync/character): the submenu is one row per editable value (2100 + row), Save, Back.
@@ -287,11 +287,11 @@ void fix_main_menu(std::int32_t* st) {
   if (g_menu == Menu::Coop) {
     struct Item { std::int32_t id; const char* key; };
     static const Item kIdle[] = {{kIdHost, "IVC_HOST"},       {kIdJoin, "IVC_JOIN"},         {kIdInvade, "IVC_INVADE"},
-                                {kIdCharacter, "IVC_CHARACTER"}, {kIdSettings, "IVC_SETTINGS"}};
-    static const Item kInvading[] = {{kIdLeave, "IVC_LEAVE"}};
-    static const Item kHosting[] = {{kIdSettings, "IVC_SETTINGS"}, {kIdLeave, "IVC_LEAVE"}};
+                                {kIdCharacter, "IVC_CHARACTER"}, {kIdSettings, "IVC_SETTINGS"}, {kIdLogs, "IVC_LOGS"}};
+    static const Item kInvading[] = {{kIdLeave, "IVC_LEAVE"}, {kIdLogs, "IVC_LOGS"}};
+    static const Item kHosting[] = {{kIdSettings, "IVC_SETTINGS"}, {kIdLeave, "IVC_LEAVE"}, {kIdLogs, "IVC_LOGS"}};
     static const Item kJoined[] = {{kIdGoToHost, "IVC_GOTOHOST"}, {kIdCharacter, "IVC_CHARACTER"},
-                                 {kIdLeave, "IVC_LEAVE"}};
+                                 {kIdLeave, "IVC_LEAVE"}, {kIdLogs, "IVC_LOGS"}};
     std::span<const Item> items = g_role == Role::Joiner    ? std::span<const Item>(kJoined)
                                   : g_role == Role::Invader ? std::span<const Item>(kInvading)
                                   : g_role == Role::Host    ? std::span<const Item>(kHosting)
@@ -349,6 +349,7 @@ bool install() {
   set_label("IVC_HOST", "Host Co-op");
   set_label("IVC_JOIN", "Join Co-op");
   set_label("IVC_INVADE", "Invade");
+  set_label("IVC_LOGS", "Save logs");
   set_label("IVC_LEAVE", "Leave Co-op");
   set_label("IVC_GOTOHOST", "Go to Host");
   set_label("IVC_SETTINGS", "Co-op Settings");
@@ -402,6 +403,13 @@ std::string dialled() {
 
 void tick() {
   if (g_hash_dirty) rehash_labels();
+  // The phone was put away while the character editor was up (its menu script ended without the screen changing):
+  // drop the edits so the player isn't left wearing the preview.
+  if (g_menu == Menu::Character && !main_statics()) {
+    character::editor_close(false);
+    g_menu = Menu::Phone;
+    log::info("Phone: closed during the character editor; edits discarded");
+  }
   const std::int32_t s = screen();
   static std::int32_t last = -1;
   if (s != last) {
@@ -447,8 +455,13 @@ void tick() {
     case kIdLeave:
     case kIdGoToHost:
     case kIdInvade:
+    case kIdLogs:
       g_menu = Menu::Phone;
-      g_request = Request{s == kIdLeave ? Action::Leave : s == kIdInvade ? Action::Invade : Action::GoToHost, {}};
+      g_request = Request{s == kIdLeave    ? Action::Leave
+                          : s == kIdInvade ? Action::Invade
+                          : s == kIdLogs   ? Action::SaveLogs
+                                           : Action::GoToHost,
+                          {}};
       switch_screen(kScreenClose);
       break;
     case kScreenKeypad:

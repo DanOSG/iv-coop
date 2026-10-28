@@ -33,6 +33,7 @@
 #include <variant>
 #include <vector>
 
+#include "core/log_export.h"
 #include "resource.h"
 
 namespace fs = std::filesystem;
@@ -69,7 +70,7 @@ constexpr RadioOption kRadioSplit[] = {{"opVANILLA.dat", 0x5C3C23F6}, {"opSPLITb
 
 // ------------------------------------------------------------------ UI plumbing
 
-HWND g_wnd, g_log, g_progress, g_path_label, g_install, g_uninstall, g_browse, g_use_zip, g_split_radio;
+HWND g_wnd, g_log, g_progress, g_path_label, g_install, g_uninstall, g_browse, g_use_zip, g_split_radio, g_logs;
 bool g_want_split_radio = false;
 fs::path g_local_zip; // a pack zip the user downloaded themselves
 fs::path g_game; // ...\Grand Theft Auto IV\GTAIV
@@ -723,6 +724,7 @@ void set_busy(bool busy) {
   EnableWindow(g_uninstall, !busy && !g_game.empty());
   EnableWindow(g_browse, !busy);
   EnableWindow(g_use_zip, !busy && !g_game.empty());
+  EnableWindow(g_logs, !busy && !g_game.empty());
   EnableWindow(g_split_radio, !busy);
 }
 
@@ -730,6 +732,18 @@ void show_game() {
   SetWindowTextW(g_path_label, g_game.empty() ? L"GTA IV not found: pick its GTAIV folder."
                                               : (L"GTA IV: " + g_game.wstring()).c_str());
   set_busy(false);
+}
+
+// Collect logs: the same zip the mod makes in game (phone: Multiplayer > Save logs), for when the game won't start
+// or crashed. Shown in Explorer when done.
+void do_collect_logs() {
+  log(L"Collecting logs...");
+  const ivc::log_export::Result r = ivc::log_export::run(g_game, IVCOOP_VERSION);
+  log(r.message);
+  if (r.ok) {
+    const std::wstring args = L"/select,\"" + r.zip.wstring() + L"\"";
+    ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+  }
 }
 
 void start(void (*job)()) {
@@ -773,6 +787,7 @@ LRESULT CALLBACK wnd_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
       if (reinterpret_cast<HWND>(lp) == g_install) start(do_install);
       if (reinterpret_cast<HWND>(lp) == g_uninstall) start(do_uninstall);
       if (reinterpret_cast<HWND>(lp) == g_browse) browse();
+      if (reinterpret_cast<HWND>(lp) == g_logs) start(do_collect_logs);
       if (reinterpret_cast<HWND>(lp) == g_use_zip)
         if (auto zip = pick_zip(h)) {
           g_local_zip = *zip;
@@ -850,6 +865,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmd, int show) {
       }
       return 0;
     }
+    // --logs <game> <report>: Collect logs without the window.
+    if (argc >= 4 && std::wstring(argv[1]) == L"--logs") {
+      const ivc::log_export::Result r = ivc::log_export::run(argv[2], IVCOOP_VERSION);
+      std::ofstream(argv[3]) << r.message << '\n' << r.zip.string() << '\n';
+      return r.ok ? 0 : 2;
+    }
     // --radiosplit <game> <release.rar> <report>: the split-radio step against a folder, from a local release.
     if (argc >= 5 && std::wstring(argv[1]) == L"--radiosplit") {
       std::wofstream report(argv[4]);
@@ -892,6 +913,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmd, int show) {
   g_install = make(L"BUTTON", L"Install", BS_DEFPUSHBUTTON, 12, 80, 120, 30);
   g_uninstall = make(L"BUTTON", L"Uninstall", BS_PUSHBUTTON, 140, 80, 120, 30);
   g_use_zip = make(L"BUTTON", L"Install from a downloaded zip...", BS_PUSHBUTTON, 392, 80, 200, 30);
+  g_logs = make(L"BUTTON", L"Collect logs", BS_PUSHBUTTON, 268, 80, 116, 30);
   g_split_radio = make(L"BUTTON",
                        L"Original Vladivostok FM songs in GTA IV, club music only in the Episodes (Radio Restoration "
                        L"\"split\", ~1 GB download)",

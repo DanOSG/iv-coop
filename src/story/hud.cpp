@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <array>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -55,6 +56,11 @@ constexpr Kind kKinds[] = {
     {0x7EF6599D, "DISPLAY_TEXT_WITH_SUBSTRING_GIVEN_HASH_KEY", 4, {2, -1, -1}},
     {0x39E77F70, "DISPLAY_TEXT_WITH_TWO_SUBSTRINGS_GIVEN_HASH_KEYS", 5, {2, -1, -1}},
     {0x3B2526E3, "DRAW_RECT", 8, {-1, -1, -1}},
+    // The episodes' activity screens (base jumps, races, drug wars, fight club) and race markers drawn each frame.
+    {0x337957AF, "DISPLAY_TEXT_WITH_2_NUMBERS", 5, {2, -1, -1}},
+    {0x746C06E8, "DISPLAY_TEXT_WITH_3_NUMBERS", 6, {2, -1, -1}},
+    {0x29FC3E19, "DRAW_CHECKPOINT", 7, {-1, -1, -1}},
+    {0x26810BE3, "DRAW_CHECKPOINT_WITH_ALPHA", 8, {-1, -1, -1}},
 };
 
 struct Command {
@@ -75,6 +81,58 @@ bool g_sent_empty = true;
 // Joiner.
 std::vector<Command> g_draw;
 DWORD g_draw_at = 0;
+
+// Sprites (minigame screens: darts, pool, air hockey, golf, cards, the episodes' activity screens). A texture handle
+// means nothing on another machine, so the host remembers which dictionary and name each came from and sends those
+// (as the command's three strings: dictionary, texture, "s" streamed / "t" loaded); partners load the same texture
+// and draw it with their own handle.
+constexpr std::uint32_t kLoadTxd = 0x52FC763A, kGetTxd = 0x15D668D0, kGetTexture = 0x0F5D1937,
+                        kGetStreamedTexture = 0x32C24491, kRequestStreamedTxd = 0x7C7B1237,
+                        kHasStreamedTxdLoaded = 0x5F9C43D4;
+constexpr std::uint32_t kSpriteKinds[] = {0x6ADD40EC /* DRAW_SPRITE */, 0x1849408D /* DRAW_TOPLEVEL_SPRITE */};
+struct TextureName {
+  std::string txd, name;
+  bool streamed;
+};
+std::map<std::uint32_t, std::string> g_txd_names;  // host: dictionary handle -> name
+std::map<std::uint32_t, TextureName> g_textures;   // host: texture handle -> where it came from
+std::map<std::string, std::uint32_t> g_resolved;   // joiner: "s|txd|name" -> our texture handle (0: loading)
+
+bool is_sprite(std::uint32_t hash) {
+  for (std::uint32_t h : kSpriteKinds)
+    if (h == hash) return true;
+  return false;
+}
+
+void capture_sprite(const Call& c, std::uint32_t hash) {
+  if (!g_hosting || !is_story_script(c.script)) return;
+  for (const auto& s : g_render_target_scripts)
+    if (s == c.script) return;
+  const auto it = g_textures.find(c.arg<std::uint32_t>(0));
+  if (it == g_textures.end()) return;
+  Command cmd;
+  cmd.hash = hash;
+  cmd.argc = 10;
+  for (int i = 0; i < 10; ++i) cmd.args[i] = c.arg<std::uint32_t>(i);
+  cmd.string_arg = {0, 0, 0};
+  cmd.strings = {make_key(it->second.txd), make_key(it->second.name), make_key(it->second.streamed ? "s" : "t")};
+  if (g_frame.size() < 256) g_frame.push_back(cmd);
+}
+
+std::uint32_t resolve_texture(const std::string& txd, const std::string& name, bool streamed) {
+  const std::string key = (streamed ? "s|" : "t|") + txd + "|" + name;
+  if (const auto it = g_resolved.find(key); it != g_resolved.end() && it->second) return it->second;
+  std::uint32_t tex = 0;
+  if (streamed) {
+    natives::invoke(kRequestStreamedTxd, txd.c_str(), true);
+    if (natives::invoke<bool>(kHasStreamedTxdLoaded, txd.c_str()))
+      tex = natives::invoke<std::uint32_t>(kGetStreamedTexture, txd.c_str(), name.c_str());
+  } else if (const auto dict = natives::invoke<std::uint32_t>(kLoadTxd, txd.c_str())) {
+    tex = natives::invoke<std::uint32_t>(kGetTexture, dict, name.c_str());
+  }
+  g_resolved[key] = tex;
+  return tex;
+}
 
 void capture(const Call& c, const Kind& k) {
   if (!g_hosting || !is_story_script(c.script)) return;
@@ -110,6 +168,21 @@ std::vector<std::uint8_t> encode(const std::vector<Command>& list) {
 
 void register_hooks() {
   for (const Kind& k : kKinds) native_hooks::on(k.hash, k.name, [&k](const Call& c) { capture(c, k); });
+  auto txd = [](const Call& c) {
+    if (g_hosting) g_txd_names[c.result<std::uint32_t>()] = c.str(0);
+  };
+  native_hooks::on(kLoadTxd, "LOAD_TXD", txd);
+  native_hooks::on(kGetTxd, "GET_TXD", txd);
+  native_hooks::on(kGetTexture, "GET_TEXTURE", [](const Call& c) {
+    if (!g_hosting) return;
+    const auto it = g_txd_names.find(c.arg<std::uint32_t>(0));
+    if (it != g_txd_names.end()) g_textures[c.result<std::uint32_t>()] = {it->second, c.str(1), false};
+  });
+  native_hooks::on(kGetStreamedTexture, "GET_TEXTURE_FROM_STREAMED_TXD", [](const Call& c) {
+    if (g_hosting) g_textures[c.result<std::uint32_t>()] = {c.str(0), c.str(1), true};
+  });
+  native_hooks::on(kSpriteKinds[0], "DRAW_SPRITE", [](const Call& c) { capture_sprite(c, kSpriteKinds[0]); });
+  native_hooks::on(kSpriteKinds[1], "DRAW_TOPLEVEL_SPRITE", [](const Call& c) { capture_sprite(c, kSpriteKinds[1]); });
   native_hooks::on(kSetTextRenderId, "SET_TEXT_RENDER_ID", [](const Call& c) {
     if (g_hosting && is_story_script(c.script)) g_render_target_scripts.push_back(c.script);
   });
@@ -160,6 +233,11 @@ void client_tick() {
   }
   for (const Command& c : g_draw) {
     std::array<std::uint32_t, kMaxArgs> args = c.args;
+    if (is_sprite(c.hash)) {
+      args[0] = resolve_texture(to_string(c.strings[0]), to_string(c.strings[1]), to_string(c.strings[2]) == "s");
+      if (args[0]) natives::invoke_raw(c.hash, args.data(), c.argc);
+      continue;
+    }
     std::array<std::string, kMaxStrings> text;
     for (int s = 0; s < kMaxStrings; ++s)
       if (c.string_arg[s] >= 0 && c.string_arg[s] < c.argc) {
@@ -171,6 +249,7 @@ void client_tick() {
 }
 
 void clear() {
+  g_resolved.clear(); // handles from an older world (or session) may be stale
   g_frame.clear();
   g_latest.clear();
   g_draw.clear();

@@ -3,16 +3,23 @@
 #include <cmath>
 #include <map>
 #include <memory>
+#include <filesystem>
 #include <mutex>
+#include <optional>
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
 #include <format>
+#include <filesystem>
+#include <mutex>
+#include <optional>
 #include <random>
+#include <thread>
 #include <string>
 
 #include "core/input.h"
+#include "core/log_export.h"
 #include "game/episode.h"
 #include "game/phone.h"
 #include "net/steam.h"
@@ -28,6 +35,8 @@
 #include "story/scene_cam.h"
 #include "sync/downed.h"
 #include "sync/episode_sync.h"
+#include "sync/player_mirror.h"
+#include "sync/race_sync.h"
 #include "sync/invasion.h"
 #include "story/story_protocol.h"
 #include "story/fx.h"
@@ -288,7 +297,43 @@ void process_pending_spawn(n::Ped me) {
   g_entities.host_register(h, type, model, session());
 }
 
+// Save logs (phone: Multiplayer > Save logs, or Ctrl+Shift+L): zipped to the Desktop on a worker thread, the result
+// shown on the phone when it's ready.
+std::mutex g_logs_mutex;
+std::optional<std::string> g_logs_done;
+bool g_logs_busy = false;
+bool g_logs_key_down = false;
+
+void save_logs() {
+  if (g_logs_busy) return;
+  g_logs_busy = true;
+  phone::notify("Saving logs...");
+  log::info("Saving logs to the Desktop");
+  wchar_t exe[MAX_PATH];
+  GetModuleFileNameW(nullptr, exe, MAX_PATH);
+  const std::filesystem::path game = std::filesystem::path(exe).parent_path();
+  std::thread([game] {
+    const log_export::Result r = log_export::run(game, IVCOOP_VERSION);
+    std::lock_guard lock(g_logs_mutex);
+    g_logs_done = r.message;
+  }).detach();
+}
+
+void poll_save_logs() {
+  std::optional<std::string> done;
+  {
+    std::lock_guard lock(g_logs_mutex);
+    done.swap(g_logs_done);
+  }
+  if (!done) return;
+  g_logs_busy = false;
+  log::info("{}", *done);
+  phone::notify(*done);
+}
+
 void handle_hotkeys() {
+  if (input::pressed_ctrl_shift('L', g_logs_key_down)) save_logs();
+  poll_save_logs();
   const net::Mode mode = session().status().mode;
   handle_entity_keys(mode == net::Mode::Hosting);
   const bool no_phone = phone::unavailable(); // F10/F11 stand in for the phone menu (handle_phone hosts)
@@ -474,6 +519,9 @@ void handle_phone() {
         break;
       case phone::Action::GoToHost:
         go_to_host();
+        break;
+      case phone::Action::SaveLogs:
+        save_logs();
         break;
       case phone::Action::Invade:
         if (mode != net::Mode::Idle) break;
@@ -772,6 +820,8 @@ void tick() {
         df.host_puppet = it->second.puppet.ped();
       drunk_sync::tick(df, session());
     }
+    player_mirror::tick(f.hosting && session_live, session());
+    race_sync::tick(f.hosting && session_live, session());
     {
       bowling_sync::Frame bf;
       bf.in_session = session_live && !f.invader, bf.hosting = f.hosting, bf.my_id = f.my_id;
@@ -803,6 +853,7 @@ void tick() {
           ped_looks::host_on_player_joined(net);
           vehicle_props::host_on_player_joined(net);
           episode_sync::host_on_player_joined(net);
+          race_sync::host_on_player_joined(net);
         }
         break;
       case K::Left:
@@ -828,6 +879,7 @@ void tick() {
         if (e.text != "left the session") phone::notify("Disconnected: " + e.text);
         drop_all();
         episode_sync::clear();
+        race_sync::clear();
         g_vehicles.clear();
         g_entities.clear(g_was_host);
         attach_sync::clear();
@@ -1039,7 +1091,8 @@ void tick() {
       if (is_invader && (story::is_story_msg(m.data) || story::sounds::is_msg(m.data) || story::pickups::is_msg(m.data) ||
                          story::scene_cam::is_msg(m.data) || story::fx::is_msg(m.data) ||
                          story::npc_anims::is_msg(m.data) || regroup::is_msg(m.data) || radio_sync::is_msg(m.data) ||
-                         drunk_sync::is_msg(m.data) || bowling_sync::is_msg(m.data)))
+                         drunk_sync::is_msg(m.data) || bowling_sync::is_msg(m.data) ||
+                         player_mirror::is_msg(m.data) || race_sync::is_msg(m.data)))
         continue;
       if (melee_sync::is_msg(m.data)) {
         const auto it = g_remotes.find(m.from);
@@ -1056,6 +1109,14 @@ void tick() {
       }
       if (drunk_sync::is_msg(m.data)) {
         drunk_sync::on_message(m);
+        continue;
+      }
+      if (player_mirror::is_msg(m.data)) {
+        player_mirror::on_message(m);
+        continue;
+      }
+      if (race_sync::is_msg(m.data)) {
+        race_sync::on_message(m);
         continue;
       }
       if (bowling_sync::is_msg(m.data)) {

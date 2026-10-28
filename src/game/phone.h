@@ -21,7 +21,7 @@
 
 namespace ivc::phone {
 
-enum class Action { Host, Join, Leave, GoToHost, Invade };
+enum class Action { Host, Join, Leave, GoToHost, Invade, SaveLogs };
 struct Request {
   Action action;
   std::string password; // 6 digits (Host/Join)

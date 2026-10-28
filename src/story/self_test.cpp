@@ -17,6 +17,7 @@
 #include "game/phone.h"
 #include "game/script.h"
 #include "sync/episode_sync.h"
+#include "sync/race_sync.h"
 #include "sync/remote_players.h"
 
 namespace ivc::story::self_test {
@@ -24,7 +25,8 @@ namespace {
 namespace n = natives;
 using native_hooks::Call;
 
-constexpr std::uint32_t kIsControlPressed = 0x0E635761;
+constexpr std::uint32_t kIsControlPressed = 0x0E635761, kHasCharGotWeapon = 0x11F759DE, kRemoveWeapon = 0x2485231E;
+constexpr std::uint32_t kBotWeapon = 7; // the bot host gives it through player_mirror
 constexpr std::int32_t kControlPhoneUp = 21; // (2, 21): "up" on the phone scripts opens the phone
 constexpr std::int32_t kControlSkip = 77;    // accept: pad A; scripted intros skip on it
 constexpr std::int32_t kScreenMainMenu = 1011, kScreenClose = 1001, kIdMultiplayer = 2000, kIdHost = 2001;
@@ -244,7 +246,10 @@ void tick() {
       break;
     case Step::JoinSame:
       if (in_step < kBotStartMs) return;
-      if (mode() == net::Mode::Idle && !g_mark_ms) g_mark_ms = now, coop::join("127.0.0.1");
+      if (mode() == net::Mode::Idle && !g_mark_ms) {
+        if (const n::Ped p = me()) n::invoke(kRemoveWeapon, p, kBotWeapon); // so its arrival can be seen
+        g_mark_ms = now, coop::join("127.0.0.1");
+      }
       if (mode() == net::Mode::Joined) {
         go(Step::JoinSameHold);
       } else if (in_step > kJoinTimeoutMs) {
@@ -266,6 +271,11 @@ void tick() {
                std::format("stayed {} s; host episode {}", kHoldMs / 1000, episode::short_name(host)));
         result("client model", model != 0 && model != g_protagonist,
                std::format("0x{:08X} (protagonist 0x{:08X})", model, g_protagonist));
+        const n::Ped p = me();
+        result("player mirror", p && n::invoke<bool>(kHasCharGotWeapon, p, kBotWeapon),
+               std::format("weapon {} from the host's story message", kBotWeapon));
+        result("race checkpoint", race_sync::local_count() == 1,
+               std::format("{} checkpoints from the host", race_sync::local_count()));
         coop::leave();
         go(Step::Restore);
       }

@@ -25,6 +25,10 @@ const char* tag(Level l) {
 void init(const std::filesystem::path& file) {
   std::lock_guard lock(g_mutex);
   if (g_file) return;
+  // The last launch's log is kept as <name>.previous.log (a crash's log survives the restart that follows).
+  std::filesystem::path previous = file;
+  previous.replace_extension(L".previous.log");
+  MoveFileExW(file.c_str(), previous.c_str(), MOVEFILE_REPLACE_EXISTING);
   g_file = _wfsopen(file.c_str(), L"w", _SH_DENYWR); // truncate each launch
 }
 

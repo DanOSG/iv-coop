@@ -487,6 +487,19 @@ docs/
     another (turned away). The bot's `--episode N` plays message 67. All 27 checks passed on 2026-10-28; one
     earlier run crashed once in the renderer (`CDrawPedDC` allocation failed, TLAD intro, a frame after a model
     swap), not seen again in two more runs.
+  - **Episode sync gaps (0.7.0):** `sync/player_mirror` (message 69) repeats the host story's calls on the host's
+    player (GIVE_WEAPON_TO_CHAR, REMOVE_WEAPON_FROM_CHAR, REMOVE_ALL_CHAR_WEAPONS, ADD_ARMOUR_TO_CHAR,
+    SET_CHAR_BULLETPROOF_VEST, SET_CHAR_HEALTH, SET_PLAYER_DISABLE_JUMP/CROUCH) on every partner's player;
+    `sync/race_sync` (message 71) mirrors CREATE/DELETE_CHECKPOINT and the GPS race track (START_GPS_RACE_TRACK,
+    ADD_POINT_TO_GPS_RACE_TRACK, RENDER/LOOP_RACE_TRACK) with a full resend to late joiners; `story/hud` also replays
+    DISPLAY_TEXT_WITH_2/3_NUMBERS, DRAW_CHECKPOINT(_WITH_ALPHA) and sprites (DRAW_SPRITE / DRAW_TOPLEVEL_SPRITE: the
+    host records each texture handle's dictionary and name from LOAD_TXD/GET_TXD/GET_TEXTURE/
+    GET_TEXTURE_FROM_STREAMED_TXD; partners load the same texture). `parachute*` and `*stattracker` always run
+    locally (the engine starts parachutelauncher for whoever boards a helicopter). Natives were picked by diffing
+    the episodes' decompiled scripts against IV's.
+  - **Hook safety:** `native_hooks::install` skips any handler inside the protected region; no-op natives such as
+    SET_PLAYER_INVISIBLE_TO_AI point at a shared engine stub (0x4016A0) that the engine calls everywhere, and
+    hooking it crashed the game at startup.
   - **To verify in game:** Johnny/Luis cutscene swaps with a real partner, and the
     episodes' own HUD elements (gang/club meters) and minigames (TBoGT club, base jumps, fight club, TLAD gang wars).
 - **Co-op settings** (phone: Multiplayer > Co-op Settings; done 2026-10-26, sync/session_settings): the host's

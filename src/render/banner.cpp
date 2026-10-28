@@ -102,7 +102,11 @@ void load_font() {
   ImFontConfig cfg;
   cfg.FontDataOwnedByAtlas = false; // the resource stays mapped for the life of the module
   cfg.OversampleH = 2, cfg.OversampleV = 1;
-  g_font = ImGui::GetIO().Fonts->AddFontFromMemoryTTF(const_cast<void*>(data), static_cast<int>(SizeofResource(g_self, res)),
+  // ImGui draws everything in the first font loaded; the debug overlay must keep the small default one, so load it
+  // first and keep it the default (the banner picks its font explicitly).
+  ImGuiIO& io = ImGui::GetIO();
+  if (io.Fonts->Fonts.empty()) io.FontDefault = io.Fonts->AddFontDefault();
+  g_font = io.Fonts->AddFontFromMemoryTTF(const_cast<void*>(data), static_cast<int>(SizeofResource(g_self, res)),
                                                       kFontPx, &cfg, kRanges);
   if (!g_font) log::warn("Banner: could not load the embedded font");
 }

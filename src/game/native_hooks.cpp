@@ -67,6 +67,7 @@ void guarded_callbacks(int n, natives::CallContext* ctx, const std::uint32_t* ar
 template <int N>
 void __cdecl detour(natives::CallContext* ctx) {
   Slot& s = g_slots[N];
+  if (!ctx) return s.orig(ctx); // not a script call (install() skips the engine's shared stubs; this is a backstop)
   const bool report = !g_in_callback && !script::in_own_tick();
   if (g_trace && report) log::debug("[trace] -> {} from {}", s.name, script::current_script_name());
   // Snapshot the arguments before the native overwrites slot 0 with its result.
@@ -161,6 +162,15 @@ bool install() {
     s.target = natives::handler(s.hash);
     if (!s.target) {
       log::error("Native hook {}: handler for 0x{:08X} not found", s.name, s.hash);
+      continue;
+    }
+    // Never patch the exe's protected code region (0x401000-0x4FB000, static): besides being off limits, the handlers
+    // that live there are the engine's shared stubs (a no-op native such as SET_PLAYER_INVISIBLE_TO_AI points at
+    // 0x4016A0, which the engine itself calls everywhere with other arguments).
+    const auto base = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    const auto va = reinterpret_cast<std::uintptr_t>(s.target) - base + 0x400000;
+    if (va >= 0x401000 && va < 0x4FB000) {
+      log::warn("Native hook {}: handler at static 0x{:X} is an engine stub in the protected region; skipped", s.name, va);
       continue;
     }
     bool shared = false;

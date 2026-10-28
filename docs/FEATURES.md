@@ -3,7 +3,7 @@
 iv-coop turns **GTA IV: The Complete Edition**'s single-player story into a co-op game for **up to 4 players**
 (a host + 3 partners). The host plays their own save and story; partners join that world as their own characters
 and play the missions alongside, and their own saves are never loaded or changed. It's one ASI plugin, set up by a
-one-click installer. Status: version 0.6.1; much of it is new and still being tested in play (see the end).
+one-click installer. Status: version 0.7.0; much of it is new and still being tested in play (see the end).
 
 ## Getting in
 - **Installer:** finds GTA IV, checks it's the supported version (1.2.0.59), installs TJGM's Drag n' Drop pack
@@ -55,6 +55,11 @@ one-click installer. Status: version 0.6.1; much of it is new and still being te
 ## The Lost and Damned and The Ballad of Gay Tony
 - Co-op works in the Episodes too: everyone plays the host's episode (a partner in another one is told which to
   start), with the episode's own phone menu and protagonist. Bowling there uses shared frames.
+- What the host's story does to the host's player happens to partners too: weapons given or taken (TBoGT's parachute
+  before every skydive), armour, vests, health, no-jump/no-crouch sections. Every player gets their own parachute.
+- Race checkpoints and the GPS race track (street races, TLAD bike races, TBoGT races and base jumps) show for
+  everyone, and so do the episodes' activity screens (score/number text) and minigame screens drawn with sprites
+  (darts, pool, air hockey, golf, drug wars).
 
 ## Combat
 - **Team fire** setting: Off / On / No aim (default No aim). Damage from guns, cars, explosions, melee and fire
@@ -79,6 +84,11 @@ one-click installer. Status: version 0.6.1; much of it is new and still being te
 Team fire · Revive · Shared pay · Radio sync · Weather sync · Partner blips · Scenes (Host cam / Own cam) ·
 Ambient sync · Invasions
 
+## Logs for bug reports
+- **Phone → Multiplayer → Save logs** (or **Ctrl+Shift+L**) zips the mod's logs (this launch and the previous one),
+  its settings and test results to the Desktop. The installer's **Collect logs** button does the same when the game
+  won't start.
+
 ## Networking
 Packet size and flood guards, handshake timeout, clean drop-outs, a clear message on version mismatch, and a
 per-player traffic log every 10 s.
@@ -95,4 +105,5 @@ per-player traffic log every 10 s.
 - Most 0.6.x sync features, invasions, bowling, the character creator, ambient sync and the cutscene stand-in are
   untested in play.
 - The Episodes support is new and untested in play; their own minigames and HUD meters aren't synced yet.
+- The debug overlay (F8) now stays small in a corner.
 - Not done yet: the small radio hiccup at song changes.

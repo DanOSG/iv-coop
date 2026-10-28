@@ -297,6 +297,25 @@ int main(int argc, char** argv) {
       if (e.kind == K::Joined) {
         std::printf("[%s] player #%u '%s' is here\n", a.name.c_str(), e.id, e.text.c_str());
         if (a.serve) send_episode(0);
+        if (a.serve && a.episode >= 0) {
+          // The self-test's joiner checks: player_mirror (give weapon 7, a pistol, 50 rounds) and race_sync (one
+          // checkpoint 5 m from the origin).
+          auto u32 = [](std::vector<std::uint8_t>& v, std::uint32_t x) {
+            for (int i = 0; i < 4; ++i) v.push_back(static_cast<std::uint8_t>(x >> (8 * i)));
+          };
+          auto f32 = [&u32](std::vector<std::uint8_t>& v, float f) {
+            std::uint32_t x;
+            std::memcpy(&x, &f, 4);
+            u32(v, x);
+          };
+          std::vector<std::uint8_t> give{69, 0, 0};
+          u32(give, 7), u32(give, 50);
+          session.send_game(std::move(give), true);
+          std::vector<std::uint8_t> cp{71, 0, 0};
+          u32(cp, 1), u32(cp, 0), f32(cp, 5.0f), f32(cp, 0.0f), f32(cp, 0.0f), f32(cp, 0.0f), f32(cp, 0.0f);
+          session.send_game(std::move(cp), true);
+          std::printf("[%s] sent a weapon (69) and a checkpoint (71)\n", a.name.c_str());
+        }
         if (!a.replay.empty() && !replay_start) {
           replay = load_recording(a.replay);
           std::printf("[%s] loaded %zu recorded messages (%.1f s) from %s\n", a.name.c_str(), replay.size(),

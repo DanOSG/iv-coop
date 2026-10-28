@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(iv-coop VERSION 0.6.1 LANGUAGES C CXX)
+project(iv-coop VERSION 0.7.0 LANGUAGES C CXX)
 add_compile_definitions(IVCOOP_VERSION="${PROJECT_VERSION}")
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
@@ -95,6 +95,7 @@ add_library(iv-coop SHARED
   src/game/player_slots.cpp
   src/game/phone.cpp
   src/game/episode.cpp
+  src/core/log_export.cpp
   src/net/steam.cpp
   src/net/steam_relay.cpp
   src/net/upnp.cpp
@@ -133,6 +134,8 @@ add_library(iv-coop SHARED
   src/sync/scream.cpp
   src/sync/regroup.cpp
   src/sync/episode_sync.cpp
+  src/sync/player_mirror.cpp
+  src/sync/race_sync.cpp
   src/sync/attach_sync.cpp
   src/sync/ped_looks.cpp
   src/sync/vehicle_props.cpp
@@ -164,7 +167,8 @@ if(IVCOOP_DEPLOY)
 endif()
 
 # --- the installer: one exe with the mod embedded (see tools/installer/main.cpp) ---
-add_executable(iv-coop-setup WIN32 tools/installer/main.cpp tools/installer/installer.rc)
+add_executable(iv-coop-setup WIN32 tools/installer/main.cpp src/core/log_export.cpp tools/installer/installer.rc)
+target_include_directories(iv-coop-setup PRIVATE src)
 target_compile_options(iv-coop-setup PRIVATE /W4 /permissive- /utf-8)
 target_link_libraries(iv-coop-setup PRIVATE winhttp bcrypt version comctl32 shell32 ole32)
 target_link_options(iv-coop-setup PRIVATE

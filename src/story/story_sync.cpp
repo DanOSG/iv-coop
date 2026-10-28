@@ -217,8 +217,9 @@ void configure(const Settings& s) { g_cfg = s; }
 bool is_story_script(const std::string& name) {
   if (name.empty()) return false;
   // Always local, whatever the ini says: the phone (every player needs theirs, e.g. for
-  // the co-op menu while joined).
-  static const char* kAlwaysLocal[] = {"spcellphone*"};
+  // the co-op menu while joined); TBoGT's parachute (the engine starts parachutelauncher for whoever boards a
+  // helicopter, and it runs parachute_player, the player's own parachute); the episodes' stat trackers.
+  static const char* kAlwaysLocal[] = {"spcellphone*", "parachute*", "*stattracker"};
   for (const char* p : kAlwaysLocal)
     if (wildcard(p, name)) return false;
   for (const auto& p : g_cfg.local_scripts)
