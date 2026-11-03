@@ -509,9 +509,18 @@ docs/
     host-side only. **To verify in game:** whether START_NEW_SCRIPT_WITH_ARGS copies the args before the first tick
     (the adapter handles both), that the init's `l_U56[0] = 0` write is followed by our re-assert before any read,
     seat 0's pad-1 stick reads, the puppet surviving state 0's CLEAR_AREA_OF_CHARS, and the partner staying within
-    10 m of the table. Darts still use `sync/minigame_sync` (message 73): everyone at the table as a team, the
-    controlling player's input answering the script's reads, a go ending after 1.5 s without aim reads.
-    Table cameras (tenpinbowl, pool_game, darts) only stream to the players at the table.
+    10 m of the table. Table cameras (tenpinbowl, pool_game, darts) only stream to the seated players.
+  - **Darts (activities/darts, message 77):** up to four humans, each their own 301 (double out). The script has
+    two hard-coded seats (0 the local player, 1 the AI), so all humans play through seat 0: at each seat flip (3 darts
+    or a bust; seen as seat 0 -> 1 in state 1) the window's {score, history row, turn-start score} is saved for the
+    thrower, the next human's are loaded, and seat/dart/points/hint/sub-state are reset so the AI never throws.
+    A partner's turn is `activity_seats::set_active(partner)` (input + GET_PLAYER_CHAR = their puppet at the oche);
+    the host's turn is `set_active(0xFF)`. Win = state 2 with seat 0 at 0 (announced via the phone box and the log).
+    The script's own two-row board is replaced by the mod's 2-4 row board (drawn on the host, sent to partners as
+    message 77). Statics are layout-checked (array count words, ranges); on doubt the game stays vanilla 1v1.
+    **To verify in game:** the rotation on 3 darts, on a bust and on a checkout; the extra dart the script counts
+    after a bust (undone until the first throw); a rematch (scores reset, host first); a partner leaving mid-game;
+    that the partner's character stands at the oche.
   - **Hook safety:** `native_hooks::install` skips any handler inside the protected region; no-op natives such as
     SET_PLAYER_INVISIBLE_TO_AI point at a shared engine stub (0x4016A0) that the engine calls everywhere, and
     hooking it crashed the game at startup.
