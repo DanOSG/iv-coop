@@ -37,7 +37,8 @@ struct Ctl {
   int pad, control;
 };
 constexpr Ctl kCtl[] = {{2, 0},  {2, 1},  {2, 2},  {2, 3},  {2, 4},   {2, 21}, {2, 22}, {2, 23},
-                        {2, 77}, {2, 78}, {2, 87}, {2, 181}, {2, 182}, {0, 23}, {0, 77}, {0, 78}};
+                        {2, 77}, {2, 78}, {2, 87}, {2, 181}, {2, 182}, {0, 23}, {0, 77}, {0, 78},
+                        {2, 137}, {0, 1}, {0, 137}}; // golf's swing: start (2: 1/137), strike (0: 1/137)
 constexpr int kNumCtl = static_cast<int>(sizeof(kCtl) / sizeof(kCtl[0]));
 
 int ctl_index(int pad, int control) {
