@@ -1344,6 +1344,12 @@ natives::Ped puppet_ped(std::uint8_t id) {
   return it != g_remotes.end() ? it->second.puppet.ped() : 0;
 }
 
+natives::Vehicle puppet_vehicle(std::uint8_t id) {
+  const auto it = g_remotes.find(id);
+  if (it == g_remotes.end() || it->second.vehicle_id == sync::kNoVehicle) return 0;
+  return g_vehicles.handle_for(it->second.vehicle_id);
+}
+
 void leave() {
   if (session().status().mode == net::Mode::Idle) return;
   log::info("Leaving session (self-test)");
