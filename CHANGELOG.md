@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0
+
+- Air hockey (The Lost and Damned, The Ballad of Gay Tony): one against one, a friend on the far paddle with their
+  own controls.
+- Races (The Ballad of Gay Tony): up to three friends race as themselves in their own cars, starting on the grid,
+  each with their own finishing place.
+- Golf, air hockey, arm wrestling and hi-lo cards cameras show only for the players taking part.
+
 ## 0.8.0
 
 - Activities with everyone as their own character, each with their own score and turns:

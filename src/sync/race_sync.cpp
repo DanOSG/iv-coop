@@ -23,7 +23,7 @@ constexpr std::size_t kMaxCheckpoints = 64, kMaxPoints = 512;
 
 struct Checkpoint {
   std::int32_t type;
-  float x, y, z, a5, a6;
+  float x, y, z, nx, ny, nz, radius; // position, the next checkpoint (where it points), size
 };
 
 // Host: what's up now (for late joiners) and what to send.
@@ -51,7 +51,7 @@ void queue(net::Writer&& w) {
 bool capture(const Call& c) { return g_hosting && story::replicating(c.script); }
 
 void put_checkpoint(net::Writer& w, std::uint32_t id, const Checkpoint& cp) {
-  w.put(id).put(cp.type).put(cp.x).put(cp.y).put(cp.z).put(cp.a5).put(cp.a6);
+  w.put(id).put(cp.type).put(cp.x).put(cp.y).put(cp.z).put(cp.nx).put(cp.ny).put(cp.nz).put(cp.radius);
 }
 
 } // namespace
@@ -61,8 +61,11 @@ void register_hooks() {
   on(kCreateCheckpoint, "CREATE_CHECKPOINT", [](const Call& c) {
     if (!capture(c) || g_checkpoints.size() >= kMaxCheckpoints) return;
     const auto id = c.result<std::uint32_t>();
+    // CREATE_CHECKPOINT takes eight arguments: type, x y z, the next checkpoint's x y z, radius (as the scripts call
+    // it; the community signature lists six, and replaying six left the renderer reading garbage, which crashed it).
+    if (c.arg_count < 8) return;
     const Checkpoint cp{c.arg<std::int32_t>(0), c.arg<float>(1), c.arg<float>(2), c.arg<float>(3), c.arg<float>(4),
-                        c.arg<float>(5)};
+                        c.arg<float>(5),         c.arg<float>(6), c.arg<float>(7)};
     g_checkpoints[id] = cp;
     auto w = msg(OpCreate);
     put_checkpoint(w, id, cp);
@@ -154,12 +157,13 @@ void on_message(const net::GameMessage& m) {
     case OpCreate: {
       std::uint32_t id;
       Checkpoint cp{};
-      if (!r.get(id) || !r.get(cp.type) || !r.get(cp.x) || !r.get(cp.y) || !r.get(cp.z) || !r.get(cp.a5) ||
-          !r.get(cp.a6))
+      if (!r.get(id) || !r.get(cp.type) || !r.get(cp.x) || !r.get(cp.y) || !r.get(cp.z) || !r.get(cp.nx) ||
+          !r.get(cp.ny) || !r.get(cp.nz) || !r.get(cp.radius))
         return;
       if (const auto it = g_local.find(id); it != g_local.end()) n::invoke(kDeleteCheckpoint, it->second);
       if (g_local.size() >= kMaxCheckpoints) return;
-      g_local[id] = n::invoke<std::uint32_t>(kCreateCheckpoint, cp.type, cp.x, cp.y, cp.z, cp.a5, cp.a6);
+      if (cp.type < 0 || cp.type > 15 || !(cp.radius > 0.0f && cp.radius < 100.0f)) return; // never draw garbage
+      g_local[id] = n::invoke<std::uint32_t>(kCreateCheckpoint, cp.type, cp.x, cp.y, cp.z, cp.nx, cp.ny, cp.nz, cp.radius);
       break;
     }
     case OpDelete: {

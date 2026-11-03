@@ -117,11 +117,11 @@ void apply_settled() {
 
 } // namespace
 
-void tick(bool hosting, net::Session& net) {
+void tick(bool hosting, net::Session& net, bool ready) {
   g_hosting = hosting;
   if (!hosting) {
     g_out.clear();
-    apply_settled();
+    if (ready) apply_settled();
     return;
   }
   for (const Pending& p : g_out) {

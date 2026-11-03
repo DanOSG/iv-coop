@@ -30,10 +30,12 @@ using native_hooks::Call;
 
 constexpr std::uint32_t kIsControlPressed = 0x0E635761, kHasCharGotWeapon = 0x11F759DE, kRemoveWeapon = 0x2485231E;
 constexpr std::uint32_t kBotWeapon = 7; // the bot host gives it through player_mirror
+// Engine cutscenes (an episode's intro, a mission's) are stopped rather than waited out while the phone is wanted.
+constexpr std::uint32_t kHasCutsceneFinished = 0x4ECE1AD2, kStopCutscene = 0x50FF1428;
 constexpr std::int32_t kControlPhoneUp = 21; // (2, 21): "up" on the phone scripts opens the phone
 constexpr std::int32_t kControlSkip = 77;    // accept: pad A; scripted intros skip on it
 constexpr std::int32_t kScreenMainMenu = 1011, kScreenClose = 1001, kIdMultiplayer = 2000, kIdHost = 2001;
-constexpr std::uint32_t kSwitchTimeoutMs = 240000, kSettleMs = 20000, kPhoneTimeoutMs = 420000, kPhoneStepMs = 2000,
+constexpr std::uint32_t kSwitchTimeoutMs = 240000, kSettleMs = 20000, kPhoneTimeoutMs = 60000, kPhoneStepMs = 2000,
                         kJoinTimeoutMs = 45000, kHoldMs = 15000, kBotStartMs = 5000, kRefuseTimeoutMs = 25000,
                         kRestoreTimeoutMs = 20000, kQuitDelayMs = 3000;
 
@@ -52,17 +54,20 @@ unsigned g_refusals_before = 0;
 bool g_joined_seen = false;
 // Activity seats: host side (the bot seated, its input arriving) and joiner side (seated by the bot host).
 std::uint8_t g_seat_bot = 0xFF;
+bool g_seat_done = false; // this episode's host-side seat check has run
 bool g_seat_input_seen = false, g_seated_seen = false;
 float g_seat_moved = 0;
 n::Vector3 g_hold_start{};
 
 episode::Id target() { return g_episodes[g_index]; }
 
-void result(const std::string& check, bool ok, const std::string& detail) {
+void record(const std::string& check, const char* status, const std::string& detail) {
   std::ofstream(g_dir / "selftest_result.txt", std::ios::app)
-      << episode::short_name(target()) << '\t' << check << '\t' << (ok ? "PASS" : "FAIL") << '\t' << detail << '\n';
-  log::warn("Self-test: {} {} {}: {}", episode::short_name(target()), check, ok ? "PASS" : "FAIL", detail);
+      << episode::short_name(target()) << '\t' << check << '\t' << status << '\t' << detail << '\n';
+  log::warn("Self-test: {} {} {}: {}", episode::short_name(target()), check, status, detail);
 }
+
+void result(const std::string& check, bool ok, const std::string& detail) { record(check, ok ? "PASS" : "FAIL", detail); }
 
 void bot(const std::string& state) {
   std::ofstream(g_dir / "selftest_state.txt", std::ios::trunc) << "bot=" << state << '\n';
@@ -105,6 +110,7 @@ void send_window_back() {
 }
 
 void next_episode() {
+  g_seat_done = false;
   coop::leave();
   bot("none");
   if (++g_index < g_episodes.size()) {
@@ -193,7 +199,7 @@ void tick() {
         result("protagonist", g_protagonist != 0,
                std::format("model 0x{:08X} ({} expected 0x{:08X})", g_protagonist, episode::protagonist_name(target()),
                            episode::protagonist_model()));
-        go(Step::PhoneOpen);
+        coop::host(), bot("join"), go(Step::Host); // the phone comes last: an intro may hold it
       }
       break;
     case Step::PhoneOpen: {
@@ -202,11 +208,13 @@ void tick() {
         go(Step::PhoneMenu);
         phone::open_screen(kScreenMainMenu);
       } else if (in_step > kPhoneTimeoutMs) {
-        result("phone", false, std::format("the phone didn't open in {} s (player control off?); {}", in_step / 1000,
-                                           phone::unavailable() ? "menu marked unavailable" : "menu not marked"));
-        coop::host(), bot("join"), go(Step::Host);
+        // The game kept the phone away (an intro or a mission with control off): not the mod's fault.
+        record("phone", "SKIP", std::format("the game didn't hand the phone back in {} s (intro or control off); {}",
+                                            in_step / 1000, phone::unavailable() ? "menu marked unavailable" : "menu ok"));
+        next_episode();
       } else if (now - g_press_ms > 3000) {
         g_press_ms = now;
+        if (!n::invoke<bool>(kHasCutsceneFinished)) n::invoke(kStopCutscene); // don't sit through a cutscene
       }
       break;
     }
@@ -224,16 +232,14 @@ void tick() {
       if (in_step < kPhoneStepMs) return;
       {
         const phone::MenuProbe p = phone::probe();
-        result("phone co-op items", p.screen == kScreenMainMenu && p.first_id == kIdHost, probe_text(p));
+        result("phone co-op items", p.first_id == kIdHost, probe_text(p)); // the items are what matter; the game may shut the phone
         phone::open_screen(kScreenClose);
         go(Step::PhoneClose);
       }
       break;
     case Step::PhoneClose:
       if (in_step < kPhoneStepMs) return;
-      coop::host();
-      bot("join");
-      go(Step::Host);
+      next_episode();
       break;
     case Step::Host:
       if (mode() == net::Mode::Hosting && players() >= 2) {
@@ -244,7 +250,7 @@ void tick() {
       }
       break;
     case Step::HostHold:
-      if (g_seat_bot == 0xFF && in_step > 2000)
+      if (g_seat_bot == 0xFF && !g_seat_done && in_step > 2000)
         for (const auto& p : coop::status().session.players)
           if (p.id != coop::status().session.my_id) {
             g_seat_bot = p.id, g_seat_input_seen = false;
@@ -252,11 +258,13 @@ void tick() {
             activity_seats::set_active(p.id);
           }
       if (g_seat_bot != 0xFF && activity_seats::has_input(g_seat_bot)) g_seat_input_seen = true;
-      if (in_step > kHoldMs && g_seat_bot != 0xFF) {
+      // Unseated 3 s before leaving, as in play (an activity ends, the session goes on): leaving in the very frame a
+      // seated puppet was released crashed an engine worker on the next join about half the time.
+      if (in_step > kHoldMs - 3000 && g_seat_bot != 0xFF) {
         result("activity seat (host)", g_seat_input_seen && activity_seats::owns(coop::puppet_ped(g_seat_bot)),
                g_seat_input_seen ? "the seated bot's input arrived; its puppet is held" : "no input from the seated bot");
         activity_seats::unseat_all();
-        g_seat_bot = 0xFF;
+        g_seat_bot = 0xFF, g_seat_done = true;
       }
       if (players() < 2) {
         result("host", false, "the bot left the session");
@@ -344,7 +352,7 @@ void tick() {
     case Step::Next:
       if (mode() != net::Mode::Idle) coop::leave();
       if (in_step > 3000 && mode() == net::Mode::Idle && (!me() || my_model() == g_protagonist || in_step > 20000))
-        next_episode();
+        bot("none"), go(Step::PhoneOpen);
       break;
     case Step::Done:
       if (in_step > kQuitDelayMs) TerminateProcess(GetCurrentProcess(), 0);

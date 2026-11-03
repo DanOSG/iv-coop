@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(iv-coop VERSION 0.8.0 LANGUAGES C CXX)
+project(iv-coop VERSION 0.9.0 LANGUAGES C CXX)
 add_compile_definitions(IVCOOP_VERSION="${PROJECT_VERSION}")
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
@@ -95,6 +95,7 @@ add_library(iv-coop SHARED
   src/game/player_slots.cpp
   src/game/phone.cpp
   src/game/episode.cpp
+  src/game/model_swap.cpp
   src/core/log_export.cpp
   src/net/steam.cpp
   src/net/steam_relay.cpp

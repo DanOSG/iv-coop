@@ -7,6 +7,7 @@
 #include <map>
 
 #include "core/log.h"
+#include "game/model_swap.h"
 #include "net/bytes.h"
 
 namespace ivc::character {
@@ -116,7 +117,7 @@ bool settle() {
     n::RequestModel(target);
     if (!n::HasModelLoaded(target)) return false;
     const n::Player player = n::GetPlayerId();
-    n::ChangePlayerModel(player, target);
+    if (!model_swap::change_player_model(player, target)) return false; // hidden for a few frames first
     ped = n::GetPlayerChar(player);
     if (!ped) return false;
     n::SetCharDefaultComponentVariation(ped);

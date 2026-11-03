@@ -53,10 +53,10 @@ same episode as the host. If you are in a different one, the mod tells you which
 
 ### Activities
 
-Bowling, darts, pool, golf (The Ballad of Gay Tony), arm wrestling and hi-lo cards (The Lost and Damned) are played
-with everyone as their own character, with their own score and turns: stand near the host when they start the
-activity. Bowling, darts, golf and cards take up to four players; pool and arm wrestling are one against one, and
-whoever is waiting plays the winner.
+Bowling, darts, pool, air hockey, golf and races (The Ballad of Gay Tony), arm wrestling and hi-lo cards (The Lost
+and Damned) are played with everyone as their own character, with their own score and turns: stand near the host
+when they start the activity. Bowling, darts, golf, cards and races take up to four players; pool, air hockey and arm
+wrestling are one against one, and whoever is waiting plays the winner. In a race each player drives their own car.
 
 ### What to expect
 

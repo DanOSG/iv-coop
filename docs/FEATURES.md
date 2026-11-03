@@ -3,7 +3,7 @@
 iv-coop turns **GTA IV: The Complete Edition**'s single-player story into a co-op game for **up to 4 players**
 (a host + 3 partners). The host plays their own save and story; partners join that world as their own characters
 and play the missions alongside, and their own saves are never loaded or changed. It's one ASI plugin, set up by a
-one-click installer. Status: version 0.8.0; much of it is new and still being tested in play (see the end).
+one-click installer. Status: version 0.9.0; much of it is new and still being tested in play (see the end).
 
 ## Getting in
 - **Installer:** finds GTA IV, checks it's the supported version (1.2.0.59), installs TJGM's Drag n' Drop pack
@@ -56,6 +56,8 @@ one-click installer. Status: version 0.8.0; much of it is new and still being te
   - **Pool** (all three games): 1v1, a partner against the host; others queue and play the winner.
   - **Golf** (TBoGT): up to 4 golfers, each their own 10 shots and score.
   - **Arm wrestling** (TLAD): 1v1, a partner against the host. **Hi-lo cards** (TLAD): up to 4 at the table.
+  - **Air hockey** (TLAD, TBoGT): 1v1, a partner on the far paddle.
+  - **Races** (TBoGT): up to 4 racers, each in their own car from their own grid spot, with their own place.
   - Players at the table watch through the table camera; nobody else is pulled in.
 - **Out on your own:** street vendors, TBoGT's nightclub dancing and base jumps run for each player separately.
 

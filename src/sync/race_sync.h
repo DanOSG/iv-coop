@@ -4,7 +4,7 @@
 // (DRAW_CHECKPOINT) go with the HUD (story/hud); this is for the persistent ones.
 //
 //   [71][sender][op][...]   (reliable, host -> everyone)
-//   op 0 create checkpoint: id u32, type i32, x y z f32, a5 a6 f32 · op 1 delete checkpoint: id u32 ·
+//   op 0 create checkpoint: id u32, type i32, x y z, next x y z, radius f32 · op 1 delete checkpoint: id u32 ·
 //   op 2 start GPS race track: colour i32 (clears its points) · op 3 track point: x y z f32 ·
 //   op 4 render track: on u8 · op 5 loop track: on u8 · op 6 clear everything (sent before a full resend)
 //

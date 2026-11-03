@@ -320,7 +320,9 @@ int main(int argc, char** argv) {
           u32(give, 7), u32(give, 50);
           session.send_game(std::move(give), true);
           std::vector<std::uint8_t> cp{71, 0, 0};
-          u32(cp, 1), u32(cp, 0), f32(cp, 5.0f), f32(cp, 0.0f), f32(cp, 0.0f), f32(cp, 0.0f), f32(cp, 0.0f);
+          // A race checkpoint as the scripts make one: type 2 (arrow), 5 m from the origin, pointing at the next, 1 m.
+          u32(cp, 1), u32(cp, 2), f32(cp, 5.0f), f32(cp, 0.0f), f32(cp, 0.0f), f32(cp, 25.0f), f32(cp, 0.0f), f32(cp, 0.0f),
+              f32(cp, 1.0f);
           session.send_game(std::move(cp), true);
           std::printf("[%s] sent a weapon (69) and a checkpoint (71)\n", a.name.c_str());
         }

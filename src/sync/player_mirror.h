@@ -25,7 +25,9 @@ inline bool is_msg(std::span<const std::uint8_t> d) { return !d.empty() && d[0] 
 // Before native_hooks::install().
 void register_hooks();
 // Game thread, every frame: sends what the host's story did since the last call.
-void tick(bool hosting, net::Session& net);
+// `ready` (joiners): our character is the one we'll play the session as (client mode has swapped the model; a
+// swap drops weapons, so ops wait for it).
+void tick(bool hosting, net::Session& net, bool ready = true);
 // Joiner: apply to our own player.
 void on_message(const net::GameMessage& m);
 

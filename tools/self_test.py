@@ -32,7 +32,10 @@ def read(path):
 
 def main():
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    clear = 0  # a previous run's game (or its launcher) may still be closing: wait for 5 clear seconds in a row
+    # A previous run's launcher stack can linger and swallow the next launch: clear it, then wait for 5 clear seconds.
+    for exe in ("PlayGTAIV.exe", "Launcher.exe", "SocialClubHelper.exe", "RockstarErrorHandler.exe"):
+        subprocess.run(["taskkill", "/F", "/IM", exe], capture_output=True)
+    clear = 0
     for _ in range(60):
         busy = subprocess.run(["tasklist", "/NH"], capture_output=True, text=True).stdout
         clear = 0 if ("GTAIV.exe" in busy or "PlayGTAIV.exe" in busy) else clear + 1
@@ -51,7 +54,7 @@ def main():
     bot, bot_state = None, "none"
     log = open(BOT_LOG, "a")
     subprocess.Popen(launch_args(), cwd=GAME, creationflags=subprocess.CREATE_NO_WINDOW)
-    deadline, started, gone_since = time.time() + TIMEOUT, False, None
+    deadline, started, gone_since, up_since = time.time() + TIMEOUT, False, None, None
     try:
         while time.time() < deadline:
             time.sleep(1)
@@ -77,7 +80,9 @@ def main():
                 print(f"[driver] bot={state}", flush=True)
                 bot_state = state
             running = game_running()
-            started |= running
+            # Started = our game has run 30 s straight (a brief GTAIV.exe from a launcher restart doesn't count).
+            up_since = (up_since or time.time()) if running else None
+            started |= bool(up_since) and time.time() - up_since > 30
             # The launcher may start GTAIV.exe, end it and start it again: gone for 15 s means it's really closed.
             gone_since = None if running else (gone_since or time.time())
             if started and not running and time.time() - gone_since > 15:
