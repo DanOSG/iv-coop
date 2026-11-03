@@ -138,8 +138,12 @@ void register_hooks() {
     const auto cam = c.arg<n::Camera>(0);
     drop_cam(cam);
     if (c.arg<bool>(1)) {
-      const char* s = c.script.c_str();
-      g_cams.push_back({cam, _stricmp(s, "tenpinbowl") == 0 || _stricmp(s, "pool_game") == 0 || _stricmp(s, "darts") == 0});
+      // The activities' cameras go only to the players taking part (bowling's lane, the seated players elsewhere).
+      static const char* kTables[] = {"tenpinbowl", "pool_game", "darts", "golf", "air_hockey", "arm_wrestling",
+                                      "hi_lo_cards"};
+      bool table = false;
+      for (const char* t : kTables) table |= _stricmp(c.script.c_str(), t) == 0;
+      g_cams.push_back({cam, table});
     }
   });
   on(kActivateScripted, "ACTIVATE_SCRIPTED_CAMS", [](const Call& c) {
