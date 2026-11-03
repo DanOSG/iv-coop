@@ -10,6 +10,7 @@
 //   darts         up to 4: each player's 301 rotated through the script's human seat; scoreboard drawn by the mod
 //   golf          TBoGT, up to 4: each player takes the player path with their own scorebook
 //   tlad_games    TLAD arm wrestling (1v1 via the script's own second-pad mode) and hi-lo cards (4 seats)
+//   air_hockey    TLAD / TBoGT 1v1: a partner takes the far seat, paddle 1 driven from their input
 // Bowling is sync/bowling_sync (up to 4, each their own bowler). docs/activities/ has the research per script.
 
 #include <cstdint>

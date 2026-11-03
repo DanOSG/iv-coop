@@ -55,6 +55,7 @@ bool has_input(std::uint8_t id);
 struct PadSample {
   bool fresh = false, controller = false;
   int mx = 0, my = 0, kx = 0, ky = 0;
+  int lx = 0, ly = 0, rx = 0, ry = 0; // the sticks (adapters that drive a script's statics from them, e.g. air hockey)
 };
 PadSample sample(std::uint8_t id);
 // Host: partner `id` holds the relayed control (pad, control) (the list in the .cpp; others are never true); with

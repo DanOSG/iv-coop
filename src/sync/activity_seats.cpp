@@ -387,6 +387,7 @@ PadSample sample(std::uint8_t id) {
   const Input& in = it->second;
   out.fresh = true, out.controller = in.controller;
   out.mx = in.mx, out.my = in.my, out.kx = in.kx, out.ky = in.ky;
+  out.lx = in.lx, out.ly = in.ly, out.rx = in.rx, out.ry = in.ry;
   return out;
 }
 
