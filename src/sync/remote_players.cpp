@@ -37,6 +37,7 @@
 #include "sync/episode_sync.h"
 #include "sync/activities/activities.h"
 #include "sync/activities/darts.h"
+#include "sync/activities/races.h"
 #include "sync/activity_seats.h"
 #include "sync/player_mirror.h"
 #include "sync/race_sync.h"
@@ -838,8 +839,9 @@ void tick() {
       af.hosting = bf.hosting && bf.in_session, af.my_id = bf.my_id;
       for (const auto& p : bf.players) af.players.push_back({p.id, p.name, p.ped});
       activities::tick(af);
-      if (af.hosting) activities::darts::host_send(session());
+      if (af.hosting) activities::darts::host_send(session()), activities::races::host_send(session());
       activities::darts::client_tick();
+      activities::races::client_tick(bf.my_id);
     }
     {
       // Invaders and the invaded fight whatever the Team fire setting says (melee's switch is session-wide).
@@ -1105,7 +1107,8 @@ void tick() {
                          story::npc_anims::is_msg(m.data) || regroup::is_msg(m.data) || radio_sync::is_msg(m.data) ||
                          drunk_sync::is_msg(m.data) || bowling_sync::is_msg(m.data) ||
                          player_mirror::is_msg(m.data) || race_sync::is_msg(m.data) ||
-                         activity_seats::is_msg(m.data) || activities::darts::is_msg(m.data)))
+                         activity_seats::is_msg(m.data) || activities::darts::is_msg(m.data) ||
+                         activities::races::is_msg(m.data)))
         continue;
       if (melee_sync::is_msg(m.data)) {
         const auto it = g_remotes.find(m.from);
@@ -1138,6 +1141,10 @@ void tick() {
       }
       if (activities::darts::is_msg(m.data)) {
         activities::darts::on_message(m);
+        continue;
+      }
+      if (activities::races::is_msg(m.data)) {
+        activities::races::on_message(m);
         continue;
       }
       if (bowling_sync::is_msg(m.data)) {
@@ -1342,6 +1349,12 @@ bool join(const std::string& address) {
 natives::Ped puppet_ped(std::uint8_t id) {
   const auto it = g_remotes.find(id);
   return it != g_remotes.end() ? it->second.puppet.ped() : 0;
+}
+
+natives::Vehicle puppet_vehicle(std::uint8_t id) {
+  const auto it = g_remotes.find(id);
+  if (it == g_remotes.end() || it->second.vehicle_id == sync::kNoVehicle) return 0;
+  return g_vehicles.handle_for(it->second.vehicle_id);
 }
 
 void leave() {

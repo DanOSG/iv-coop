@@ -582,6 +582,17 @@ docs/
     far-seat sign/mirroring feels right, input latency (velocity commands are one frame + network old; the partner's
     view is the host's entity stream), the slam, the mouse divisor (fixed at the sensitivity midpoint), rematch/quit and
     the stand-in surviving cleanup.
+  - **Races (TBoGT `raceSP`):** partners race as themselves in their own car (`sync/activities/races.cpp`, message 79).
+    When the script's grid is populated (stage word 874 = 0, sub-stage 875 = 5, racer array l_U1129 with 4 slots, player in
+    slot 3) the first three partners near the start take the AI slots 0-2: each builds a car of that slot's model on its
+    grid spot (held until the host's "go"), the slot's AI car and driver are hidden in the sky as stand-ins, and once
+    the partner's puppet sits in the host's copy of their car the slot's ped and car words are replaced by them. The script's
+    own checkpoint, lap and place code then tracks them (`LOCATE_CHAR_ANY_MEANS_3D` on the puppet); everything it does to
+    that slot (`TASK_CAR_MISSION*`, `CLEAR_CHAR_TASKS`, the rubber-band `SET_CHAR_COORDINATES`/`APPLY_FORCE_TO_CAR`/
+    `WARP_CHAR_INTO_CAR`, `DELETE_*`) is aimed at the stand-in by before-hooks. Racers are not seated (activity_seats would
+    stop the puppet following the partner's driving). Places come from lap, checkpoint, distance as in `sub_2125`; each
+    partner gets theirs by message and phone text. Car/bike types 0-2 only; any layout mismatch leaves the race vanilla.
+    TLAD RoadRash is not handled (6 AI racers, different struct, combat).
   - **Hook safety:** `native_hooks::install` skips any handler inside the protected region; no-op natives such as
     SET_PLAYER_INVISIBLE_TO_AI point at a shared engine stub (0x4016A0) that the engine calls everywhere, and
     hooking it crashed the game at startup.

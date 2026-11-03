@@ -74,6 +74,8 @@ bool join(const std::string& address);
 void leave();
 // The puppet ped of player `id` here (0 if none).
 natives::Ped puppet_ped(std::uint8_t id);
+// Our copy of the vehicle player `id` is in (0 if on foot or it hasn't arrived here yet).
+natives::Vehicle puppet_vehicle(std::uint8_t id);
 void stop_recording();
 
 } // namespace ivc::coop
