@@ -139,6 +139,7 @@ add_library(iv-coop SHARED
   src/sync/activities/activities.cpp
   src/sync/activities/pool.cpp
   src/sync/activities/darts.cpp
+  src/sync/activities/golf.cpp
   src/sync/activity_seats.cpp
   src/sync/attach_sync.cpp
   src/sync/ped_looks.cpp
