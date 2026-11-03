@@ -37,7 +37,9 @@ struct Ctl {
   int pad, control;
 };
 constexpr Ctl kCtl[] = {{2, 0},  {2, 1},  {2, 2},  {2, 3},  {2, 4},   {2, 21}, {2, 22}, {2, 23},
-                        {2, 77}, {2, 78}, {2, 87}, {2, 181}, {2, 182}, {0, 23}, {0, 77}, {0, 78}};
+                        {2, 77}, {2, 78}, {2, 87}, {2, 181}, {2, 182}, {0, 23}, {0, 77}, {0, 78},
+                        // hi-lo cards' higher / lower (keyboard, controller): appended, the indices above are fixed
+                        {2, 93}, {2, 94}, {2, 79}, {2, 130}, {2, 131}};
 constexpr int kNumCtl = static_cast<int>(sizeof(kCtl) / sizeof(kCtl[0]));
 
 int ctl_index(int pad, int control) {
@@ -259,7 +261,8 @@ void on_player_char(const Call& c) {
 
 void send_seat(std::uint8_t id, const Seat& s, bool on, net::Session& net) {
   auto w = msg(OpSeat, id);
-  w.put(static_cast<std::uint8_t>(on)).put(static_cast<std::uint8_t>(on && g_active == id))
+  // A seat on its own pad (> 2) is live all the time: its script reads that pad (or the adapter reads sample()).
+  w.put(static_cast<std::uint8_t>(on)).put(static_cast<std::uint8_t>(on && (g_active == id || s.pad > 2)))
       .put(static_cast<std::int8_t>(s.pad));
   net.send_game(std::move(w.data()), true);
 }
@@ -375,6 +378,29 @@ bool has_input(std::uint8_t id) {
 }
 
 bool seated(std::uint8_t id) { return g_seats.count(id) != 0; }
+
+PadSample sample(std::uint8_t id) {
+  PadSample out;
+  const auto it = g_inputs.find(id);
+  if (it == g_inputs.end() || !it->second.fresh()) return out;
+  const Input& in = it->second;
+  out.fresh = true, out.controller = in.controller;
+  out.mx = in.mx, out.my = in.my, out.kx = in.kx, out.ky = in.ky;
+  return out;
+}
+
+bool control(std::uint8_t id, int pad, int control, bool edge) {
+  const int i = ctl_index(pad, control);
+  const auto it = g_inputs.find(id);
+  if (i < 0 || it == g_inputs.end()) return false;
+  Input& in = it->second;
+  if (edge) {
+    const bool v = (in.just & (1u << i)) != 0;
+    in.just &= ~(1u << i);
+    return v;
+  }
+  return in.fresh() && (in.controls & (1u << i));
+}
 
 bool owns(n::Ped ped) {
   if (!ped || !g_hosting) return false;

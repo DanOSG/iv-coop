@@ -36,7 +36,9 @@ inline bool is_msg(std::span<const std::uint8_t> d) { return !d.empty() && d[0] 
 // ---- host
 
 // Seat partner `id` (their puppet `ped` here) in `script`'s game. `pad`: the controller index the script reads that
-// seat's sticks/buttons from (-1: it only reads the generic pad, so turns decide; see set_active).
+// seat's sticks/buttons from (-1: it only reads the generic pad, so turns decide; see set_active). A pad above 2
+// (arm wrestling's 99) makes the seat live all the time: the partner streams input without a turn, and only reads
+// on that pad are answered with it; an adapter that reads the input itself (sample/control) can use an unused pad.
 void seat(std::uint8_t id, natives::Ped ped, const std::string& script, int pad);
 void unseat(std::uint8_t id);
 void unseat_all();
@@ -48,6 +50,17 @@ void set_active(std::uint8_t id);
 bool seated(std::uint8_t id);
 // Host: seated partner `id` is sending input (self-test).
 bool has_input(std::uint8_t id);
+// Host: what a seated partner's devices say now (for adapters that answer a script's mouse / keyboard fallback for
+// them): the mouse and keyboard-move reads and whether they use a controller. Idle (fresh false) once they go quiet.
+struct PadSample {
+  bool fresh = false, controller = false;
+  int mx = 0, my = 0, kx = 0, ky = 0;
+};
+PadSample sample(std::uint8_t id);
+// Host: partner `id` holds the relayed control (pad, control) (the list in the .cpp; others are never true); with
+// `edge`, whether it was pressed since the last call (consumed). For adapters that decide from their input in the
+// script's statics rather than through the script's own reads.
+bool control(std::uint8_t id, int pad, int control, bool edge = false);
 // Host: anyone is seated (story/scene_cam streams the table cameras to the seated players only then).
 bool any_seated();
 // The host must not drive this puppet from the partner's movement stream (the script has it).
