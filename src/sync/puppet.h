@@ -103,6 +103,9 @@ class Puppet {
   natives::Vector3 last_goal_{};
   float last_heading_ = 0;
   std::uint32_t last_issue_ms_ = 0;
+  // A player-slot ped holds still for a moment after its slot was created or reused: moving a player across the map
+  // in the frame its slot was recycled crashed an engine worker (stale per-player data).
+  std::uint32_t settle_until_ms_ = 0;
   bool moving_aimed_ = false; // the current movement task also aims
   natives::Vector3 last_aim_{};
   float error_m_ = 0;

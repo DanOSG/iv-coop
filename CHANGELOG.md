@@ -10,7 +10,8 @@
   - Arm wrestling (one against one) and hi-lo cards (up to four) in The Lost and Damned.
 - Balls, pins, darts and pucks are simulated once, on the host, and replayed for everyone at 60 updates a second with
   smoothing that follows their motion, so shots end exactly where they did on the host (no desyncs).
-- Fixed a crash when the host's story gave a partner a weapon the moment they joined.
+- Fixed a crash that could happen when joining a host far away (a partner's character was moved across the map in
+  the same moment its player slot was reused).
 - The team version of pool and darts from 0.7.1 is replaced by the above.
 - Drinking nights out now make partners drunk too (it never triggered before).
 - Street vendors, nightclub dancing (TBoGT) and base jumps (TBoGT) work for every player on their own.

@@ -51,7 +51,7 @@ def main():
     bot, bot_state = None, "none"
     log = open(BOT_LOG, "a")
     subprocess.Popen(launch_args(), cwd=GAME, creationflags=subprocess.CREATE_NO_WINDOW)
-    deadline, started = time.time() + TIMEOUT, False
+    deadline, started, gone_since = time.time() + TIMEOUT, False, None
     try:
         while time.time() < deadline:
             time.sleep(1)
@@ -78,7 +78,9 @@ def main():
                 bot_state = state
             running = game_running()
             started |= running
-            if started and not running:
+            # The launcher may start GTAIV.exe, end it and start it again: gone for 15 s means it's really closed.
+            gone_since = None if running else (gone_since or time.time())
+            if started and not running and time.time() - gone_since > 15:
                 break
         else:
             subprocess.run(["taskkill", "/F", "/IM", "GTAIV.exe"], capture_output=True)

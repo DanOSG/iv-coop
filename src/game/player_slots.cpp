@@ -172,7 +172,9 @@ n::Ped acquire(const n::Vector3& at, float heading, std::uint32_t model) {
       continue;
     }
     if (!wear(i, model)) return 0;
-    place(s.ped, at, heading);
+    // Left where it was parked: the puppet moves it once the slot has settled (sync/puppet). Teleporting a recycled
+    // slot's player across the map in this frame crashed an engine worker reading the slot's stale data.
+    (void)at, (void)heading;
     s.in_use = true;
     log::info("PlayerSlots: reusing slot {} (ped {})", kFirstSlot + i, s.ped);
     return s.ped;

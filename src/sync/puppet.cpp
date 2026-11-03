@@ -1,5 +1,7 @@
 #include "sync/puppet.h"
 
+#include <windows.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -72,6 +74,7 @@ bool Puppet::ensure(const n::Vector3& at) {
   // model. Out of slots, other models fall back to an ordinary ped.
   ped_ = animated_ ? player_slots::acquire(at, 0.0f, model_) : 0;
   is_player_ped_ = ped_ != 0;
+  if (is_player_ped_) settle_until_ms_ = GetTickCount() + 500;
   if (!ped_ && model_ == player_slots::kProtagonistModel) {
     phase_ = "no player slot";
     return false;
@@ -197,6 +200,11 @@ void Puppet::unlock_ragdoll() {
 
 void Puppet::drive(const PlayerState& t, std::uint32_t now_ms) {
   if (!ped_) return;
+  if (settle_until_ms_ && static_cast<std::int32_t>(GetTickCount() - settle_until_ms_) < 0) {
+    phase_ = "settling slot";
+    return;
+  }
+  settle_until_ms_ = 0;
   if (mirroring_ragdoll_ || (!ragdoll_locked_ && n::invoke<bool>(kIsPedRagdoll, ped_))) {
     phase_ = "ragdoll";
     return; // tasks would fight the ragdoll; it gets up when the owner does
