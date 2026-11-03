@@ -545,6 +545,22 @@ docs/
     (0,137): the strike reads pad 0). **To verify in game:** the swing release from a partner, that the O skip
     fires once per half-turn and the tee hand-over uses the new golfer, club position after the swap, the host not
     walking off while a partner shoots, that puppets tolerate the tee attach / `MINI_GOLF` anims, rematch and quit.
+  - **TLAD arm wrestling and hi-lo cards (`sync/activities/tlad_games`):** the host's own scripts stay the game.
+    Arm wrestling has an unused second-human mode: static `l_U116 = 1` makes seat B read `GET_POSITION_OF_ANALOGUE_STICKS(99)`
+    through the flick helper. A partner within 15 m when a match starts becomes the opponent (puppet in `l_U220`, `l_U116 = 1`,
+    `activity_seats::seat(.., 99)`, the script's own opponent kept hidden as the stand-in so its DELETE_CHAR / MARK_...
+    on `l_U220` land on it); the pad-99 stick read flags a context so the helper's mouse / keyboard / IS_USING_CONTROLLER
+    fallbacks are answered from the partner too (`activity_seats::sample`). A seat on a pad above 2 is live all the time (the
+    partner streams input without a turn). Hi-lo cards seats up to three partners in `l_U253[1..3]` (group friends' seats
+    are left alone); the script plays them as AI, so on a partner's turn (`l_U214 == 3`) the adapter holds the AI off
+    (reverting its `l_U214 = 4`) and writes the AI's own results (`l_U116`, `l_U221`, `l_U216`, `l_U214 = 4`) from the
+    partner's higher / lower (`activity_seats::control`, controls 93/130/79, 94/131/78); after 20 s the AI decides.
+    The table's exit (`SET_PLAYER_CONTROL(.., 1)` in the script's cleanup) puts the original peds back first. Stakes
+    and winnings stay the host's (announced for partners). **To verify in game:** that seat B's power moves for a flicking
+    partner (the script's AI block after the pad-99 branch, arm_wrestling.txt:1848-1869, must not overwrite it; a log
+    warning says so after 12 s), that mouse partners' per-frame deltas are enough to flick, that the puppet shows in the
+    seat and plays the match animations, hi-lo turn flow and reaction animations after a partner's call, and the
+    cleanup (host and puppets back to normal; the ambient AI diners return).
   - **Hook safety:** `native_hooks::install` skips any handler inside the protected region; no-op natives such as
     SET_PLAYER_INVISIBLE_TO_AI point at a shared engine stub (0x4016A0) that the engine calls everywhere, and
     hooking it crashed the game at startup.
