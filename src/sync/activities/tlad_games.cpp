@@ -41,7 +41,7 @@ namespace n = natives;
 using native_hooks::Call;
 
 constexpr std::uint32_t kGetSticks = 0x4F7F4FAE, kGetMouse = 0x447B154B, kGetKeyboardMove = 0x4AF73456,
-                        kIsUsingController = 0x669D053F, kSetPlayerControl = 0x1A6203EA,
+                        kIsUsingController = 0x669D053F,
                         kAttachPedToObject = 0x376917AB, kDetachPed = 0x2CD52C5C;
 
 std::string lower(std::string s) {
@@ -422,11 +422,6 @@ void hi_tick(const Frame& f) {
 
 // The game ends through sub_793 (:2627), which starts with SET_PLAYER_CONTROL(player, 1) and then releases or re-seats
 // whatever is in l_U253 as ambient table sitters: give the script its own peds back before that runs.
-void hi_on_exit(const Call& c) {
-  if (g_hi.empty() || lower(c.script) != "hi_lo_cards" || c.arg<std::int32_t>(1) == 0) return;
-  hi_release_all(activity_seats::statics("hi_lo_cards"), "the script is closing the table");
-}
-
 } // namespace
 
 void register_hooks() {
@@ -435,7 +430,8 @@ void register_hooks() {
   on(kGetMouse, "GET_MOUSE_INPUT", [](const Call& c) { arm_on_pair(c, true); });
   on(kGetKeyboardMove, "GET_KEYBOARD_MOVE_INPUT", [](const Call& c) { arm_on_pair(c, false); });
   on(kIsUsingController, "IS_USING_CONTROLLER", arm_on_using_controller);
-  native_hooks::before(kSetPlayerControl, "SET_PLAYER_CONTROL", hi_on_exit);
+  // No SET_PLAYER_CONTROL hook for hi-lo's close-down: hooking that native crashed the game (an engine worker, when a
+  // player slot was reused on joining); the per-frame check releases the seats when the table closes instead.
 }
 
 void host_tick(const Frame& f) {

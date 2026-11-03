@@ -32,13 +32,15 @@ def read(path):
 
 def main():
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    for _ in range(30):  # a previous run's game may still be closing
-        if not game_running():
+    clear = 0  # a previous run's game (or its launcher) may still be closing: wait for 5 clear seconds in a row
+    for _ in range(60):
+        busy = subprocess.run(["tasklist", "/NH"], capture_output=True, text=True).stdout
+        clear = 0 if ("GTAIV.exe" in busy or "PlayGTAIV.exe" in busy) else clear + 1
+        if clear >= 5:
             break
         time.sleep(1)
     else:
         sys.exit("close the game first")
-    time.sleep(3)
     episodes = [int(a) for a in sys.argv[1:]] or [0, 1, 2]
     for path in (STATE, os.path.join(PLUGINS, "selftest.active")):
         if os.path.exists(path):
