@@ -4,7 +4,7 @@
 
 // Each adapter: namespace ivc::activities::<name> { void register_hooks(); void host_tick(const Frame&); }
 // declared here so the adapters stay self-contained files. ACTIVITY(name) lists them once.
-#define IVC_ACTIVITIES(ACTIVITY) ACTIVITY(pool) ACTIVITY(darts) ACTIVITY(golf) ACTIVITY(tlad_games) /* adapters are added here as they land */
+#define IVC_ACTIVITIES(ACTIVITY) ACTIVITY(pool) ACTIVITY(darts) ACTIVITY(golf) ACTIVITY(tlad_games) ACTIVITY(air_hockey) /* adapters are added here as they land */
 
 namespace ivc::activities {
 

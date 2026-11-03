@@ -570,6 +570,18 @@ docs/
     half the usual delay and no extrapolation past the newest snapshot. So the path between snapshots follows the
     motion, nothing overshoots, and every ball, pin and dart comes to rest where it did on the host. The rules,
     scores and turns are the host script's, and the host reads its own simulation.
+  - **Air hockey (`sync/activities/air_hockey`, TLAD + TBoGT):** 1v1 host vs one partner, each as their own character. The
+    script has two seats: seat 0 reads pad 0 (`sub_14382`), seat 1 is `l_U524` driven by an AI (`sub_15445`) that is skipped
+    while `l_U486 > 0`. When a game is under way (`l_U245 == 4`) the partner's puppet replaces `l_U524` (original kept hidden
+    as the stand-in, same anchor `l_U538[1]`), `l_U486` is held at 1e9, and every frame (states 4/8) paddle 1's velocity
+    statics (276/277) get what the seat-0 helper `sub_14423` would write, mirrored: stick / mouse divisors and table-bound
+    gates from the script's own statics, right-stick slam, and the `sub_14980` wall pinch. The partner's sticks come from
+    `activity_seats::sample` (now carries lx/ly/rx/ry) on a seat on pad 97, no native hooks. TBoGT = statics -113. Layout
+    fingerprinted (divisors 1650/560/512/256, extents, AI tuning) else vanilla; scores announced via the phone.
+    **To verify in game:** slot numbers (paddle array element size 12, velocity 276/277, scores 518/519), that the
+    far-seat sign/mirroring feels right, input latency (velocity commands are one frame + network old; the partner's
+    view is the host's entity stream), the slam, the mouse divisor (fixed at the sensitivity midpoint), rematch/quit and
+    the stand-in surviving cleanup.
   - **Hook safety:** `native_hooks::install` skips any handler inside the protected region; no-op natives such as
     SET_PLAYER_INVISIBLE_TO_AI point at a shared engine stub (0x4016A0) that the engine calls everywhere, and
     hooking it crashed the game at startup.
