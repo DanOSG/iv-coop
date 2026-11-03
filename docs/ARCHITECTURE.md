@@ -498,15 +498,20 @@ docs/
     GET_TEXTURE_FROM_STREAMED_TXD; partners load the same texture). `parachute*` and `*stattracker` always run
     locally (the engine starts parachutelauncher for whoever boards a helicopter). Natives were picked by diffing
     the episodes' decompiled scripts against IV's.
-  - **Pool and darts (0.7.1, `sync/minigame_sync`, message 73):** bowling's approach without a scorecard of our
-    own. pool_game and darts are the same script in all three games; the human side is played by everyone at the
-    table (host and partners within 15 m when the script starts) as a team against the friend. The controlling
-    player's sticks, mouse, keyboard move (pool aims with it), controls (2: 0 1 2 4 23 77 78, 0: 77 78), pad buttons
-    0-19 and mouse buttons answer the script's reads on the host. A go ends after 1.5 s without aim reads (sticks,
-    mouse, keyboard move) and the next read hands it on, so pool alternates shots and darts alternates darts.
-    Table cameras (tenpinbowl, pool_game, darts) only stream to the players at the table. **To verify in game:** that
-    the scripts don't read the aim during the friend's turn or while balls/darts are in flight (otherwise a go
-    would never end), and that pool's per-player pad index (`l_U318._fU32[l_U243]`) is 0 for the human side.
+  - **Pool (`sync/activities/pool`, on `activity_seats`):** 1v1, each player their own character; the team mode was
+    removed. When pool_game runs on the host, the first partner near the table (the head of a wait queue) takes seat 0
+    (the friend/stranger seat) and the host keeps seat 1. The adapter writes the partner's puppet into the script's
+    args/live copy (not pool_table's block), sets seat 0's human flag and pad word 1, seats it (`activity_seats::seat`,
+    original opponent ped kept hidden as the stand-in so the script's DELETE_CHAR hits it), and sets the active seat
+    from the turn word every frame. Statics are checked (size words, flags 0/1, turn, winner) per episode; any doubt
+    leaves the game single player. The winner stays on across games (a winning partner keeps seat 0; a loser queues
+    behind the others, longest wait first); the next challenger sits when pool_game starts again. Notifications are
+    host-side only. **To verify in game:** whether START_NEW_SCRIPT_WITH_ARGS copies the args before the first tick
+    (the adapter handles both), that the init's `l_U56[0] = 0` write is followed by our re-assert before any read,
+    seat 0's pad-1 stick reads, the puppet surviving state 0's CLEAR_AREA_OF_CHARS, and the partner staying within
+    10 m of the table. Darts still use `sync/minigame_sync` (message 73): everyone at the table as a team, the
+    controlling player's input answering the script's reads, a go ending after 1.5 s without aim reads.
+    Table cameras (tenpinbowl, pool_game, darts) only stream to the players at the table.
   - **Hook safety:** `native_hooks::install` skips any handler inside the protected region; no-op natives such as
     SET_PLAYER_INVISIBLE_TO_AI point at a shared engine stub (0x4016A0) that the engine calls everywhere, and
     hooking it crashed the game at startup.
