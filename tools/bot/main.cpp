@@ -277,6 +277,13 @@ int main(int argc, char** argv) {
                       true);
     std::printf("[%s] told %s we play episode %d\n", a.name.c_str(), op == 0 ? "everyone" : "the host", a.episode);
   };
+  bool seat_on = false, seat_active = false;
+  std::uint32_t seat_input_at = 0;
+  // --serve --episode: seat the joiner in a pretend activity 2-8 s after they join, with a pose 2 m east of them.
+  std::uint8_t seat_target = 0;
+  std::uint32_t seat_from = 0;
+  float target_x = 0, target_y = 0, target_z = 0;
+  bool have_target = false, seat_sent_off = false;
   auto send_clip = [&send_melee](const std::string& dict, const std::string& clip) { send_melee(46, 0xFF, dict, clip); };
 
   while (!g_quit) {
@@ -297,6 +304,7 @@ int main(int argc, char** argv) {
       if (e.kind == K::Joined) {
         std::printf("[%s] player #%u '%s' is here\n", a.name.c_str(), e.id, e.text.c_str());
         if (a.serve) send_episode(0);
+        if (a.serve && a.episode >= 0) seat_target = e.id, seat_from = now + 2000, have_target = false, seat_sent_off = false;
         if (a.serve && a.episode >= 0) {
           // The self-test's joiner checks: player_mirror (give weapon 7, a pistol, 50 rounds) and race_sync (one
           // checkpoint 5 m from the origin).
@@ -356,12 +364,49 @@ int main(int argc, char** argv) {
           std::printf("[%s] host vehicle is now 0x%08X\n", a.name.c_str(), u.state.vehicle_id);
         host_vehicle = u.state.vehicle_id;
       }
+      if (seat_target && u.id == seat_target && !have_target)
+        target_x = u.state.x + 2.0f, target_y = u.state.y, target_z = u.state.z, have_target = true;
+    }
+    {
+      // sync/activity_seats test rig: [75][0][op][target]...
+      auto put_f = [](std::vector<std::uint8_t>& v, float f) {
+        std::uint8_t b[4];
+        std::memcpy(b, &f, 4);
+        v.insert(v.end(), b, b + 4);
+      };
+      if (seat_target && have_target && now >= seat_from && now < seat_from + 6000 && now - seat_input_at >= 100) {
+        seat_input_at = now;
+        session.send_game({75, 0, 0, seat_target, 1, 1, static_cast<std::uint8_t>(-1)}, true); // seated, their turn
+        std::vector<std::uint8_t> pose{75, 0, 1, seat_target};
+        put_f(pose, target_x), put_f(pose, target_y), put_f(pose, target_z), put_f(pose, 90.0f);
+        session.send_game(std::move(pose), false);
+      } else if (seat_target && have_target && now >= seat_from + 6000 && !seat_sent_off) {
+        seat_sent_off = true;
+        session.send_game({75, 0, 0, seat_target, 0, 0, static_cast<std::uint8_t>(-1)}, true);
+        std::printf("[%s] activity seat test: seated player %u for 6 s, now released\n", a.name.c_str(), seat_target);
+      }
+      // Seated by the host and it's our turn: input with control (2, 77) held (bit 8), ~30 Hz.
+      if (seat_on && seat_active && now - seat_input_at >= 33) {
+        seat_input_at = now;
+        std::vector<std::uint8_t> in{75, 0, 3, session.status().my_id};
+        const std::uint32_t controls = 1u << 8;
+        for (int i = 0; i < 4; ++i) in.push_back(static_cast<std::uint8_t>(controls >> (8 * i)));
+        in.insert(in.end(), 4 + 4 + 1 + 1 + 16, 0); // just, buttons, mouse buttons, controller, 8 axes
+        session.send_game(std::move(in), false);
+      }
     }
     for (const auto& u : session.drain_vehicles()) ++vehicles_received[u.state.vehicle_id];
 
     const std::uint8_t my_id = session.status().my_id;
     static unsigned world_ops = 0;
     for (const auto& gm : session.drain_game()) {
+      // sync/activity_seats (75): the host seated us; while it says we're up, send input (control 2,77 held).
+      if (gm.data.size() >= 7 && gm.data[0] == 75 && gm.data[2] == 0 && gm.data[3] == my_id) {
+        const bool on = gm.data[4] != 0, active = gm.data[5] != 0;
+        if (on != seat_on || active != seat_active)
+          std::printf("[%s] activity seat: %s%s\n", a.name.c_str(), on ? "seated" : "unseated", active ? ", our turn" : "");
+        seat_on = on, seat_active = active;
+      }
       if (!gm.data.empty() && gm.data[0] == 67 && gm.data.size() >= 4)
         std::printf("[%s] episode message from #%u: op %u, episode %u\n", a.name.c_str(), gm.from, gm.data[2], gm.data[3]);
       // --melee: melee_sync messages from the host. The one being hit decides contact; we have no game to test

@@ -12,7 +12,7 @@
 #include "game/natives.h"
 #include "net/bytes.h"
 #include "sync/bowling_sync.h"
-#include "sync/minigame_sync.h"
+#include "sync/activity_seats.h"
 #include "story/cutscene.h"
 #include "story/story_sync.h"
 
@@ -58,7 +58,7 @@ std::vector<PendingFade> g_fades;
 bool story_call(const Call& c) { return g_hosting && is_story_script(c.script); }
 bool scene_on() {
   return g_scripted && !g_cams.empty() && (!g_cams.back().bowling || bowling_sync::lane_cam_wanted() ||
-                                                         minigame_sync::cam_wanted());
+                                                         activity_seats::any_seated());
 }
 
 void drop_cam(n::Camera cam) {
@@ -228,7 +228,7 @@ void client_tick(bool watch) {
   if (g_scene && now - g_last_sample > kTimeoutMs) g_scene = false, g_fade_since = now;
   // The lane camera is for the people bowling with the host, not for whoever is elsewhere in the session.
   const bool scene =
-      g_scene && (!g_bowl_scene || bowling_sync::participating() || minigame_sync::participating());
+      g_scene && (!g_bowl_scene || bowling_sync::participating() || activity_seats::me_seated());
   if (!watch || cutscene_on) { // our own setting, or a cutscene is playing here: stand down
     g_pending_fades.clear();
     if (g_cam_live || g_control_taken) teardown();

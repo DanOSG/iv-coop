@@ -72,6 +72,8 @@ bool start_recording(const std::string& path);
 // Self-test (game thread): join `address` on the configured port as F11 does, and leave whatever session we're in.
 bool join(const std::string& address);
 void leave();
+// The puppet ped of player `id` here (0 if none).
+natives::Ped puppet_ped(std::uint8_t id);
 void stop_recording();
 
 } // namespace ivc::coop

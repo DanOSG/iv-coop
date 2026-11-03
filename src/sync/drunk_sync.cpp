@@ -54,15 +54,24 @@ void set_cam(float intensity, std::uint32_t ms) {
 
 // ---- host
 
-void on_drunk(const Call& c) {
-  const auto ped = c.arg<n::Ped>(0);
-  const bool on = c.arg<std::uint32_t>(1) != 0;
-  const n::Ped me = player_ped();
-  if (!me || ped != me) return; // other peds (a date) are not synced yet
+// The host is drunk while a script has made the player ped drunk (dates) or the drunk camera is on (friend
+// outings: the friend scripts make the *friend* drunk and give the player only the drunk camera and stumbles).
+bool g_by_ped = false, g_by_cam = false;
+
+void set_drunk(bool on) {
   if (on && !g_host.drunk) g_start_pending = true;
   if (g_host.drunk != on) g_dirty = true;
   g_host.drunk = on;
   if (!on) g_host.mask = 0;
+}
+
+void on_drunk(const Call& c) {
+  const auto ped = c.arg<n::Ped>(0);
+  const bool on = c.arg<std::uint32_t>(1) != 0;
+  const n::Ped me = player_ped();
+  if (!me || ped != me) return; // other peds (the friend, a date) are not synced yet
+  g_by_ped = on;
+  set_drunk(g_by_ped || g_by_cam);
 }
 
 void on_cam(const Call& c) {
@@ -71,6 +80,8 @@ void on_cam(const Call& c) {
   if (v == g_host.cam && ms == g_host.cam_ms) return;
   g_host.cam = v, g_host.cam_ms = ms;
   g_dirty = true;
+  g_by_cam = v > 0.0f;
+  set_drunk(g_by_ped || g_by_cam);
 }
 
 void send_state(net::Session& net) {

@@ -11,6 +11,7 @@
 
 #include "core/log.h"
 #include "game/episode.h"
+#include "sync/activity_seats.h"
 #include "game/native_hooks.h"
 #include "game/script.h"
 #include "net/bytes.h"
@@ -112,6 +113,12 @@ bool g_friend_virtual = false, g_slot0_done_virtual = false; // our overrides th
 std::int32_t g_friend_real_frame = 0;
 bool g_proxy = false;                                        // the controlling partner left: the host finishes the frame
 const std::int32_t* g_checked_statics = nullptr;
+// Each partner bowls as their own character: on their turn card 0's bowler (word 0, the ped the script runs up,
+// hands the ball and animates) is their puppet, seated through sync/activity_seats (which also makes the script's
+// GET_PLAYER_CHAR return it). The host's own ped goes back for the host's and the friend's turns.
+std::int32_t g_host_card_ped = 0;
+std::int32_t* g_card_ped_slot = nullptr; // card 0's word 0 in the statics it was taken from
+std::uint8_t g_bowler_seat = 0xFF; // the partner seated as card 0's bowler, if any
 
 // Partner.
 bool g_froze = false;       // we switched our player's control off for our turn
@@ -162,7 +169,18 @@ std::string frame_marks(const Roll& f) {
 
 // ---- engine (host)
 
+void restore_bowler() {
+  if (g_bowler_seat != 0xFF) activity_seats::unseat(g_bowler_seat);
+  g_bowler_seat = 0xFF;
+  activity_seats::set_active(0xFF);
+  if (g_host_card_ped && g_card_ped_slot && g_checked_statics &&
+      activity_seats::statics("tenpinbowl") == g_checked_statics)
+    *g_card_ped_slot = g_host_card_ped;
+  g_host_card_ped = 0, g_card_ped_slot = nullptr;
+}
+
 void reset_game() {
+  restore_bowler();
   g_view = View{};
   g_ball_in_frame = 0;
   g_pins.clear();
@@ -439,6 +457,7 @@ void set_friend_virtual(std::int32_t* st, bool on) {
 
 void abandon_script_mode(const char* why) {
   if (!g_script_mode) return;
+  restore_bowler();
   log::warn("Bowling: leaving the script-card mode ({}); the rest is scored from the pins, frames shared", why);
   g_script_mode = false;
   g_proxy = false;
@@ -478,6 +497,7 @@ void begin_script_mode() {
     return;
   }
   g_empty = roll_at(c0, 0)[0]; // the "unused" value as the script stores it
+  g_host_card_ped = c0[0], g_card_ped_slot = &c0[0];
   g_checked_statics = st;
   g_snaps.clear();
   g_slot0_owner = g_my_id;
@@ -549,6 +569,28 @@ void roll_processed(const Frame& f, std::int32_t* st, int k, DWORD now) {
   log::info("Bowling: next up {} (frame {})", nb->name, g_view.frame + 1);
 }
 
+// Card 0's bowler follows whose card it holds: a partner's turn puts their puppet in, anyone else's the host's ped.
+void apply_bowler(const Frame& f, std::int32_t* st) {
+  const std::uint8_t want = g_slot0_owner != g_my_id && g_view.cur_id == g_slot0_owner ? g_slot0_owner : 0xFF;
+  if (want == g_bowler_seat) return;
+  if (g_bowler_seat != 0xFF) activity_seats::unseat(g_bowler_seat);
+  g_bowler_seat = 0xFF;
+  n::Ped ped = 0;
+  if (want != 0xFF)
+    for (const Player& p : f.players)
+      if (p.id == want) ped = p.ped;
+  if (ped && n::DoesCharExist(ped)) {
+    activity_seats::seat(want, ped, "tenpinbowl", -1);
+    activity_seats::set_active(want);
+    card_at(st, 0)[0] = static_cast<std::int32_t>(ped);
+    g_bowler_seat = want;
+    log::info("Bowling: {} bowls as their own character (ped {})", card_of(want) ? card_of(want)->name : "?", ped);
+  } else {
+    activity_seats::set_active(0xFF);
+    if (g_host_card_ped) card_at(st, 0)[0] = g_host_card_ped;
+  }
+}
+
 void script_tick(const Frame& f, DWORD now) {
   std::int32_t* st = script_statics();
   if (!st) return;
@@ -565,6 +607,8 @@ void script_tick(const Frame& f, DWORD now) {
     g_proxy = true;
     log::info("Bowling: player {} left mid-frame, the host finishes it", g_view.cur_id);
   }
+  if (g_proxy) restore_bowler();
+  else apply_bowler(f, st);
   const int n0 = roll_count(card_at(st, 0)), n1 = g_friend ? roll_count(card_at(st, 1)) : 0;
   if (n0 < g_seen_cnt[0] || n1 < g_seen_cnt[1]) return abandon_script_mode("the script's card was reset");
   if (n0 > g_seen_cnt[0]) return roll_processed(f, st, 0, now);

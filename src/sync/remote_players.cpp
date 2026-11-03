@@ -35,7 +35,8 @@
 #include "story/scene_cam.h"
 #include "sync/downed.h"
 #include "sync/episode_sync.h"
-#include "sync/minigame_sync.h"
+#include "sync/activities/activities.h"
+#include "sync/activity_seats.h"
 #include "sync/player_mirror.h"
 #include "sync/race_sync.h"
 #include "sync/invasion.h"
@@ -831,10 +832,11 @@ void tick() {
         bf.players.push_back({p.id, p.name, p.id != f.my_id && it != g_remotes.end() ? it->second.puppet.ped() : 0});
       }
       bowling_sync::tick(bf, session());
-      minigame_sync::Frame mf;
-      mf.in_session = bf.in_session, mf.hosting = bf.hosting, mf.my_id = bf.my_id;
-      for (const auto& p : bf.players) mf.players.push_back({p.id, p.name, p.ped});
-      minigame_sync::tick(mf, session());
+      activity_seats::tick(bf.in_session, bf.hosting, bf.my_id, session());
+      activities::Frame af;
+      af.hosting = bf.hosting && bf.in_session, af.my_id = bf.my_id;
+      for (const auto& p : bf.players) af.players.push_back({p.id, p.name, p.ped});
+      activities::tick(af);
     }
     {
       // Invaders and the invaded fight whatever the Team fire setting says (melee's switch is session-wide).
@@ -1007,7 +1009,9 @@ void tick() {
             r.pose.up(r.puppet.ped());
             r.puppet.mirror_body((smp->flags & sync::PlayerState::kRagdoll) != 0,
                                  (smp->flags & sync::PlayerState::kOnFire) != 0, now);
-            if (!melee_sync::playing(r.puppet.ped())) r.puppet.drive(*smp, now);
+            if (activity_seats::owns(r.puppet.ped())) {
+              // seated in the host's activity: its script moves and animates the puppet
+            } else if (!melee_sync::playing(r.puppet.ped())) r.puppet.drive(*smp, now);
             else n::SetCharHeading(r.puppet.ped(), smp->heading); // a mirrored melee move runs; keep facing as they do
           }
         }
@@ -1098,7 +1102,7 @@ void tick() {
                          story::npc_anims::is_msg(m.data) || regroup::is_msg(m.data) || radio_sync::is_msg(m.data) ||
                          drunk_sync::is_msg(m.data) || bowling_sync::is_msg(m.data) ||
                          player_mirror::is_msg(m.data) || race_sync::is_msg(m.data) ||
-                         minigame_sync::is_msg(m.data)))
+                         activity_seats::is_msg(m.data)))
         continue;
       if (melee_sync::is_msg(m.data)) {
         const auto it = g_remotes.find(m.from);
@@ -1125,8 +1129,8 @@ void tick() {
         race_sync::on_message(m);
         continue;
       }
-      if (minigame_sync::is_msg(m.data)) {
-        minigame_sync::on_message(m);
+      if (activity_seats::is_msg(m.data)) {
+        activity_seats::on_message(m);
         continue;
       }
       if (bowling_sync::is_msg(m.data)) {
@@ -1326,6 +1330,11 @@ bool join(const std::string& address) {
   }
   log::info("Joining {}:{} as '{}' (self-test)", address, g_cfg.port, g_cfg.name);
   return true;
+}
+
+natives::Ped puppet_ped(std::uint8_t id) {
+  const auto it = g_remotes.find(id);
+  return it != g_remotes.end() ? it->second.puppet.ped() : 0;
 }
 
 void leave() {

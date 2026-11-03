@@ -2,7 +2,9 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <format>
 #include <fstream>
 #include <sstream>
@@ -16,6 +18,7 @@
 #include "game/natives.h"
 #include "game/phone.h"
 #include "game/script.h"
+#include "sync/activity_seats.h"
 #include "sync/episode_sync.h"
 #include "sync/race_sync.h"
 #include "sync/remote_players.h"
@@ -47,6 +50,11 @@ std::uint32_t g_step_ms = 0, g_press_ms = 0, g_mark_ms = 0;
 std::uint32_t g_protagonist = 0; // the player's model in this episode before any session
 unsigned g_refusals_before = 0;
 bool g_joined_seen = false;
+// Activity seats: host side (the bot seated, its input arriving) and joiner side (seated by the bot host).
+std::uint8_t g_seat_bot = 0xFF;
+bool g_seat_input_seen = false, g_seated_seen = false;
+float g_seat_moved = 0;
+n::Vector3 g_hold_start{};
 
 episode::Id target() { return g_episodes[g_index]; }
 
@@ -236,6 +244,20 @@ void tick() {
       }
       break;
     case Step::HostHold:
+      if (g_seat_bot == 0xFF && in_step > 2000)
+        for (const auto& p : coop::status().session.players)
+          if (p.id != coop::status().session.my_id) {
+            g_seat_bot = p.id, g_seat_input_seen = false;
+            activity_seats::seat(p.id, coop::puppet_ped(p.id), "selftest", -1);
+            activity_seats::set_active(p.id);
+          }
+      if (g_seat_bot != 0xFF && activity_seats::has_input(g_seat_bot)) g_seat_input_seen = true;
+      if (in_step > kHoldMs && g_seat_bot != 0xFF) {
+        result("activity seat (host)", g_seat_input_seen && activity_seats::owns(coop::puppet_ped(g_seat_bot)),
+               g_seat_input_seen ? "the seated bot's input arrived; its puppet is held" : "no input from the seated bot");
+        activity_seats::unseat_all();
+        g_seat_bot = 0xFF;
+      }
       if (players() < 2) {
         result("host", false, "the bot left the session");
         coop::leave(), bot("serve " + std::to_string(static_cast<int>(target()))), go(Step::JoinSame);
@@ -252,6 +274,8 @@ void tick() {
       }
       if (mode() == net::Mode::Joined) {
         go(Step::JoinSameHold);
+        g_seated_seen = false, g_seat_moved = 0;
+        if (const n::Ped p = me()) g_hold_start = n::GetCharCoordinates(p);
       } else if (in_step > kJoinTimeoutMs) {
         result("join same episode", false, std::format("mode {} after {} s", net::to_string(mode()), in_step / 1000));
         coop::leave(), go(Step::Restore);
@@ -260,6 +284,11 @@ void tick() {
       }
       break;
     case Step::JoinSameHold:
+      if (activity_seats::me_seated()) g_seated_seen = true;
+      if (const n::Ped p = me(); p && g_seated_seen) {
+        const n::Vector3 q = n::GetCharCoordinates(p);
+        g_seat_moved = std::max(g_seat_moved, std::hypot(q.x - g_hold_start.x, q.y - g_hold_start.y));
+      }
       if (mode() != net::Mode::Joined) {
         result("join same episode", false, std::format("dropped after {:.0f} s (refusals {})", in_step / 1000.0,
                                                        episode_sync::refusals()));
@@ -276,6 +305,9 @@ void tick() {
                std::format("weapon {} from the host's story message", kBotWeapon));
         result("race checkpoint", race_sync::local_count() == 1,
                std::format("{} checkpoints from the host", race_sync::local_count()));
+        result("activity seat (joiner)", g_seated_seen && g_seat_moved > 1.0f && !activity_seats::me_seated(),
+               std::format("seated {}, followed the seat {:.1f} m, released {}", g_seated_seen, g_seat_moved,
+                           !activity_seats::me_seated()));
         coop::leave();
         go(Step::Restore);
       }
