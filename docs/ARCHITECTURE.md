@@ -507,6 +507,21 @@ docs/
     Table cameras (tenpinbowl, pool_game, darts) only stream to the players at the table. **To verify in game:** that
     the scripts don't read the aim during the friend's turn or while balls/darts are in flight (otherwise a go
     would never end), and that pool's per-player pad index (`l_U318._fU32[l_U243]`) is 0 for the human side.
+  - **Golf (TBoGT, `sync/activities/golf`):** up to 4 humans (host plus partners within 15 m when the script starts),
+    each their own golfer with their own 10 shots and score, turn by turn. Every human takes the script's P side:
+    `activity_seats::set_active` makes `GET_PLAYER_CHAR` return the shooter, and the script's own arrays are the
+    shooter's scorebook (`l_U2884` shots / `l_U2887` score written before their turn, read back after; `l_U2885` is
+    kept above 0 until the last human's last shot so the game doesn't end early, `l_U2888` shows the best of the
+    others). The AI opponent's half-turn between two shots is bounced through the script's own skip
+    (`IS_CONTROL_JUST_PRESSED(2, 77)` after 1.25 s), and the golfer changes during it, so the script's hand-over
+    parks the last shooter and puts the next on the tee. The club (`l_U3100`, created once and attached to the first
+    P ped) is re-attached to each new golfer; non-shooters are parked beside the waiting spot. The statics are
+    checked against the research (size words 2 and 2, `l_U2882` = 10) before anything is written, else vanilla.
+    The mod draws a 2-4 row scoreboard on the host and announces the winner with the phone message (partners
+    seeing the board comes later). `activity_seats` relays three more controls for the swing ((2,137), (0,1),
+    (0,137): the strike reads pad 0). **To verify in game:** the swing release from a partner, that the O skip
+    fires once per half-turn and the tee hand-over uses the new golfer, club position after the swap, the host not
+    walking off while a partner shoots, that puppets tolerate the tee attach / `MINI_GOLF` anims, rematch and quit.
   - **Hook safety:** `native_hooks::install` skips any handler inside the protected region; no-op natives such as
     SET_PLAYER_INVISIBLE_TO_AI point at a shared engine stub (0x4016A0) that the engine calls everywhere, and
     hooking it crashed the game at startup.
