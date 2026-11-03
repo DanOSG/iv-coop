@@ -507,6 +507,17 @@ docs/
     Table cameras (tenpinbowl, pool_game, darts) only stream to the players at the table. **To verify in game:** that
     the scripts don't read the aim during the friend's turn or while balls/darts are in flight (otherwise a go
     would never end), and that pool's per-player pad index (`l_U318._fU32[l_U243]`) is 0 for the human side.
+  - **Darts (activities/darts, message 77):** up to four humans, each their own 301 (double out). The script has
+    two hard-coded seats (0 the local player, 1 the AI), so all humans play through seat 0: at each seat flip (3 darts
+    or a bust; seen as seat 0 -> 1 in state 1) the window's {score, history row, turn-start score} is saved for the
+    thrower, the next human's are loaded, and seat/dart/points/hint/sub-state are reset so the AI never throws.
+    A partner's turn is `activity_seats::set_active(partner)` (input + GET_PLAYER_CHAR = their puppet at the oche);
+    the host's turn is `set_active(0xFF)`. Win = state 2 with seat 0 at 0 (announced via the phone box and the log).
+    The script's own two-row board is replaced by the mod's 2-4 row board (drawn on the host, sent to partners as
+    message 77). Statics are layout-checked (array count words, ranges); on doubt the game stays vanilla 1v1.
+    **To verify in game:** the rotation on 3 darts, on a bust and on a checkout; the extra dart the script counts
+    after a bust (undone until the first throw); a rematch (scores reset, host first); a partner leaving mid-game;
+    that the partner's character stands at the oche and the minigame_sync team mode (message 73) is off for darts.
   - **Hook safety:** `native_hooks::install` skips any handler inside the protected region; no-op natives such as
     SET_PLAYER_INVISIBLE_TO_AI point at a shared engine stub (0x4016A0) that the engine calls everywhere, and
     hooking it crashed the game at startup.
