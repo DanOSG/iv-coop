@@ -32,8 +32,13 @@ def read(path):
 
 def main():
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    if game_running():
+    for _ in range(30):  # a previous run's game may still be closing
+        if not game_running():
+            break
+        time.sleep(1)
+    else:
         sys.exit("close the game first")
+    time.sleep(3)
     episodes = [int(a) for a in sys.argv[1:]] or [0, 1, 2]
     for path in (STATE, os.path.join(PLUGINS, "selftest.active")):
         if os.path.exists(path):

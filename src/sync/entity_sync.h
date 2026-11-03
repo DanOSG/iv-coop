@@ -57,11 +57,20 @@ class EntitySync {
   // Makes an existing local entity networked (we become its sim owner). Returns its id.
   // `pinned`: the host always simulates it (mission entities, until script task
   // forwarding exists, since their AI is driven by the host's mission script).
+  // `precise`: an activity's physics object (pool balls, pins, darts, the golf ball): see kPreciseBit.
   std::optional<std::uint32_t> host_register(natives::Handle handle, EntityType type, std::uint32_t model,
-                                             net::Session& net, bool pinned = false, bool ambient = false);
+                                             net::Session& net, bool pinned = false, bool ambient = false,
+                                             bool precise = false);
   // Ambient ids carry kAmbientBit, so every machine knows which entities are ambient (lower send rate).
   static constexpr std::uint32_t kAmbientBit = 0x800000;
   static bool is_ambient(std::uint32_t id) { return (id & kAmbientBit) != 0; }
+  // Precise ids (kPreciseBit, host entities only) are the activities' physics objects. The host simulates them (they
+  // are pinned) and no copy ever runs physics: the host sends at 60 Hz while one moves and its exact resting pose
+  // (reliably, twice) when it stops; copies follow with velocity-aware (Hermite) blending, a shorter delay and no
+  // extrapolation past the newest snapshot (a ball never overshoots a cushion), so a shot ends exactly where it
+  // ended on the host. The engine's physics isn't deterministic across machines; one simulation, replayed, is.
+  static constexpr std::uint32_t kPreciseBit = 0x400000;
+  static bool is_precise(std::uint32_t id) { return (id & kPreciseBit) != 0 && (id & (kAmbientBit | 0xFF000000u)) == 0; }
   // Takes an entity off the network (clients delete their copies) and leaves the host with a plain,
   // live local entity (woken up if a client was simulating it). Returns its host handle (0 if none).
   natives::Handle host_release(std::uint32_t id, net::Session& net);
@@ -116,6 +125,8 @@ class EntitySync {
     bool shown_dead = false; // follower: owner reported death, we killed our copy
     bool pinned = false;     // host-only: never migrate (host always simulates)
     bool attached = false;   // attached to a parent: no stream in or out
+    bool moving = false;     // precise entities: moving at the last send (a stop sends the rest pose)
+    std::uint8_t rest_sends = 0;
     CarFollower car;         // vehicle followers: physics-follow (wheels roll, collisions)
     // Ped followers: driven like a partner's copy (walk/run to the stream, gun, shots, ragdoll, seat).
     std::unique_ptr<Puppet> driver;

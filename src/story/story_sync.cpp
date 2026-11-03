@@ -37,7 +37,7 @@ Status g_status;
 // ---------------------------------------------------------------- host capture
 
 struct SendOp { std::vector<std::uint8_t> bytes; };
-struct RegisterOp { n::Handle handle; sync::EntityType type; std::uint32_t model; };
+struct RegisterOp { n::Handle handle; sync::EntityType type; std::uint32_t model; bool precise; };
 struct UnregisterOp { n::Handle handle; };
 struct EntityBlipOp { std::uint32_t blip; n::Handle handle; };
 using Op = std::variant<SendOp, RegisterOp, UnregisterOp, EntityBlipOp>;
@@ -128,10 +128,18 @@ void blip_prop(const Call& c, BlipPropKind prop) {
   send(encode(p));
 }
 
+// The activities' physics objects (balls, pins, darts, pucks) stream as precise entities (EntitySync::kPreciseBit).
+bool activity_script(const std::string& script) {
+  static const char* kScripts[] = {"tenpinbowl", "pool_game", "darts", "golf", "air_hockey"};
+  for (const char* s : kScripts)
+    if (_stricmp(script.c_str(), s) == 0) return true;
+  return false;
+}
+
 void entity_created(const Call& c, sync::EntityType type, std::uint32_t model, int out_arg) {
   if (!capture(c)) return;
   const n::Handle h = c.out<n::Handle>(out_arg);
-  if (h) g_ops.push_back(RegisterOp{h, type, model});
+  if (h) g_ops.push_back(RegisterOp{h, type, model, type == sync::EntityType::Object && activity_script(c.script)});
 }
 
 void entity_released(const Call& c) {
@@ -344,7 +352,8 @@ void host_tick(bool hosting, net::Session& net, sync::EntitySync& ents) {
       net.send_game(std::move(s->bytes), true);
       ++g_status.messages;
     } else if (auto* r = std::get_if<RegisterOp>(&op)) {
-      if (ents.host_register(r->handle, r->type, r->model, net, /*pinned=*/true)) ++g_status.entities_registered;
+      if (ents.host_register(r->handle, r->type, r->model, net, /*pinned=*/true, /*ambient=*/false, r->precise))
+        ++g_status.entities_registered;
     } else if (auto* u = std::get_if<UnregisterOp>(&op)) {
       ents.host_unregister_handle(u->handle, net);
     } else if (auto* b = std::get_if<EntityBlipOp>(&op)) {

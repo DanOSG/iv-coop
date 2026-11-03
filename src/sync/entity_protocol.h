@@ -64,6 +64,16 @@ struct EntityState {
   static EntityState lerp(const EntityState& a, const EntityState& b, float k) {
     EntityState o = b;
     o.x = a.x + (b.x - a.x) * k, o.y = a.y + (b.y - a.y) * k, o.z = a.z + (b.z - a.z) * k;
+    // Precise entities (EntitySync::kPreciseBit, an activity's physics object): a cubic Hermite through both
+    // snapshots' positions and velocities, so a ball's path between frames curves the way it moved.
+    if ((b.id & 0x400000) && !(b.id & 0xFF800000u) && b.time_ms != a.time_ms) {
+      const float t = static_cast<float>(b.time_ms - a.time_ms) / 1000.0f;
+      const float k2 = k * k, k3 = k2 * k;
+      const float h00 = 2 * k3 - 3 * k2 + 1, h10 = k3 - 2 * k2 + k, h01 = -2 * k3 + 3 * k2, h11 = k3 - k2;
+      o.x = h00 * a.x + h10 * t * a.vx + h01 * b.x + h11 * t * b.vx;
+      o.y = h00 * a.y + h10 * t * a.vy + h01 * b.y + h11 * t * b.vy;
+      o.z = h00 * a.z + h10 * t * a.vz + h01 * b.z + h11 * t * b.vz;
+    }
     const float dot = a.qx * b.qx + a.qy * b.qy + a.qz * b.qz + a.qw * b.qw;
     const float s = dot < 0 ? -1.0f : 1.0f;
     o.qx = a.qx + (s * b.qx - a.qx) * k, o.qy = a.qy + (s * b.qy - a.qy) * k;

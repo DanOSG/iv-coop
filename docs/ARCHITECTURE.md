@@ -561,6 +561,15 @@ docs/
     warning says so after 12 s), that mouse partners' per-frame deltas are enough to flick, that the puppet shows in the
     seat and plays the match animations, hi-lo turn flow and reaction animations after a partner's call, and the
     cleanup (host and puppets back to normal; the ambient AI diners return).
+  - **Activity physics (0.8.0):** GTA IV's physics isn't deterministic across machines (frame timing, floating point
+    state), so the activities don't try to simulate the same shot everywhere. The host's copy is the only simulation:
+    objects the activity scripts create (tenpinbowl, pool_game, darts, golf, air_hockey) are networked as *precise*
+    entities (`EntitySync::kPreciseBit`), pinned to the host like every story entity; partners' copies are frozen and
+    only posed. The host sends a precise entity at 60 Hz while it moves and its exact rest pose (reliable, twice)
+    when it stops, then a 2 Hz keep-alive; copies blend with a cubic Hermite through positions and velocities, with
+    half the usual delay and no extrapolation past the newest snapshot. So the path between snapshots follows the
+    motion, nothing overshoots, and every ball, pin and dart comes to rest where it did on the host. The rules,
+    scores and turns are the host script's, and the host reads its own simulation.
   - **Hook safety:** `native_hooks::install` skips any handler inside the protected region; no-op natives such as
     SET_PLAYER_INVISIBLE_TO_AI point at a shared engine stub (0x4016A0) that the engine calls everywhere, and
     hooking it crashed the game at startup.

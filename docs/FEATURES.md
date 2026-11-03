@@ -3,7 +3,7 @@
 iv-coop turns **GTA IV: The Complete Edition**'s single-player story into a co-op game for **up to 4 players**
 (a host + 3 partners). The host plays their own save and story; partners join that world as their own characters
 and play the missions alongside, and their own saves are never loaded or changed. It's one ASI plugin, set up by a
-one-click installer. Status: version 0.7.1; much of it is new and still being tested in play (see the end).
+one-click installer. Status: version 0.8.0; much of it is new and still being tested in play (see the end).
 
 ## Getting in
 - **Installer:** finds GTA IV, checks it's the supported version (1.2.0.59), installs TJGM's Drag n' Drop pack
@@ -47,13 +47,17 @@ one-click installer. Status: version 0.7.1; much of it is new and still being te
   weather.
 - **Radio:** every station plays the same song, ad, DJ line and talk segment at the same moment for everyone. In a
   car only the front seats choose the station (like GTA Online); the back follows.
-- **Friend outings:** the friend comes along for partners too, and partners who drink with the host get drunk with
-  the wobbly walk and camera.
-- **Multiplayer pool and darts** (all three games): everyone at the table plays the host's side against the friend,
-  taking turns shot by shot or dart by dart, steering the host's game with their own controls and watching the
-  table camera.
-- **Multiplayer bowling:** partners take turns on the host's lane, each playing a full 10 frames on a shared
-  scorecard, watching the lane camera; the AI friend plays its own turns.
+- **Friend outings:** the friend comes along for partners too, and partners on a drinking night out get drunk
+  with the host (the wobbly walk, the camera).
+- **Activities with everyone as their own character**, each with their own score and turns; the host's game runs
+  the activity and partners play in it with their own controls, their own character taking the shot:
+  - **Bowling** (all three games): up to 4 bowlers (TBoGT's alley: 2), a full 10 frames each, plus the AI friend.
+  - **Darts** (all three games): up to 4 players, each their own 301, with a shared scoreboard.
+  - **Pool** (all three games): 1v1, a partner against the host; others queue and play the winner.
+  - **Golf** (TBoGT): up to 4 golfers, each their own 10 shots and score.
+  - **Arm wrestling** (TLAD): 1v1, a partner against the host. **Hi-lo cards** (TLAD): up to 4 at the table.
+  - Players at the table watch through the table camera; nobody else is pulled in.
+- **Out on your own:** street vendors, TBoGT's nightclub dancing and base jumps run for each player separately.
 
 ## The Lost and Damned and The Ballad of Gay Tony
 - Co-op works in the Episodes too: everyone plays the host's episode (a partner in another one is told which to

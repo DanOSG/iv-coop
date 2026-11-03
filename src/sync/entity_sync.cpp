@@ -38,11 +38,12 @@ float dist(const EntityState& s, const n::Vector3& p) { return std::hypot(s.x - 
 // ---------------------------------------------------------------- host API
 
 std::optional<std::uint32_t> EntitySync::host_register(n::Handle handle, EntityType type, std::uint32_t model,
-                                                       net::Session& net, bool pinned, bool ambient) {
+                                                       net::Session& net, bool pinned, bool ambient, bool precise) {
   if (!exists(type, handle)) return std::nullopt;
   if (auto existing = id_for_handle(handle)) return existing;
   // Host-minted (top byte 0 = host); ambient ids live in the upper half of the 24 bits.
-  const std::uint32_t id = ambient ? (kAmbientBit | (next_ambient_id_++ & (kAmbientBit - 1))) : (next_id_++ & (kAmbientBit - 1));
+  const std::uint32_t id = ambient ? (kAmbientBit | (next_ambient_id_++ & (kAmbientBit - 1)))
+                                    : ((next_id_++ & (kPreciseBit - 1)) | (precise ? kPreciseBit : 0));
   Entity& e = ents_[id];
   if (ambient) e.interp.delay_ms = interp_delay_ms + 50; // slower stream: a deeper jitter buffer
   e.id = id, e.type = type, e.model = model, e.sim_owner = net::kHostId, e.handle = handle, e.live = true;
@@ -145,7 +146,9 @@ void EntitySync::apply_create(const EntityCreate& c, std::uint8_t my_id) {
   Entity& e = it->second;
   if (inserted) {
     e.id = c.id, e.type = c.type, e.model = c.model, e.sim_owner = c.sim_owner;
-    e.interp.delay_ms = interp_delay_ms + (is_ambient(c.id) ? 50 : 0);
+    e.interp.delay_ms = is_precise(c.id) ? std::max<std::uint32_t>(interp_delay_ms / 2, 40)
+                                         : interp_delay_ms + (is_ambient(c.id) ? 50 : 0);
+    if (is_precise(c.id)) e.interp.max_extrapolate_ms = 0;
     e.last.id = c.id, e.last.x = c.x, e.last.y = c.y, e.last.z = c.z;
     e.last.qx = c.qx, e.last.qy = c.qy, e.last.qz = c.qz, e.last.qw = c.qw;
     log::info("Entity {} created by host ({} model 0x{:08X}), sim owner #{}", c.id,
@@ -507,8 +510,27 @@ void EntitySync::tick(std::uint32_t now_ms, std::uint8_t my_id, bool hosting, co
     if (!ensure_spawned(e, my_id)) continue;
     if (e.sim_owner == my_id) {
       if (!e.live) make_live(e);
+      const EntityState before = e.last;
       e.last = read_local(e, now_ms);
-      if (!e.attached && now_ms - e.last_send_ms >= (is_ambient(id) ? ambient_interval : interval)) {
+      if (e.attached) continue;
+      if (is_precise(id)) {
+        // 60 Hz while it moves; on stopping, the exact rest pose, reliably and twice; then a 2 Hz keep-alive.
+        const float speed = std::fabs(e.last.vx) + std::fabs(e.last.vy) + std::fabs(e.last.vz);
+        const float turned = std::fabs(e.last.qx - before.qx) + std::fabs(e.last.qy - before.qy) +
+                             std::fabs(e.last.qz - before.qz) + std::fabs(e.last.qw - before.qw);
+        const bool moving = speed > 0.02f || turned > 0.0005f;
+        if (e.moving && !moving) e.rest_sends = 2;
+        e.moving = moving;
+        const bool rest = e.rest_sends > 0;
+        if ((moving && now_ms - e.last_send_ms >= 16) || rest || now_ms - e.last_send_ms >= 500) { // 60 Hz cap
+          e.last_send_ms = now_ms;
+          e.last.seq = ++e.seq;
+          if (rest) --e.rest_sends;
+          net.send_game(encode_entity_state(e.last), rest);
+        }
+        continue;
+      }
+      if (now_ms - e.last_send_ms >= (is_ambient(id) ? ambient_interval : interval)) {
         e.last_send_ms = now_ms;
         e.last.seq = ++e.seq;
         net.send_game(encode_entity_state(e.last), false);

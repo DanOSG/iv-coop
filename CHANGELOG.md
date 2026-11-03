@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.0
+
+- Activities with everyone as their own character, each with their own score and turns:
+  - Bowling: up to four players, each bowling as themselves (no longer the host's character throwing for you).
+  - Darts: up to four players, each with their own 301 and a shared scoreboard.
+  - Pool: one against one, a friend against the host; others queue and play the winner.
+  - Golf in The Ballad of Gay Tony: up to four golfers.
+  - Arm wrestling (one against one) and hi-lo cards (up to four) in The Lost and Damned.
+- Balls, pins, darts and pucks are simulated once, on the host, and replayed for everyone at 60 updates a second with
+  smoothing that follows their motion, so shots end exactly where they did on the host (no desyncs).
+- Fixed a crash when the host's story gave a partner a weapon the moment they joined.
+- The team version of pool and darts from 0.7.1 is replaced by the above.
+- Drinking nights out now make partners drunk too (it never triggered before).
+- Street vendors, nightclub dancing (TBoGT) and base jumps (TBoGT) work for every player on their own.
+
 ## 0.7.1
 
 - Multiplayer pool and darts, in all three games: everyone at the table plays your side against your friend,

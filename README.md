@@ -51,6 +51,13 @@ same episode as the host. If you are in a different one, the mod tells you which
   sync, Partner blips, Scenes (host camera or your own), Ambient sync (shared pedestrians and traffic, off by
   default) and Invasions.
 
+### Activities
+
+Bowling, darts, pool, golf (The Ballad of Gay Tony), arm wrestling and hi-lo cards (The Lost and Damned) are played
+with everyone as their own character, with their own score and turns: stand near the host when they start the
+activity. Bowling, darts, golf and cards take up to four players; pool and arm wrestling are one against one, and
+whoever is waiting plays the winner.
+
 ### What to expect
 
 Partners are real characters: they take damage, ragdoll and catch fire. On missions a deadly hit leaves you down, and
@@ -80,7 +87,7 @@ place, and the backups it made stay in your game folder in case you want to rest
 
 ## Known limitations
 
-- Early access: invasions, bowling, pool and darts, the character creator, shared pedestrians and traffic, and the Episodes support
+- Early access: invasions, the multiplayer activities, the character creator, shared pedestrians and traffic, and the Episodes support
   have had little play-testing.
 - The Episodes' own minigames and some HUD meters aren't fully shared yet.
 - The radio can hiccup briefly when a song changes.

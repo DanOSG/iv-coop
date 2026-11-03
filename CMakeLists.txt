@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(iv-coop VERSION 0.7.1 LANGUAGES C CXX)
+project(iv-coop VERSION 0.8.0 LANGUAGES C CXX)
 add_compile_definitions(IVCOOP_VERSION="${PROJECT_VERSION}")
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
