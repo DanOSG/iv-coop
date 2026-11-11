@@ -39,7 +39,9 @@ pull requests are welcome.
 Everyone in the group should install the same version.
 
 **About the mod pack:** I chose TJGM's pack because it gives the game a good, stable base to build on. It's the only
-setup the mod is tested with: other mods haven't been tested and may not work alongside it.
+setup the mod is tested with: other mods haven't been tested and may not work alongside it. I'm not affiliated with
+TJGM or the makers of FusionFix. I just consider their work a baseline for the game, and the installer fetches it
+from their official downloads to save you downloading it separately.
 
 ## Host or join a game
 
@@ -109,7 +111,8 @@ place, and the backups it made stay in your game folder in case you want to rest
 ## Disclaimer
 
 This is an unofficial fan project. It is **not affiliated with, endorsed by or sponsored by Rockstar Games or
-Take-Two Interactive**. Grand Theft Auto and related names belong to their owners. You need your own legal copy of
+Take-Two Interactive**, nor with TJGM or the makers of FusionFix. Grand Theft Auto and related names belong to their
+owners. You need your own legal copy of
 the game. Use the mod at your own risk.
 
 ## For developers
