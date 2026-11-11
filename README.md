@@ -6,7 +6,7 @@ A co-op mod for **Grand Theft Auto IV: The Complete Edition**. Up to **4 players
 One player hosts and plays their own save and story. Everyone else joins that world as their own character and plays
 the missions alongside the host. Your own saves are never loaded or changed when you join someone else's game.
 
-**[Website](https://danosg.github.io/iv-coop/) · [Download the latest release](https://github.com/DanOSG/iv-coop/releases/latest) · [Report a bug](https://github.com/DanOSG/iv-coop/issues)**
+**[Download the latest release](https://github.com/DanOSG/iv-coop/releases/latest) · [Report a bug](https://github.com/DanOSG/iv-coop/issues)**
 
 > **Testers wanted.** The mod has only been tested on one PC against a test bot, so it needs people playing it with
 > real friends. Expect rough edges, and please report what you find (see "Reporting bugs").
