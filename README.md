@@ -6,8 +6,16 @@ A co-op mod for **Grand Theft Auto IV: The Complete Edition**. Up to **4 players
 One player hosts and plays their own save and story. Everyone else joins that world as their own character and plays
 the missions alongside the host. Your own saves are never loaded or changed when you join someone else's game.
 
-> **Early access.** Much of the mod is new and has not had much testing in real play. Expect rough edges, and please
-> report what you find (see "Reporting bugs").
+**[Website](https://danosg.github.io/iv-coop/) · [Download the latest release](https://github.com/DanOSG/iv-coop/releases/latest) · [Report a bug](https://github.com/DanOSG/iv-coop/issues)**
+
+> **Testers wanted.** The mod has only been tested on one PC against a test bot, so it needs people playing it with
+> real friends. Expect rough edges, and please report what you find (see "Reporting bugs").
+
+## About this project
+
+I've wanted a co-op campaign for GTA IV since I was 11 years old. This is a side project I made for fun with spare AI
+tokens: Anthropic's Claude wrote the code and I steered it. I'm not a reverse engineer and don't claim to be, just a
+fan of the game. Help, bug reports and pull requests are welcome.
 
 ## What you need
 
@@ -18,7 +26,7 @@ the missions alongside the host. Your own saves are never loaded or changed when
 
 ## Install
 
-1. Download `iv-coop-setup-<version>.exe` from the releases page and run it.
+1. Download `iv-coop-setup-<version>.exe` from the [releases page](https://github.com/DanOSG/iv-coop/releases) and run it.
 2. The installer finds your game automatically and checks it is the supported version.
 3. If you don't have **TJGM's FusionFix pack** yet, the installer downloads it from its official mirror and installs
    it (anything it replaces is backed up first). The mod needs it to run.
@@ -78,7 +86,8 @@ Please attach the logs. They only contain the mod's own information.
 - In the game: phone > Multiplayer > **Save logs**, or press **Ctrl+Shift+L**. A zip appears on your **Desktop**.
 - If the game won't start: open the installer and click **Collect logs**.
 
-Send the zip with a short description of what you were doing (which mission, what went wrong).
+[Open an issue](https://github.com/DanOSG/iv-coop/issues) and attach the zip, with a short description of what you
+were doing (which mission, what went wrong).
 
 ## Uninstall
 
@@ -87,6 +96,8 @@ place, and the backups it made stay in your game folder in case you want to rest
 
 ## Known limitations
 
+- Joining a friend in The Ballad of Gay Tony can crash the game the moment your character changes to the co-op
+  character. GTA IV and The Lost and Damned aren't affected.
 - Early access: invasions, the multiplayer activities, the character creator, shared pedestrians and traffic, and the Episodes support
   have had little play-testing.
 - The Episodes' own minigames and some HUD meters aren't fully shared yet.
