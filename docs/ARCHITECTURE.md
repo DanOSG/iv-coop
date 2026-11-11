@@ -493,7 +493,10 @@ docs/
     That only moves the TBoGT join crash on: after the swap from Luis, a stale `rage::crCreatureComponentBlendShapes`
     registration stays in the render-callback list (0x19F2488, filled by 0x6A1A60, run as draw command 0x8DDE30), so
     the render thread calls a freed object (guarded: skipped when its vtable isn't in the image) and the main thread
-    then faults at 0x6A1ADB. Not caused by a nearby puppet or by the old model streaming out (both tried). Open.
+    then faults at 0x6A1ADB. Cause (fixed in 0.9.1): 0.9's `model_swap` hid the player (SET_CHAR_VISIBLE false)
+    before CHANGE_PLAYER_MODEL; a ped changed while hidden leaves its blend shapes registered after it is freed.
+    Swapping a visible player (as 0.8 did) passes; a nearby puppet and the old model streaming out were ruled out.
+    Both guards stay as cheap safety nets and log when they fire.
   - **Episode sync gaps (0.7.0):** `sync/player_mirror` (message 69) repeats the host story's calls on the host's
     player (GIVE_WEAPON_TO_CHAR, REMOVE_WEAPON_FROM_CHAR, REMOVE_ALL_CHAR_WEAPONS, ADD_ARMOUR_TO_CHAR,
     SET_CHAR_BULLETPROOF_VEST, SET_CHAR_HEALTH, SET_PLAYER_DISABLE_JUMP/CROUCH) on every partner's player;

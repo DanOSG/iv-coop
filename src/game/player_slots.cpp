@@ -242,13 +242,6 @@ bool set_damageable(n::Ped ped, bool damageable) {
   }
 }
 
-std::vector<n::Ped> peds_in_use() {
-  std::vector<n::Ped> out;
-  for (const Slot& s : g_slots)
-    if (s.in_use && s.ped) out.push_back(s.ped);
-  return out;
-}
-
 bool is_slot_object(const void* ped_object) {
   if (!ped_object) return false;
   for (const Slot& s : g_slots)

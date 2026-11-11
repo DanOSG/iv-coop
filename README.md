@@ -101,8 +101,6 @@ place, and the backups it made stay in your game folder in case you want to rest
 
 ## Known limitations
 
-- Joining a friend in The Ballad of Gay Tony can crash the game the moment your character changes to the co-op
-  character. GTA IV and The Lost and Damned aren't affected.
 - Early access: invasions, the multiplayer activities, the character creator, shared pedestrians and traffic, and the Episodes support
   have had little play-testing.
 - The Episodes' own minigames and some HUD meters aren't fully shared yet.

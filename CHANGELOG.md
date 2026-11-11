@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.1
+
+- Fixed the crash when joining a friend in The Ballad of Gay Tony, the moment your character changed to the co-op
+  character.
+- Two safety checks in the game's drawing code skip a character that's mid-change instead of crashing.
+
 ## 0.9.0
 
 - Air hockey (The Lost and Damned, The Ballad of Gay Tony): one against one, a friend on the far paddle with their
@@ -7,9 +13,8 @@
 - Races (The Ballad of Gay Tony): up to three friends race as themselves in their own cars, starting on the grid,
   each with their own finishing place.
 - Golf, air hockey, arm wrestling and hi-lo cards cameras show only for the players taking part.
-- Known issue: joining a friend in The Ballad of Gay Tony can still crash the game the moment your character changes
-  to the co-op character (Luis's facial animation data is left behind). The Lost and Damned and GTA IV aren't
-  affected. Being worked on.
+- Known issue (fixed in 0.9.1): joining a friend in The Ballad of Gay Tony could crash the game the moment your
+  character changed to the co-op character.
 - Fixed a crash when a race checkpoint was shown to partners (0.8.0).
 
 ## 0.8.0

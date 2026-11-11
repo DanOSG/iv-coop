@@ -195,7 +195,6 @@ void update_client_mode(n::Ped me) {
     if (model == original || swap_player_model(model)) {
       g_original_model = original;
       g_client_mode = true;
-      model_swap::expect_change(false);
       if (g_cfg.freeze_story_scripts) script::set_suppress_predicate(story::is_story_script);
       hide_own_blips(me);
       g_client_frozen_at = GetTickCount();
@@ -890,7 +889,6 @@ void tick() {
         log::info("Connected; we are player {} ({})", e.id, e.role == net::Role::Invader ? "invader" : "co-op");
         g_want_client_mode = true;
         g_want_client_mode_at = GetTickCount();
-        model_swap::expect_change(true); // puppets wait for our character (see model_swap)
         episode_sync::on_connected(net);
         if (e.role == net::Role::Invader) {
           const n::Ped p = n::GetPlayerChar(n::GetPlayerId());
@@ -919,7 +917,6 @@ void tick() {
         if (g_want_client_mode || g_client_mode) {
           script::set_suppress_predicate(nullptr); // our story scripts resume where they were
           g_want_client_mode = false;
-          model_swap::expect_change(false);
           g_restore_pending = g_client_mode;
           if (g_client_frozen_at && !g_client_mode) restore_own_blips(); // left between the freeze and the swap
           g_client_frozen_at = 0;
