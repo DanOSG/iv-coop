@@ -35,8 +35,8 @@ constexpr std::uint32_t kHasCutsceneFinished = 0x4ECE1AD2, kStopCutscene = 0x50F
 constexpr std::int32_t kControlPhoneUp = 21; // (2, 21): "up" on the phone scripts opens the phone
 constexpr std::int32_t kControlSkip = 77;    // accept: pad A; scripted intros skip on it
 constexpr std::int32_t kScreenMainMenu = 1011, kScreenClose = 1001, kIdMultiplayer = 2000, kIdHost = 2001;
-constexpr std::uint32_t kSwitchTimeoutMs = 240000, kSettleMs = 20000, kPhoneTimeoutMs = 60000, kPhoneStepMs = 2000,
-                        kJoinTimeoutMs = 45000, kHoldMs = 15000, kBotStartMs = 5000, kRefuseTimeoutMs = 25000,
+constexpr std::uint32_t kSwitchTimeoutMs = 240000, kSettleMs = 10000, kPhoneTimeoutMs = 60000, kPhoneStepMs = 2000,
+                        kJoinTimeoutMs = 45000, kHoldMs = 10000, kBotStartMs = 5000, kRefuseTimeoutMs = 25000,
                         kRestoreTimeoutMs = 20000, kQuitDelayMs = 3000;
 
 enum class Step {
@@ -149,14 +149,15 @@ void register_hooks() {
   if (g_step == Step::Off) return;
   // While the test wants the phone open: a short "up" for the phone scripts, and a short accept (pad A, control 77
   // on pad 0 or 2; the mouse click's counterpart) for every other script, which skips the scripted intros
-  // (opening_credits) and cutscenes that keep the phone away.
+  // (opening_credits) and cutscenes that keep the phone away. After an episode switch (Settle) only the accept, so an
+  // episode's intro (TBoGT's) is skipped instead of sat through.
   native_hooks::on(kIsControlPressed, "IS_CONTROL_PRESSED", [](const Call& c) {
-    if (g_step != Step::PhoneOpen || GetTickCount() - g_press_ms >= 300) return;
+    if ((g_step != Step::PhoneOpen && g_step != Step::Settle) || GetTickCount() - g_press_ms >= 300) return;
     const std::int32_t pad = c.arg<std::int32_t>(0), control = c.arg<std::int32_t>(1);
     std::string s = c.script;
     for (char& ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
     const bool phone_script = s.starts_with("spcellphone");
-    const bool press = phone_script ? pad == 2 && control == kControlPhoneUp
+    const bool press = phone_script ? g_step == Step::PhoneOpen && pad == 2 && control == kControlPhoneUp
                                     : (pad == 0 || pad == 2) && control == kControlSkip;
     if (press) *reinterpret_cast<std::int32_t*>(c.ctx->result) = 1;
   });
@@ -193,6 +194,10 @@ void tick() {
       }
       break;
     case Step::Settle:
+      if (now - g_press_ms > 3000) { // an episode's intro: skip it rather than sit through it
+        g_press_ms = now;
+        if (!n::invoke<bool>(kHasCutsceneFinished)) n::invoke(kStopCutscene), g_step_ms = now;
+      }
       if (!me()) g_step_ms = now; // the world is (re)loading
       else if (in_step > kSettleMs) {
         g_protagonist = my_model();
