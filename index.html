@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GTA IV Co-op</title>
+<meta name="description" content="A free fan-made mod: play GTA IV, The Lost and Damned and The Ballad of Gay Tony's stories with up to three friends. Testers wanted.">
+<meta property="og:title" content="GTA IV Co-op">
+<meta property="og:description" content="Play the GTA IV story, The Lost and Damned and The Ballad of Gay Tony with up to three friends. A fan's side project; testers wanted.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;800;900&family=IBM+Plex+Sans+Condensed:wght@400;500;600&family=IBM+Plex+Mono:wght@400;600&family=Cinzel:wght@600;700&display=swap">
+<style>
+/* Layout: one long night street. Sodium-lamp amber on asphalt, a phone in the hero (the mod lives in Niko's
+   phone), sections as storefront signs, and one loud moment: the FBI invasion banner. Single dark theme by choice. */
+:root {
+  --asphalt: #0d0f12;
+  --curb: #161a20;
+  --wet: #1e242c;
+  --sodium: #ffae2b;
+  --neon: #ff3b6b;
+  --strobe: #3fa0ff;
+  --chalk: #e9e4da;
+  --smog: #9aa1ab;
+  --gold: #e7c36a;
+  --display: "Big Shoulders Display", "Arial Narrow", Impact, sans-serif;
+  --body: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  --ring: "Cinzel", "Trajan Pro", Georgia, serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--asphalt);
+  color: var(--chalk);
+  font-family: var(--body);
+  font-size: 17px;
+  line-height: 1.55;
+  overflow-x: hidden;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--asphalt); }
+.wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+a { color: var(--sodium); }
+:focus-visible { outline: 2px solid var(--sodium); outline-offset: 3px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: .95; letter-spacing: .01em; }
+p { margin: 0; }
+.label { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--smog); }
+
+/* ---------- hero ---------- */
+.hero {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(60% 50% at 78% 18%, rgba(255,174,43,.20), transparent 70%),
+    radial-gradient(40% 40% at 12% 90%, rgba(255,59,107,.14), transparent 70%),
+    linear-gradient(180deg, #121620 0%, var(--asphalt) 100%);
+  border-bottom: 1px solid var(--wet);
+}
+#sky { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.hero .wrap { position: relative; display: grid; grid-template-columns: 1.25fr .75fr; gap: 48px; padding-block: 72px 64px; align-items: center; }
+.hero h1 {
+  font-size: clamp(64px, 11vw, 148px);
+  font-weight: 900;
+  text-transform: uppercase;
+  line-height: .86;
+  color: var(--chalk);
+}
+.hero h1 .iv {
+  color: var(--sodium);
+  text-shadow: 0 0 18px rgba(255,174,43,.55), 0 0 2px rgba(255,174,43,.9);
+  animation: flicker 2.6s steps(1, end) .4s 1 both;
+}
+@keyframes flicker { 0%{opacity:.25} 6%{opacity:1} 9%{opacity:.35} 12%{opacity:1} 40%{opacity:1} 42%{opacity:.6} 44%{opacity:1} 100%{opacity:1} }
+.hero .pitch { margin-top: 22px; font-size: clamp(19px, 2.2vw, 24px); max-width: 30ch; color: var(--chalk); }
+.hero .pitch b { color: var(--sodium); font-weight: 600; }
+.dl {
+  display: inline-flex; flex-direction: column; gap: 2px; margin-top: 30px; padding: 14px 26px 13px;
+  background: var(--sodium); color: #1a1205; text-decoration: none;
+  font-family: var(--display); font-weight: 900; font-size: 30px; text-transform: uppercase; letter-spacing: .03em; line-height: 1;
+  box-shadow: 0 0 0 2px #c98510, 0 14px 40px rgba(255,174,43,.28);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.dl span { font-family: var(--mono); font-weight: 600; font-size: 12px; letter-spacing: .1em; }
+.dl:hover { transform: translateY(-2px); box-shadow: 0 0 0 2px #c98510, 0 18px 50px rgba(255,174,43,.4); }
+.chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+.chip { font-family: var(--mono); font-size: 13px; padding: 7px 12px; border: 1px solid var(--wet); background: rgba(22,26,32,.7); color: var(--chalk); }
+.chip b { color: var(--sodium); font-weight: 600; }
+
+/* phone */
+.phone {
+  justify-self: center;
+  width: min(300px, 100%);
+  aspect-ratio: 9 / 17;
+  max-width: 100%;
+  border-radius: 28px;
+  background: linear-gradient(160deg, #2a2f38, #12151b 60%);
+  padding: 14px;
+  box-shadow: 0 30px 80px rgba(0,0,0,.6), inset 0 0 0 2px #3a414c;
+  transform: rotate(4deg);
+}
+.screen {
+  height: 100%;
+  border-radius: 16px;
+  background: #0b1a12;
+  border: 2px solid #050a07;
+  display: flex; flex-direction: column;
+  font-family: var(--mono);
+  color: #b9f5c9;
+  overflow: hidden;
+}
+.screen .bar { display: flex; justify-content: space-between; padding: 8px 12px; font-size: 11px; background: #0f2418; color: #7fd69a; }
+.screen .head { padding: 12px 14px 6px; font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: #ffd27a; }
+.screen ul { list-style: none; margin: 0; padding: 4px 8px; display: flex; flex-direction: column; gap: 2px; }
+.screen li button {
+  width: 100%; text-align: left; background: none; border: 0; color: inherit; font: inherit; font-size: 14px;
+  padding: 8px 10px; cursor: pointer; display: flex; justify-content: space-between; border-radius: 4px;
+}
+.screen li button[aria-pressed="true"], .screen li button:hover { background: #1d4a2c; color: #eafff0; }
+.screen .tip { margin-top: auto; padding: 12px 14px 16px; font-size: 12px; line-height: 1.45; color: #9ad9ae; min-height: 6.5em; border-top: 1px solid #143322; }
+
+/* ---------- radio ticker ---------- */
+.ticker { background: var(--sodium); color: #1a1205; overflow: hidden; border-block: 2px solid #c98510; }
+.ticker .track { display: flex; gap: 48px; width: max-content; padding-block: 10px; font-family: var(--display); font-weight: 800; font-size: 20px; text-transform: uppercase; letter-spacing: .04em; animation: roll 38s linear infinite; }
+.ticker span::before { content: "\25B6\00a0"; font-size: 14px; vertical-align: 2px; }
+@keyframes roll { from { transform: translateX(0) } to { transform: translateX(-50%) } }
+
+/* ---------- sections ---------- */
+section { padding-block: 84px; }
+.sec-head { display: grid; grid-template-columns: 1fr 1.4fr; gap: 40px; align-items: end; margin-bottom: 44px; }
+.sec-head h2 { font-size: clamp(44px, 6vw, 76px); font-weight: 900; text-transform: uppercase; }
+.sec-head h2 em { font-style: normal; color: var(--sodium); }
+.sec-head p { color: var(--smog); font-size: 18px; max-width: 52ch; }
+
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; background: var(--wet); border: 2px solid var(--wet); }
+.cell { background: var(--curb); padding: 26px 24px 28px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.cell h3 { font-size: 30px; font-weight: 800; text-transform: uppercase; color: var(--chalk); }
+.cell p { color: #c7c2b8; font-size: 16px; }
+.cell .tag { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--sodium); }
+.cell.wide { grid-column: span 2; }
+
+/* settings strip */
+.settings { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 36px; }
+.settings span { font-family: var(--mono); font-size: 13px; padding: 8px 12px; background: var(--asphalt); border: 1px dashed #3a414c; color: var(--chalk); }
+.settings span i { font-style: normal; color: var(--smog); }
+
+/* ---------- invasion ---------- */
+.invade { background: linear-gradient(180deg, var(--asphalt), #0a0c10); border-block: 1px solid var(--wet); position: relative; overflow: hidden; }
+.invade .wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; }
+.invade h2 { font-size: clamp(44px, 6vw, 76px); font-weight: 900; text-transform: uppercase; }
+.invade h2 em { font-style: normal; color: var(--strobe); text-shadow: 0 0 16px rgba(63,160,255,.5); }
+.invade .copy { display: flex; flex-direction: column; gap: 16px; color: #c7c2b8; }
+.invade ul { margin: 0; padding-left: 1.1em; display: flex; flex-direction: column; gap: 8px; }
+.stage {
+  position: relative; min-height: 300px; border: 1px solid var(--wet);
+  background:
+    radial-gradient(70% 60% at 50% 120%, rgba(63,160,255,.18), transparent 70%),
+    radial-gradient(70% 60% at 50% -20%, rgba(255,59,107,.15), transparent 70%),
+    #08090c;
+  display: grid; place-items: center; overflow: hidden;
+}
+.banner {
+  position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
+  padding-block: 26px;
+  background: linear-gradient(90deg, transparent, rgba(0,0,0,.78) 14%, rgba(0,0,0,.78) 86%, transparent);
+  text-align: center;
+  font-family: var(--ring); font-weight: 700;
+  font-size: clamp(26px, 4.4vw, 44px);
+  letter-spacing: .14em;
+  color: var(--gold);
+  text-shadow: 0 0 22px rgba(231,195,106,.45);
+  opacity: 1;
+}
+.banner::before, .banner::after { content: ""; position: absolute; left: 18%; right: 18%; height: 1px; background: linear-gradient(90deg, transparent, rgba(231,195,106,.6), transparent); }
+.banner::before { top: 10px; } .banner::after { bottom: 10px; }
+.banner.red { color: #d9564f; text-shadow: 0 0 22px rgba(217,86,79,.45); }
+.banner.play { animation: banner 4.3s ease both; }
+@keyframes banner {
+  0% { opacity: 0; letter-spacing: .08em; }
+  7% { opacity: 1; }
+  77% { opacity: 1; letter-spacing: .2em; }
+  100% { opacity: 0; letter-spacing: .22em; }
+}
+.stage .controls { position: absolute; bottom: 14px; left: 14px; right: 14px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.btn {
+  font-family: var(--mono); font-size: 13px; letter-spacing: .06em; text-transform: uppercase;
+  padding: 9px 14px; border: 1px solid #3a414c; background: var(--curb); color: var(--chalk); cursor: pointer;
+}
+.btn:hover { border-color: var(--sodium); color: var(--sodium); }
+
+/* ---------- build ---------- */
+.build .lead { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; }
+.build .lead p { color: #c7c2b8; font-size: 18px; }
+.build .lead p + p { margin-top: 14px; }
+.ledger { margin-top: 44px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; background: var(--wet); border: 2px solid var(--wet); }
+.ledger div { background: var(--curb); padding: 22px 24px; min-width: 0; }
+.ledger h3 { font-size: 24px; font-weight: 800; text-transform: uppercase; margin-bottom: 8px; color: var(--sodium); }
+.ledger p { color: #c7c2b8; font-size: 16px; }
+.ledger code { font-family: var(--mono); font-size: 13px; color: var(--chalk); background: var(--asphalt); padding: 1px 5px; }
+
+.status { margin-top: 40px; border-left: 4px solid var(--neon); background: var(--curb); padding: 20px 24px; }
+.status p { color: #d6d0c6; }
+.status b { color: var(--neon); font-family: var(--mono); font-size: 13px; letter-spacing: .12em; text-transform: uppercase; display: block; margin-bottom: 6px; }
+
+footer { padding-block: 48px 64px; border-top: 1px solid var(--wet); color: var(--smog); font-size: 14px; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 16px 40px; justify-content: space-between; }
+footer .disc { max-width: 70ch; }
+
+@media (max-width: 860px) {
+  .hero .wrap, .invade .wrap, .build .lead, .sec-head { grid-template-columns: 1fr; }
+  .hero .wrap { padding-block: 56px 48px; gap: 40px; }
+  .phone { transform: none; width: min(280px, 100%); }
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .cell.wide { grid-column: auto; }
+  .ledger { grid-template-columns: minmax(0, 1fr); }
+  section { padding-block: 64px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero h1 .iv, .ticker .track, .banner.play { animation: none; }
+  html { scroll-behavior: auto; }
+}
+.hero .fan { margin-top: 14px; font-size: 15px; opacity: .85; }
+.hero .fan a, .status a, .sec-head a, .ledger a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+</style>
+</head>
+<body>
+
+
+<header class="hero">
+  <canvas id="sky" aria-hidden="true"></canvas>
+  <div class="wrap">
+    <div>
+      <p class="label">A free co-op mod for GTA IV: The Complete Edition</p>
+      <h1>GTA <span class="iv">IV</span><br>Co&#8209;op</h1>
+      <p class="pitch">Play <b>Niko's story, The Lost and Damned and The Ballad of Gay Tony</b> with up to <b>three friends</b>. The host plays their own save; friends drop in as their own characters for every mission, chase and shootout.</p>
+      <a class="dl" href="https://github.com/DanOSG/iv-coop/releases/latest" target="_blank" rel="noopener">Download v0.9.0 beta <span>Windows installer &middot; GitHub</span></a>
+      <p class="fan">A fan's side project, made for fun. <a href="#about">Who made this?</a></p>
+      <div class="chips">
+        <span class="chip"><b>3</b> stories</span>
+        <span class="chip"><b>4</b> players</span>
+        <span class="chip">join from the <b>phone</b></span>
+        <span class="chip"><b>no</b> port forwarding</span>
+      </div>
+    </div>
+    <div class="phone" aria-label="The in-game phone's Multiplayer menu">
+      <div class="screen">
+        <div class="bar"><span>Whiz</span><span id="clock">21:47</span></div>
+        <div class="head">Multiplayer</div>
+        <ul id="menu">
+          <li><button type="button" id="m-host" aria-pressed="true" data-tip="Start a co-op game from your own save. Your friends join with a 6-digit password over Steam.">Host <span>&rsaquo;</span></button></li>
+          <li><button type="button" id="m-join" data-tip="Type in a friend's password and you're in their story. Your own save is never touched.">Join <span>&rsaquo;</span></button></li>
+          <li><button type="button" id="m-go" data-tip="Got separated? One press and you're back next to the host, or in their car.">Go to host <span>&rsaquo;</span></button></li>
+          <li><button type="button" id="m-set" data-tip="The host decides: friendly fire, reviving, shared mission pay, synced radio and weather, and more.">Co-op Settings <span>&rsaquo;</span></button></li>
+          <li><button type="button" id="m-char" data-tip="Make your own character: male or female, any outfit, hat and glasses.">Character <span>&rsaquo;</span></button></li>
+          <li><button type="button" id="m-inv" data-tip="Jump into another group's game as the FBI while they're on a mission or wanted.">Invade <span>&rsaquo;</span></button></li>
+          <li><button type="button" id="m-logs" data-tip="Something went wrong? This saves a zip of the logs to your Desktop to send with your bug report.">Save logs <span>&rsaquo;</span></button></li>
+        </ul>
+        <p class="tip" id="tip" aria-live="polite">Start a co-op game from your own save. Your friends join with a 6-digit password over Steam.</p>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="ticker" aria-label="Highlights">
+  <div class="track">
+    <span>The whole story with your friends</span><span>Ride with the Lost MC</span><span>Race your crew across Liberty City</span><span>Skydive together over Liberty City</span><span>Same song on the radio in every car</span><span>Revive your crew before they bleed out</span><span>Beat your friends at pool, darts and bowling</span><span>The FBI might drop in</span>
+    <span>The whole story with your friends</span><span>Ride with the Lost MC</span><span>Race your crew across Liberty City</span><span>Skydive together over Liberty City</span><span>Same song on the radio in every car</span><span>Revive your crew before they bleed out</span><span>Beat your friends at pool, darts and bowling</span><span>The FBI might drop in</span>
+  </div>
+</div>
+
+<main>
+  <section id="story">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>The story,<br><em>together</em></h2>
+        <p>The missions play exactly as Rockstar wrote them, on the host's game, and everyone is in them: the same enemies, the same cars, the same cutscenes, at the same moment.</p>
+      </div>
+      <div class="grid">
+        <article class="cell wide">
+          <span class="tag">Missions</span>
+          <h3>Every fight is everyone's fight</h3>
+          <p>Enemies, allies and mission cars are there for all of you, and they shoot, take cover, chase and crash on every screen. Objectives, markers, timers and dialogue show up for everyone.</p>
+        </article>
+        <article class="cell">
+          <span class="tag">All three stories</span>
+          <h3>Niko, Johnny or Luis</h3>
+          <p>GTA IV, The Lost and Damned and The Ballad of Gay Tony all work. Skydives hand everyone a parachute; races show everyone the course.</p>
+        </article>
+        <article class="cell">
+          <span class="tag">Regroup</span>
+          <h3>Nobody gets left behind</h3>
+          <p>When a mission jumps somewhere new, your friends land next to you, or in a free seat of your car.</p>
+        </article>
+        <article class="cell">
+          <span class="tag">Cutscenes</span>
+          <h3>Watch together</h3>
+          <p>Everyone watches the cutscene, and friends can still walk around inside it.</p>
+        </article>
+        <article class="cell">
+          <span class="tag">Downed</span>
+          <h3>Get me up</h3>
+          <p>Take a bad hit on a mission and you go down instead of dying. A friend can pick you up.</p>
+        </article>
+        <article class="cell">
+          <span class="tag">Your character</span>
+          <h3>Look like you</h3>
+          <p>Pick your own outfit, hat and glasses. Everyone sees it.</p>
+        </article>
+        <article class="cell">
+          <span class="tag">Radio</span>
+          <h3>Same song, every car</h3>
+          <p>Every station plays the same track for everyone. Whoever's in the front seat picks it.</p>
+        </article>
+        <article class="cell">
+          <span class="tag">Downtime</span>
+          <h3>Your turn, your character</h3>
+          <p>Bowling, darts, pool, air hockey, golf, arm wrestling, cards and races: everyone plays as themselves with their own score. Then get drunk together.</p>
+        </article>
+      </div>
+      <div class="settings" aria-label="Host settings">
+        <span>Friendly fire <i>Off / On / No aim</i></span><span>Revive</span><span>Shared pay</span><span>Radio sync</span><span>Weather sync</span><span>Friend blips</span><span>Cutscene camera</span><span>Shared traffic</span><span>Invasions</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="invade" id="invasions">
+    <div class="wrap">
+      <div class="copy">
+        <p class="label">Optional: invasions</p>
+        <h2>The <em>FBI</em><br>is coming</h2>
+        <p>Turn invasions on and, while you're on a mission or wanted, another group of up to four can crash your game as FBI agents, out to take down the host.</p>
+        <ul>
+          <li>No respawns for the agents, only each other's revives.</li>
+          <li>Down every agent and you've beaten the invasion.</li>
+          <li>Take out the host and the FBI wins.</li>
+          <li>Up to eight players in one city.</li>
+        </ul>
+      </div>
+      <div class="stage" role="img" aria-label="An invasion banner preview">
+        <div class="banner" id="banner">FBI INVADING</div>
+        <div class="controls">
+          <button type="button" class="btn" id="b-inv">FBI invading</button>
+          <button type="button" class="btn" id="b-van">FBI vanquished</button>
+          <button type="button" class="btn" id="b-fail">Invasion failed</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="build" id="start">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>Get<br><em>playing</em></h2>
+        <p>Everyone who plays needs their own copy of GTA IV: The Complete Edition on Steam.</p>
+      </div>
+      <div class="ledger">
+        <div>
+          <h3>1. Install</h3>
+          <p>Download and run the installer. It finds your game and sets everything up, including the FusionFix pack if you don't have it.</p>
+        </div>
+        <div>
+          <h3>2. Host</h3>
+          <p>Load your save, open the phone, go to Multiplayer &rsaquo; Host and pick a 6-digit password.</p>
+        </div>
+        <div>
+          <h3>3. Join</h3>
+          <p>Your friends open their phone, choose Multiplayer &rsaquo; Join and type in the same password.</p>
+        </div>
+        <div>
+          <h3>Something broke?</h3>
+          <p>Phone &rsaquo; Multiplayer &rsaquo; Save logs (or Ctrl+Shift+L) puts a zip on your Desktop. If the game won't start, the installer's Collect logs button does the same. Attach it to a <a href="https://github.com/DanOSG/iv-coop/issues" target="_blank" rel="noopener">GitHub issue</a> with what happened.</p>
+        </div>
+      </div>
+      <div class="status">
+        <b>Testers wanted</b>
+        <p>Version 0.9.0 beta. It has only been tested on one PC against a test bot so far, so real games with real friends are what it needs most. Expect rough edges. Known issue: joining a friend in The Ballad of Gay Tony can crash the game the moment your character changes; GTA IV and The Lost and Damned aren't affected. Found a bug? <a href="https://github.com/DanOSG/iv-coop/issues" target="_blank" rel="noopener">Open an issue on GitHub</a> and attach the log zip.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="build" id="about">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>Who made<br><em>this</em></h2>
+        <p>I've wanted a co-op campaign for GTA IV since I was 11 years old. This is a side project I made for fun with spare AI tokens: Anthropic's Claude wrote the code and I steered it. I'm not a reverse engineer and don't claim to be, just a fan of the game. The <a href="https://github.com/DanOSG/iv-coop" target="_blank" rel="noopener">source is on GitHub</a> if you want to look under the hood or help out.</p>
+      </div>
+      <div class="ledger">
+        <div>
+          <h3>Tested where possible</h3>
+          <p>Automated tests host, join and switch between all three stories on a real game. They don't catch everything, which is why testers help so much.</p>
+        </div>
+        <div>
+          <h3>Safe for your game</h3>
+          <p>Your saves are never changed when you join someone, and the installer backs up anything it replaces. Uninstall puts it all back.</p>
+        </div>
+        <div>
+          <h3>Clean</h3>
+          <p>No DRM tampering. Extras like FusionFix come from their official downloads.</p>
+        </div>
+        <div>
+          <h3>Fails gently</h3>
+          <p>Where it can, if something in your game isn't the way the mod expects, it switches that feature off and says why instead of crashing.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>GTA IV Co-op &middot; v0.9.0 beta &middot; for Grand Theft Auto IV: The Complete Edition on Steam &middot; <a href="https://github.com/DanOSG/iv-coop/releases/latest" target="_blank" rel="noopener">Download</a> &middot; <a href="https://github.com/DanOSG/iv-coop" target="_blank" rel="noopener">Source</a> &middot; <a href="https://github.com/DanOSG/iv-coop/issues" target="_blank" rel="noopener">Report a bug</a></p>
+    <p class="disc">A fan-made mod, not affiliated with or endorsed by Rockstar Games or Take-Two Interactive. Grand Theft Auto is their trademark. You need your own copy of the game.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // Phone menu: each item shows what it does.
+  var tip = document.getElementById("tip");
+  var items = Array.prototype.slice.call(document.querySelectorAll("#menu button"));
+  items.forEach(function (b) {
+    function pick() {
+      items.forEach(function (o) { o.setAttribute("aria-pressed", o === b ? "true" : "false"); });
+      tip.textContent = b.getAttribute("data-tip");
+    }
+    b.addEventListener("click", pick);
+    b.addEventListener("mouseenter", pick);
+    b.addEventListener("focus", pick);
+  });
+
+  // Phone clock: the time in Liberty City is whatever yours is.
+  var clock = document.getElementById("clock");
+  function tick() { var d = new Date(); clock.textContent = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }
+  tick(); setInterval(tick, 20000);
+
+  // Invasion banners.
+  var banner = document.getElementById("banner");
+  function show(text, red) {
+    banner.textContent = text;
+    banner.classList.toggle("red", !!red);
+    banner.classList.remove("play");
+    void banner.offsetWidth;
+    banner.classList.add("play");
+  }
+  document.getElementById("b-inv").addEventListener("click", function () { show("FBI INVADING", false); });
+  document.getElementById("b-van").addEventListener("click", function () { show("FBI VANQUISHED", false); });
+  document.getElementById("b-fail").addEventListener("click", function () { show("INVASION FAILED", true); });
+
+  // Skyline: Liberty City at night, windows lit in sodium and neon.
+  var c = document.getElementById("sky");
+  var ctx = c.getContext("2d");
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var buildings = [], w = 0, h = 0;
+  function seed(n) { return function () { n = (n * 16807) % 2147483647; return (n - 1) / 2147483646; }; }
+  function layout() {
+    var r = c.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2);
+    w = r.width; h = r.height;
+    c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var rnd = seed(1990), x = -10;
+    buildings = [];
+    while (x < w + 10) {
+      var bw = 26 + rnd() * 60, bh = h * (0.18 + rnd() * 0.42);
+      var wins = [];
+      for (var wy = h - bh + 10; wy < h - 8; wy += 11)
+        for (var wx = x + 5; wx < x + bw - 7; wx += 9)
+          if (rnd() < 0.34) wins.push([wx, wy, rnd() < 0.86 ? 0 : 1, rnd()]);
+      buildings.push({ x: x, w: bw, top: h - bh, wins: wins });
+      x += bw + 2 + rnd() * 6;
+    }
+  }
+  function draw(t) {
+    ctx.clearRect(0, 0, w, h);
+    buildings.forEach(function (b) {
+      ctx.fillStyle = "rgba(9,11,15,0.92)";
+      ctx.fillRect(b.x, b.top, b.w, h - b.top);
+      b.wins.forEach(function (p) {
+        var on = reduce ? 1 : 0.55 + 0.45 * Math.sin(t / 900 + p[3] * 40);
+        ctx.fillStyle = p[2] ? "rgba(255,59,107," + (0.35 * on) + ")" : "rgba(255,174,43," + (0.22 * on) + ")";
+        ctx.fillRect(p[0], p[1], 4, 5);
+      });
+    });
+  }
+  function frame(t) { draw(t); if (!reduce) requestAnimationFrame(frame); }
+  layout(); frame(0);
+  window.addEventListener("resize", function () { layout(); draw(performance.now()); });
+})();
+</script>
+
+</body>
+</html>
