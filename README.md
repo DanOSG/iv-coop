@@ -15,7 +15,9 @@ the missions alongside the host. Your own saves are never loaded or changed when
 
 I've wanted a co-op campaign for GTA IV since I was 11 years old. This is a side project I made for fun with spare AI
 tokens: Anthropic's Claude wrote the code and I steered it. I'm not a reverse engineer and don't claim to be, just a
-fan of the game. Help, bug reports and pull requests are welcome.
+fan of the game. I am a good programmer, though, and the project is built on solid fundamentals: a clean structure,
+every change reviewed, and automated tests that host, join and switch stories on the real game. Help, bug reports and
+pull requests are welcome.
 
 ## What you need
 
