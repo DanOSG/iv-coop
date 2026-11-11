@@ -32,11 +32,14 @@ pull requests are welcome.
 2. The installer finds your game automatically and checks it is the supported version.
 3. If you don't have **TJGM's FusionFix pack** yet, the installer downloads it from its official mirror and installs
    it (anything it replaces is backed up first). The mod needs it to run.
-4. Optional: tick **Radio Restoration** to get the original Vladivostok FM songs in GTA IV and the club music in the
-   Episodes.
+4. **Tick Radio Restoration (strongly recommended).** It brings back the original Vladivostok FM songs in GTA IV and
+   the club music in the Episodes.
 5. Click install, then start the game normally from Steam.
 
 Everyone in the group should install the same version.
+
+**About the mod pack:** I chose TJGM's pack because it gives the game a good, stable base to build on. It's the only
+setup the mod is tested with: other mods haven't been tested and may not work alongside it.
 
 ## Host or join a game
 
