@@ -1,6 +1,6 @@
 # TLAD / TBOGT ambient minigames: arm wrestling, air hockey, hi-lo cards
 
-Source: decompiled scripts in `C:\Users\dosgo\dev\research\GTAIVMissionScripts\TLAD\` (and `TBOGT\air_hockey.txt`).
+Source: decompiled scripts in [GTAIVMissionScripts](https://github.com/0x52617665/GTAIVMissionScripts) `TLAD/` (and `TBOGT/air_hockey.txt`).
 Static slot = `l_U<n>` literal slot n; struct fields `_fU<off>` are byte offsets so slot = base + off/4.
 Arrays: the decompiler's `l_U254[2]` has a count header in slot 254, elements start at 255 (verified by
 spacing of `l_U291/308/325` = 17 = 1 + 2*8 and puck at 279 = 254 + 1 + 2*12). Treat slot numbers

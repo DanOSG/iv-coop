@@ -78,7 +78,8 @@ std::int32_t* statics(const char* script);
 // Before native_hooks::install().
 void register_hooks();
 // Game thread, every frame. `hosting`/`in_session` as everywhere; `my_id` our session id.
-void tick(bool in_session, bool hosting, std::uint8_t my_id, net::Session& net);
+// `ready` (partners): our character is the one we'll play as (client mode has swapped the model); seats wait for it.
+void tick(bool in_session, bool hosting, std::uint8_t my_id, net::Session& net, bool ready = true);
 void on_message(const net::GameMessage& m);
 // Partner: we're seated in the host's game (our character follows the seat; story/scene_cam shows its camera).
 bool me_seated();

@@ -1,6 +1,6 @@
 # Venues, drinking, shows, nightlife and minigames for up to 4 players
 
-Static analysis of the decompiled scripts (`C:\Users\dosgo\dev\research\GTAIVMissionScripts\{IV,TLAD,TBOGT}`). Nothing here was
+Static analysis of the decompiled scripts ([GTAIVMissionScripts](https://github.com/0x52617665/GTAIVMissionScripts): `IV`, `TLAD`, `TBOGT`). Nothing here was
 run in-game; everything marked **[verify]** needs a test. Line numbers are in the named script's `.txt`.
 Rule used throughout: a script matching `LocalScripts` (`amb*, vendor*, foodserver*, binco*, *help, carfood*`, plus the
 always-local `spcellphone*, parachute*, *stattracker`, `story_sync.cpp:is_story_script`) runs on every machine; all else

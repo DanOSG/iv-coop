@@ -180,37 +180,27 @@ std::uint32_t joiner_model_checked(std::uint32_t fallback) {
   return have_stock ? stock : fallback;
 }
 
-// Client mode waits a moment after connecting: swapping our player's model in the frames right after joining (with
-// the session's first messages, our story scripts being frozen and our blips hidden in the same frames) crashed an
-// engine worker reading the player's stale data. Not while ragdolling either.
-constexpr DWORD kClientModeDelayMs = 1500;
 DWORD g_want_client_mode_at = 0;
 DWORD g_client_frozen_at = 0; // stage one done (scripts frozen, blips hidden); the model swap follows
 
 void update_client_mode(n::Ped me) {
   if (!me) return;
-  if (g_want_client_mode && !g_client_mode &&
-      (GetTickCount() - g_want_client_mode_at < kClientModeDelayMs ||
-       n::invoke<bool>(0x3E251ADE /* IS_PED_RAGDOLL */, me)))
-    return;
+  // Right away on joining (as 0.8 did): delaying the swap by a second or two crashed the renderer in TBoGT.
+  if (g_want_client_mode && !g_client_mode && n::invoke<bool>(0x3E251ADE /* IS_PED_RAGDOLL */, me)) return;
   if (g_want_client_mode && !g_client_mode) {
-    // Two stages, a second apart: freeze our story scripts and hide their blips, then swap the model. Doing all of it
-    // in one frame crashed the renderer on joining in TBoGT (a draw command that couldn't be allocated).
-    if (!g_client_frozen_at) {
-      if (g_cfg.freeze_story_scripts) script::set_suppress_predicate(story::is_story_script);
-      hide_own_blips(me);
-      g_client_frozen_at = GetTickCount();
-      log::info("Client mode: story scripts {}", g_cfg.freeze_story_scripts ? "frozen" : "left running");
-      return;
-    }
-    if (GetTickCount() - g_client_frozen_at < kClientModeDelayMs) return;
+    // Swap the model first, then freeze our story scripts and hide their blips (the order 0.8 used, which held in all
+    // three games). Freezing first and swapping later crashed the renderer on joining in TBoGT.
     const std::uint32_t original = n::GetCharModel(me);
     const std::uint32_t model = joiner_model_checked(original);
     if (model == original || swap_player_model(model)) {
       g_original_model = original;
       g_client_mode = true;
-      g_client_frozen_at = 0;
-      log::info("Client mode: playing as {} (was 0x{:08X})", g_cfg.joiner_model, original);
+      model_swap::expect_change(false);
+      if (g_cfg.freeze_story_scripts) script::set_suppress_predicate(story::is_story_script);
+      hide_own_blips(me);
+      g_client_frozen_at = GetTickCount();
+      log::info("Client mode: playing as {} (was 0x{:08X}); story scripts {}", g_cfg.joiner_model, original,
+                g_cfg.freeze_story_scripts ? "frozen" : "left running");
     }
   }
   if (g_restore_pending && g_original_model) {
@@ -855,7 +845,8 @@ void tick() {
         bf.players.push_back({p.id, p.name, p.id != f.my_id && it != g_remotes.end() ? it->second.puppet.ped() : 0});
       }
       bowling_sync::tick(bf, session());
-      activity_seats::tick(bf.in_session, bf.hosting, bf.my_id, session());
+      activity_seats::tick(bf.in_session, bf.hosting, bf.my_id, session(),
+                           bf.hosting || (g_client_mode && !model_swap::busy()) || !g_want_client_mode);
       activities::Frame af;
       af.hosting = bf.hosting && bf.in_session, af.my_id = bf.my_id;
       for (const auto& p : bf.players) af.players.push_back({p.id, p.name, p.ped});
@@ -899,6 +890,7 @@ void tick() {
         log::info("Connected; we are player {} ({})", e.id, e.role == net::Role::Invader ? "invader" : "co-op");
         g_want_client_mode = true;
         g_want_client_mode_at = GetTickCount();
+        model_swap::expect_change(true); // puppets wait for our character (see model_swap)
         episode_sync::on_connected(net);
         if (e.role == net::Role::Invader) {
           const n::Ped p = n::GetPlayerChar(n::GetPlayerId());
@@ -927,6 +919,7 @@ void tick() {
         if (g_want_client_mode || g_client_mode) {
           script::set_suppress_predicate(nullptr); // our story scripts resume where they were
           g_want_client_mode = false;
+          model_swap::expect_change(false);
           g_restore_pending = g_client_mode;
           if (g_client_frozen_at && !g_client_mode) restore_own_blips(); // left between the freeze and the swap
           g_client_frozen_at = 0;

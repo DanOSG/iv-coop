@@ -487,7 +487,13 @@ docs/
     items, then hosts the bot, joins a bot host in the same episode (client model swap and restore) and one in
     another (turned away). The bot's `--episode N` plays message 67. All 27 checks passed on 2026-10-28; one
     earlier run crashed once in the renderer (`CDrawPedDC` allocation failed, TLAD intro, a frame after a model
-    swap), not seen again in two more runs.
+    swap). Cause (found in 0.9.0): a ped whose model just changed can reach the ped draw-list builder (0xC645A0)
+    before its render data (CPed+0x310) is built; the draw command (0x8DAFC0) copies 0x370 bytes from it and read
+    null at 0xDF969A. `game/model_swap` hooks the ped add-to-draw-list (0xC64520) and skips such a ped for the frame.
+    That only moves the TBoGT join crash on: after the swap from Luis, a stale `rage::crCreatureComponentBlendShapes`
+    registration stays in the render-callback list (0x19F2488, filled by 0x6A1A60, run as draw command 0x8DDE30), so
+    the render thread calls a freed object (guarded: skipped when its vtable isn't in the image) and the main thread
+    then faults at 0x6A1ADB. Not caused by a nearby puppet or by the old model streaming out (both tried). Open.
   - **Episode sync gaps (0.7.0):** `sync/player_mirror` (message 69) repeats the host story's calls on the host's
     player (GIVE_WEAPON_TO_CHAR, REMOVE_WEAPON_FROM_CHAR, REMOVE_ALL_CHAR_WEAPONS, ADD_ARMOUR_TO_CHAR,
     SET_CHAR_BULLETPROOF_VEST, SET_CHAR_HEALTH, SET_PLAYER_DISABLE_JUMP/CROUCH) on every partner's player;

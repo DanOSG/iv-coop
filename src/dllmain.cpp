@@ -14,6 +14,7 @@
 #include "core/instance.h"
 #include "core/log.h"
 #include "game/addresses.h"
+#include "game/model_swap.h"
 #include "game/native_hooks.h"
 #include "game/netprobe.h"
 #include "game/radio_probe.h"
@@ -86,6 +87,7 @@ void start_game_layer(const ivc::Config& cfg, bool version_ok) {
   vehicle_props::register_hooks();
   phone::install();
   downed::install();
+  model_swap::install();
   story::audit::configure(cfg.audit);
   story::audit::register_hooks();
   story::coverage::register_hooks();

@@ -7,6 +7,10 @@
 - Races (The Ballad of Gay Tony): up to three friends race as themselves in their own cars, starting on the grid,
   each with their own finishing place.
 - Golf, air hockey, arm wrestling and hi-lo cards cameras show only for the players taking part.
+- Known issue: joining a friend in The Ballad of Gay Tony can still crash the game the moment your character changes
+  to the co-op character (Luis's facial animation data is left behind). The Lost and Damned and GTA IV aren't
+  affected. Being worked on.
+- Fixed a crash when a race checkpoint was shown to partners (0.8.0).
 
 ## 0.8.0
 

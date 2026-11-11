@@ -6,6 +6,7 @@
 #include <cmath>
 
 #include "core/log.h"
+#include "game/model_swap.h"
 #include "game/player_slots.h"
 
 namespace ivc::sync {
@@ -72,6 +73,11 @@ bool Puppet::ensure(const n::Vector3& at) {
   }
   // A player ped (an extra player slot) reacts to hits like a player; only it can wear the protagonist
   // model. Out of slots, other models fall back to an ordinary ped.
+  // Taking a player slot changes a player ped's model: not until every player ped is out of the draw list.
+  if (animated_ && (model_swap::busy() || !model_swap::hold_player_peds())) {
+    phase_ = "waiting to change a slot's model";
+    return false;
+  }
   ped_ = animated_ ? player_slots::acquire(at, 0.0f, model_) : 0;
   is_player_ped_ = ped_ != 0;
   if (is_player_ped_) settle_until_ms_ = GetTickCount() + 500;

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/log.h"
+#include "game/model_swap.h"
 #include "game/native_hooks.h"
 #include "game/script.h"
 #include "net/bytes.h"
@@ -102,6 +103,7 @@ std::vector<std::vector<std::uint8_t>> g_out;
 
 // ---- partner state
 bool g_me_seated = false, g_me_active = false;
+bool g_ready = true; // our character is settled (see tick)
 DWORD g_seat_at = 0, g_sent_at = 0;
 std::uint32_t g_pending_just = 0;
 struct PendingAnim {
@@ -430,7 +432,8 @@ void register_hooks() {
   native_hooks::before(kRemoveCharElegantly, "REMOVE_CHAR_ELEGANTLY", [](const Call& c) { before_release(c, false); });
 }
 
-void tick(bool in_session, bool hosting, std::uint8_t my_id, net::Session& net) {
+void tick(bool in_session, bool hosting, std::uint8_t my_id, net::Session& net, bool ready) {
+  g_ready = ready;
   const DWORD now = GetTickCount();
   g_my_id = my_id;
   if (g_hosting && !(in_session && hosting)) g_seats.clear(), g_inputs.clear(), g_active = kNobody;
@@ -497,6 +500,9 @@ void on_message(const net::GameMessage& m) {
     std::uint8_t on, active;
     std::int8_t pad;
     if (!r.get(on) || !r.get(active) || !r.get(pad)) return;
+    // Not until we're the character we'll play as: being seated (player control off, posed) while client mode swapped our
+    // model crashed the renderer. The host resends the seat every 2 s, so it lands a moment later.
+    if (on && (!g_ready || model_swap::busy())) return;
     set_seated(on != 0);
     g_me_active = on && active;
     g_seat_at = GetTickCount();
@@ -507,7 +513,7 @@ void on_message(const net::GameMessage& m) {
     if (!me) return;
     const n::Vector3 cur = n::GetCharCoordinates(me);
     if (std::hypot(cur.x - x, cur.y - y) > kPoseSnapM || std::fabs(cur.z - z) > 1.0f)
-      n::SetCharCoordinatesNoOffset(me, {x, y, z});
+      if (!model_swap::busy()) n::SetCharCoordinatesNoOffset(me, {x, y, z}); // never during a model swap
     const float mine = n::GetCharHeading(me);
     float d = std::fmod(std::fabs(mine - heading), 360.0f);
     if (d > 180.0f) d = 360.0f - d;

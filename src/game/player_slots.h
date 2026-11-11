@@ -10,6 +10,8 @@
 // (freeing one mid-game crashed on a queued job still referencing the ped). A released
 // slot is parked hidden and frozen, and the next acquire reuses it.
 
+#include <vector>
+
 #include "game/natives.h"
 
 namespace ivc::player_slots {
@@ -27,6 +29,8 @@ bool owns(natives::Ped ped);
 // engine damage a partner's copy natively - melee (contact, blocks, reactions, sounds), bullets, cars,
 // explosions - the way IV multiplayer damages remote players. Returns the flag's previous state.
 bool set_damageable(natives::Ped ped, bool damageable);
+// The script handles of the slots' peds in use (a partner's character each).
+std::vector<natives::Ped> peds_in_use();
 // The CPed* is one of our slots' (for the health hooks).
 bool is_slot_object(const void* ped_object);
 
